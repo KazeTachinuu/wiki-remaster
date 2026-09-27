@@ -109,7 +109,7 @@ Read directly via the browser session on wiki-masters.com. Corrections and confi
   created_at }`.
 - **`/api/profile` returns 404** — it does not exist as a JSON route.
 - **Profile / packs come from Supabase directly**, not same-origin: `POST
-  https://cyrxjeppjqsxxjayfrur.supabase.co/rest/v1/rpc/sync_profile_packs` (needs apikey + bearer). `is_pro`
+  https://<project>.supabase.co/rest/v1/rpc/sync_profile_packs` (needs apikey + bearer). `is_pro`
   is fetched separately: `GET .../rest/v1/profiles?select=id,is_pro&id=eq.<uid>`. The wrapper must intercept
   these (a same-origin call 404s / lacks the Supabase auth headers). `is_vip` is NOT fetched by the app.
 - **`/api/packs/open` is POST-only** (GET → 405).

@@ -4,6 +4,13 @@ A userscript that reskins wiki-masters.com with a custom UI, running on the site
 
 ![wiki-remaster](docs/screenshot.png)
 
+## Install
+1. Install the [Tampermonkey](https://www.tampermonkey.net/) browser extension.
+2. Click **[Install](https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js)**; Tampermonkey will prompt to install.
+3. Open [wiki-masters.com](https://www.wiki-masters.com).
+
+It auto-updates when a new version is pushed here (the version number lives in the userscript header). Turn it off with "Version originale du site" in the sidebar.
+
 Svelte 5, Vite, vite-plugin-monkey. Build output: `wm-userscript/dist/wikimasters-app.user.js`.
 
 ## Rebuilt screens

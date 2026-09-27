@@ -1,9 +1,13 @@
 // ==UserScript==
-// @name         WikiMasters App
+// @name         wiki-remaster
 // @namespace    hugo.wikimasters
 // @version      0.1.0
-// @author       Hugo
-// @description  Personal redesigned client for wiki-masters.com. Uses the real API and session.
+// @author       Hugo Sibony
+// @description  Redesigned client for wiki-masters.com. Uses the real API and session.
+// @homepage     https://github.com/KazeTachinuu/wiki-remaster
+// @supportURL   https://github.com/KazeTachinuu/wiki-remaster/issues
+// @downloadURL  https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js
+// @updateURL    https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js
 // @match        https://www.wiki-masters.com/*
 // @match        https://wiki-masters.com/*
 // @grant        none

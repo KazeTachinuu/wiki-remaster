@@ -13,15 +13,21 @@ export default defineConfig(({ command }) => ({
           monkey({
             entry: "src/main.js",
             userscript: {
-              name: "WikiMasters App",
+              name: "wiki-remaster",
               namespace: "hugo.wikimasters",
               version: "0.1.0",
               description:
-                "Personal redesigned client for wiki-masters.com. Uses the real API and session.",
-              author: "Hugo",
+                "Redesigned client for wiki-masters.com. Uses the real API and session.",
+              author: "Hugo Sibony",
               match: ["https://www.wiki-masters.com/*", "https://wiki-masters.com/*"],
               runAt: "document-start",
               grant: "none",
+              homepage: "https://github.com/KazeTachinuu/wiki-remaster",
+              supportURL: "https://github.com/KazeTachinuu/wiki-remaster/issues",
+              // Tampermonkey checks these to auto-update. They resolve once the built file
+              // is reachable at a public raw URL (repo public, or a public release).
+              updateURL: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js",
+              downloadURL: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js",
             },
             build: { fileName: "wikimasters-app.user.js" },
             server: { open: false },
