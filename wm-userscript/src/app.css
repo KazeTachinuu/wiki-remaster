@@ -401,6 +401,16 @@
 .confirm-text{font-size:14px;color:var(--fg);line-height:1.4}
 .confirm-text b{color:var(--r-l);font-weight:700}
 
+/* In-app sell form */
+.sell-form{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.sell-row{display:flex;gap:10px}
+.sell-field{flex:1;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--fg-soft)}
+.sell-input{width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:10px;padding:9px 11px;color:var(--fg);font:inherit;font-size:14px}
+.sell-input:focus{outline:none;border-color:var(--accent)}
+.sell-fallback{background:none;border:none;padding:2px 0;color:var(--fg-soft);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;text-decoration:underline}
+.sell-fallback:hover{color:var(--fg)}
+.chip.hint{color:var(--fg-soft);border-style:dashed}
+
 /* modal tabs + market */
 .modal-tabs{display:inline-flex;gap:4px;background:var(--elev);border:1px solid var(--line);border-radius:10px;padding:3px;align-self:flex-start;margin-top:2px}
 .modal-tabs button{background:none;border:none;color:var(--fg-soft);font-family:var(--display);font-weight:600;font-size:13px;padding:6px 14px;border-radius:8px;cursor:pointer;transition:.15s}

@@ -166,6 +166,22 @@ export const RealData = {
     catch { return { sellingCount: 0, maxConcurrentAuctions: 5 }; }
   },
 
+  // Create a listing for one owned card. UNVERIFIED against the live API: the create
+  // endpoint was not captured, so this is the RESTful best guess, symmetric with the
+  // verified bid route (POST /api/marketplace/{id}/bid). It fails safe: a non-2xx throws
+  // with the server's message, so the caller shows an error and nothing is ever faked.
+  // If the real shape differs, this is the one function to correct.
+  async createAuction(userCardId, { price, durationHours } = {}) {
+    const r = await fetch(`/api/marketplace`, {
+      method: "POST", credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ user_card_id: userCardId, starting_price: price, duration_hours: durationHours }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(d.error || "Mise en vente refusée."); e.code = d.code; throw e; }
+    return d;
+  },
+
   // Place a bid. Verified live (2026-09-27):
   //   POST /api/marketplace/{auctionId}/bid  { amount }
   //   200 -> { auction_id, current_bid, bidder_balance }

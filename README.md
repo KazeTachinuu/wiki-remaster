@@ -54,7 +54,7 @@ mock/catalog.js  dev card fixture
 `src/wm/index.js` picks the real API on wiki-masters.com and the mock locally, by hostname.
 The mock lives in a Vite dev plugin, so `npm run dev` serves the app and the API together.
 
-Runs against your real account. Writes not verified against the live API (create auction, buy, cancel, wishlist) open the original site instead of guessing.
+Runs against your real account. Bidding and discarding use verified endpoints. Selling posts a best-effort create request that fails safe: if the server rejects it you get an error and a one-click native fallback, never a faked listing. Buy and cancel are not wired and stay on the native site.
 
 ## Reference
 The verified API surface and per-feature integration status, captured live from the app, drive what gets built and what stays a fallback: [docs/API_REFERENCE.md](docs/API_REFERENCE.md), [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md).

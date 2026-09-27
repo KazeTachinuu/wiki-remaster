@@ -39,6 +39,7 @@ export default function mockApiPlugin() {
         wishlist: new Set(),
         bids: new Map(), // auctionId -> current highest bid
         bidHistory: new Map(), // auctionId -> [{ amount, bidder, placed_at, bidder_id }]
+        sellingCount: 0, // auctions the player has created this session
       };
 
       // Seed a few Legendaries so the dev app shows every legendary state at a glance:
@@ -237,7 +238,20 @@ export default function mockApiPlugin() {
           const auctions = src.slice(page * 24, page * 24 + 24).map(synthAuction);
           return send(res, 200, { auctions, page, limit: 24, hasMore: page * 24 + 24 < src.length });
         }
-        if (p === "/api/marketplace/mine") return send(res, 200, { sellingCount: 0, maxConcurrentAuctions: 5 });
+        if (p === "/api/marketplace/mine") return send(res, 200, { sellingCount: state.sellingCount, maxConcurrentAuctions: 5 });
+
+        // Create a listing (dev): mirror the shape the real adapter's best-guess sends.
+        if (p === "/api/marketplace" && method === "POST") {
+          const b = await readBody(req);
+          const it = findUc(b.user_card_id);
+          if (!it) return send(res, 404, { error: "Carte introuvable." });
+          if (!(b.starting_price > 0)) return send(res, 400, { error: "Prix invalide.", code: "bad_price" });
+          if (state.sellingCount >= 5) return send(res, 409, { error: "Limite de ventes atteinte.", code: "too_many" });
+          it.count -= 1;
+          if (it.count <= 0) state.collection.delete(it.card.id);
+          state.sellingCount += 1;
+          return send(res, 200, { ok: true, listing: { card_id: it.card.id, starting_price: b.starting_price, duration_hours: b.duration_hours } });
+        }
 
         // Place a bid: mirrors { auction_id, current_bid, bidder_balance }.
         if (/^\/api\/marketplace\/[^/]+\/bid$/.test(p) && method === "POST") {

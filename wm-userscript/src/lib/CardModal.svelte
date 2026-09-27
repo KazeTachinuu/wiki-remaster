@@ -38,8 +38,30 @@
   }
   $effect(() => { if (tab === "market") loadMarket(); });
 
-  // Listing a card for auction is not a verified endpoint, so we send the user to the
-  // native marketplace flow instead of POSTing a guess.
+  // In-app listing. The create endpoint is a best guess (see data.createAuction), so it
+  // fails safe: on any server rejection we surface the error and reveal a one-click native
+  // fallback rather than pretend the card was listed.
+  const DURATIONS = [6, 12, 24, 48, 72];
+  let sellOpen = $state(false);
+  let price = $state("");
+  let durationH = $state(24);
+  let sellErr = $state(false);
+  function openSell() {
+    sellOpen = true; sellErr = false; msg = "";
+    if (!price) price = mval != null ? String(mval) : "";
+  }
+  async function sell() {
+    const p = Math.round(Number(price));
+    if (!(p > 0)) { flash("Entrez un prix de départ valide."); return; }
+    busy = true; msg = ""; sellErr = false;
+    try {
+      await data.createAuction(item.id, { price: p, durationHours: durationH });
+      onaction?.();
+      done = true; msgOk = true; msg = "Carte mise en vente.";
+    } catch (e) {
+      busy = false; sellErr = true; flash(e?.message || "La mise en vente a échoué.");
+    }
+  }
   function sellNative() { try { localStorage.setItem("wm-off", "1"); } catch {} location.assign("/collection"); }
   async function discard() {
     busy = true; msg = "";
@@ -173,9 +195,31 @@
                   <button class="btn danger" disabled={busy} onclick={discard}>Défausser</button>
                 </div>
               </div>
+            {:else if sellOpen}
+              <div class="sell-form">
+                <div class="sell-row">
+                  <label class="sell-field">
+                    <span>Prix de départ</span>
+                    <input class="sell-input" type="number" min="1" step="1" inputmode="numeric" bind:value={price} placeholder="0" />
+                  </label>
+                  <label class="sell-field">
+                    <span>Durée</span>
+                    <select class="sell-input" bind:value={durationH}>
+                      {#each DURATIONS as h}<option value={h}>{h} h</option>{/each}
+                    </select>
+                  </label>
+                </div>
+                <div class="af-actions">
+                  <button class="btn" disabled={busy} onclick={() => (sellOpen = false)}>Annuler</button>
+                  <button class="btn primary" disabled={busy} onclick={sell}>Mettre en vente</button>
+                </div>
+                {#if sellErr}
+                  <button class="sell-fallback" onclick={sellNative}>Le marché a refusé la vente. Vendre sur le site officiel ?</button>
+                {/if}
+              </div>
             {:else}
               <div class="actions">
-                <button class="btn primary" onclick={sellNative}>Mettre en vente sur le site</button>
+                <button class="btn primary" onclick={openSell}>Mettre en vente</button>
                 <button class="btn danger" onclick={() => (confirmDiscard = true)}>Défausser, +1 pt</button>
               </div>
             {/if}

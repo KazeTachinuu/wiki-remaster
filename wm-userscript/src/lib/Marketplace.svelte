@@ -64,9 +64,8 @@
   function go(delta) { page = Math.max(0, page + delta); load(); }
   function setRarity(r) { rarity = rarity === r ? "" : r; page = 0; load(); }
 
-  // Bidding / listing writes are UNVERIFIED, so they are never POSTed from here, they go
-  // to the real site (the overlay steps aside; the "WikiMasters +" pill brings it back).
-  function toNative() { try { localStorage.setItem("wm-off", "1"); } catch {} location.assign("/marketplace"); }
+  // Bidding happens in-app on any auction (see AuctionModal); selling happens from your
+  // own cards in Ma collection. Nothing here redirects to the native site.
 </script>
 
 <div class="coll-head">
@@ -85,10 +84,9 @@
         <svg class="cico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 9 6 5h12l1.5 4M5.5 9v10h13V9"/></svg>
         Ventes <b>{mine.sellingCount}</b>/{mine.maxConcurrentAuctions}
       </span>
-      <button class="iconbtn" onclick={toNative} title="Vendre ou enchérir se fait sur le site officiel">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7M21 3l-9 9M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
-        <span>Vendre / enchérir</span>
-      </button>
+      <span class="chip hint" title="Ouvrez une de vos cartes dans Ma collection pour la vendre">
+        Vendre depuis Ma collection
+      </span>
     </div>
   </div>
 </div>
