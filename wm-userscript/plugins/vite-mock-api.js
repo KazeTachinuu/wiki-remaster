@@ -240,17 +240,18 @@ export default function mockApiPlugin() {
         }
         if (p === "/api/marketplace/mine") return send(res, 200, { sellingCount: state.sellingCount, maxConcurrentAuctions: 5 });
 
-        // Create a listing (dev): mirror the shape the real adapter's best-guess sends.
+        // Create a listing (dev): mirrors the verified live shape
+        //   POST /api/marketplace { card_id, base_amount, duration_minutes }
         if (p === "/api/marketplace" && method === "POST") {
           const b = await readBody(req);
-          const it = findUc(b.user_card_id);
+          const it = state.collection.get(b.card_id);
           if (!it) return send(res, 404, { error: "Carte introuvable." });
-          if (!(b.starting_price > 0)) return send(res, 400, { error: "Prix invalide.", code: "bad_price" });
+          if (!(b.base_amount > 0)) return send(res, 400, { error: "Prix invalide.", code: "bad_price" });
           if (state.sellingCount >= 5) return send(res, 409, { error: "Limite de ventes atteinte.", code: "too_many" });
           it.count -= 1;
           if (it.count <= 0) state.collection.delete(it.card.id);
           state.sellingCount += 1;
-          return send(res, 200, { ok: true, listing: { card_id: it.card.id, starting_price: b.starting_price, duration_hours: b.duration_hours } });
+          return send(res, 200, { ok: true, listing: { card_id: it.card.id, base_amount: b.base_amount, duration_minutes: b.duration_minutes } });
         }
 
         // Place a bid: mirrors { auction_id, current_bid, bidder_balance }.

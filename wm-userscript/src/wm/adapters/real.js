@@ -166,17 +166,16 @@ export const RealData = {
     catch { return { sellingCount: 0, maxConcurrentAuctions: 5 }; }
   },
 
-  // Create a listing for one owned card via POST /api/marketplace. The live API confirmed
-  // it requires `card_id` (it rejected `user_card_id` with "card_id requis"). We send both
-  // the catalog card_id and the user_card_id so the server can identify the exact copy
-  // either way. Price and duration field names are still a best guess. It fails safe: a
-  // non-2xx throws with the server's message, so the caller shows the error and reveals a
-  // native fallback rather than faking a listing.
+  // Create a listing for one owned card. VERIFIED live (2026-09-27) by capturing the real
+  // request from the native sell form:
+  //   POST /api/marketplace  { card_id, base_amount, duration_minutes }
+  // (card_id is the catalog card id; base_amount is the starting price; duration is minutes.)
+  // Fails safe: a non-2xx throws with the server's message so the caller shows the error.
   async createAuction(item, { price, durationHours } = {}) {
     const r = await fetch(`/api/marketplace`, {
       method: "POST", credentials: "include",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ card_id: item.card?.id, user_card_id: item.id, starting_price: price, duration_hours: durationHours }),
+      body: JSON.stringify({ card_id: item.card?.id, base_amount: price, duration_minutes: Math.round((durationHours || 0) * 60) }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { const e = new Error(d.error || "Mise en vente refusée."); e.code = d.code; throw e; }

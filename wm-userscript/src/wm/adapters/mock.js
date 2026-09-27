@@ -84,7 +84,7 @@ export const MockData = {
   },
 
   async createAuction(item, { price, durationHours } = {}) {
-    const r = await fetch(`/api/marketplace`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ card_id: item.card?.id, user_card_id: item.id, starting_price: price, duration_hours: durationHours }) });
+    const r = await fetch(`/api/marketplace`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ card_id: item.card?.id, base_amount: price, duration_minutes: Math.round((durationHours || 0) * 60) }) });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { const e = new Error(d.error || "Mise en vente refusée."); e.code = d.code; throw e; }
     return d;

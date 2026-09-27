@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.3.1
+// @version      0.4.0
 // @author       Hugo Sibony
 // @description  Redesigned client for wiki-masters.com. Uses the real API and session.
 // @homepage     https://github.com/KazeTachinuu/wiki-remaster
@@ -4255,9 +4255,8 @@
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
 					card_id: item.card?.id,
-					user_card_id: item.id,
-					starting_price: price,
-					duration_hours: durationHours
+					base_amount: price,
+					duration_minutes: Math.round((durationHours || 0) * 60)
 				})
 			});
 			const d = await r.json().catch(() => ({}));
@@ -4505,9 +4504,8 @@
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
 					card_id: item.card?.id,
-					user_card_id: item.id,
-					starting_price: price,
-					duration_hours: durationHours
+					base_amount: price,
+					duration_minutes: Math.round((durationHours || 0) * 60)
 				})
 			});
 			const d = await r.json().catch(() => ({}));
