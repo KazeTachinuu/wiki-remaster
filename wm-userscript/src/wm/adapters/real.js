@@ -166,16 +166,17 @@ export const RealData = {
     catch { return { sellingCount: 0, maxConcurrentAuctions: 5 }; }
   },
 
-  // Create a listing for one owned card. UNVERIFIED against the live API: the create
-  // endpoint was not captured, so this is the RESTful best guess, symmetric with the
-  // verified bid route (POST /api/marketplace/{id}/bid). It fails safe: a non-2xx throws
-  // with the server's message, so the caller shows an error and nothing is ever faked.
-  // If the real shape differs, this is the one function to correct.
-  async createAuction(userCardId, { price, durationHours } = {}) {
+  // Create a listing for one owned card via POST /api/marketplace. The live API confirmed
+  // it requires `card_id` (it rejected `user_card_id` with "card_id requis"). We send both
+  // the catalog card_id and the user_card_id so the server can identify the exact copy
+  // either way. Price and duration field names are still a best guess. It fails safe: a
+  // non-2xx throws with the server's message, so the caller shows the error and reveals a
+  // native fallback rather than faking a listing.
+  async createAuction(item, { price, durationHours } = {}) {
     const r = await fetch(`/api/marketplace`, {
       method: "POST", credentials: "include",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ user_card_id: userCardId, starting_price: price, duration_hours: durationHours }),
+      body: JSON.stringify({ card_id: item.card?.id, user_card_id: item.id, starting_price: price, duration_hours: durationHours }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { const e = new Error(d.error || "Mise en vente refusée."); e.code = d.code; throw e; }
@@ -225,15 +226,16 @@ export const RealData = {
   discard: (ucId) => postJson(`/api/user-cards/${ucId}/discard`, {}),
 
   // Verified market source (from the client): GET /api/marketplace/cards/{cardId}/sales
-  // -> { sales: [{ final_price, settled_at, rarity }] }. It is a PRO-only endpoint: a
-  // non-PRO account gets 403 { code:"pro_required" }, which we treat as "no data" (null)
-  // so no value is shown rather than a fabricated one. Sold history only, no live asks.
+  // -> { sales: [{ final_price, settled_at, rarity }] }. It is PRO-gated: a non-Pro account
+  // gets { code:"pro_required" }, which the real client shows as a distinct "Pro only" state
+  // (not a generic error). We mirror that: return { proRequired:true } so the tab can say so,
+  // instead of claiming the market is unavailable for every card. Sold history only.
   async marketStats(card) {
     let d;
     try {
       const r = await fetch(`/api/marketplace/cards/${card.id}/sales`, { credentials: "include" });
-      d = await r.json();
-      if (!r.ok) return null; // pro_required or any error -> unavailable, fail safe
+      d = await r.json().catch(() => ({}));
+      if (!r.ok) return d.code === "pro_required" ? { proRequired: true } : null;
     } catch { return null; }
     const sales = Array.isArray(d.sales) ? d.sales : null;
     if (!sales) return null;

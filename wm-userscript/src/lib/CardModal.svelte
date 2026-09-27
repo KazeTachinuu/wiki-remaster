@@ -33,8 +33,10 @@
   async function loadMarket() {
     if (marketState !== "idle") return;
     marketState = "loading";
-    try { market = await data.marketStats(c); marketState = market ? "done" : "error"; }
-    catch { marketState = "error"; }
+    try {
+      market = await data.marketStats(c);
+      marketState = market ? (market.proRequired ? "pro" : "done") : "error";
+    } catch { marketState = "error"; }
   }
   $effect(() => { if (tab === "market") loadMarket(); });
 
@@ -55,7 +57,7 @@
     if (!(p > 0)) { flash("Entrez un prix de départ valide."); return; }
     busy = true; msg = ""; sellErr = false;
     try {
-      await data.createAuction(item.id, { price: p, durationHours: durationH });
+      await data.createAuction(item, { price: p, durationHours: durationH });
       onaction?.();
       done = true; msgOk = true; msg = "Carte mise en vente.";
     } catch (e) {
@@ -196,25 +198,38 @@
                 </div>
               </div>
             {:else if sellOpen}
-              <div class="sell-form">
-                <div class="sell-row">
-                  <label class="sell-field">
+              <div class="sell2">
+                <div class="sell2-head">Mettre en vente</div>
+
+                <div class="sell2-block">
+                  <div class="sell2-lab">
                     <span>Prix de départ</span>
-                    <input class="sell-input" type="number" min="1" step="1" inputmode="numeric" bind:value={price} placeholder="0" />
-                  </label>
-                  <label class="sell-field">
-                    <span>Durée</span>
-                    <select class="sell-input" bind:value={durationH}>
-                      {#each DURATIONS as h}<option value={h}>{h} h</option>{/each}
-                    </select>
-                  </label>
+                    {#if mval != null}
+                      <button type="button" class="sell2-suggest" onclick={() => (price = String(mval))}>Estimé {nf(mval)}</button>
+                    {/if}
+                  </div>
+                  <div class="af-input-row">
+                    <input class="af-input" type="number" min="1" step="1" inputmode="numeric" bind:value={price} placeholder="0" />
+                    <span class="af-unit">pts</span>
+                  </div>
                 </div>
+
+                <div class="sell2-block">
+                  <div class="sell2-lab"><span>Durée de l'enchère</span></div>
+                  <div class="sell2-durs">
+                    {#each DURATIONS as h}
+                      <button type="button" class="sell2-dur" class:on={durationH === h} onclick={() => (durationH = h)}>{h} h</button>
+                    {/each}
+                  </div>
+                </div>
+
                 <div class="af-actions">
                   <button class="btn" disabled={busy} onclick={() => (sellOpen = false)}>Annuler</button>
-                  <button class="btn primary" disabled={busy} onclick={sell}>Mettre en vente</button>
+                  <button class="btn primary" disabled={busy || !(Number(price) > 0)} onclick={sell}>{busy ? "Mise en vente..." : "Mettre en vente"}</button>
                 </div>
+
                 {#if sellErr}
-                  <button class="sell-fallback" onclick={sellNative}>Le marché a refusé la vente. Vendre sur le site officiel ?</button>
+                  <button type="button" class="sell-fallback" onclick={sellNative}>Le marché a refusé la vente. Vendre sur le site officiel ?</button>
                 {/if}
               </div>
             {:else}
@@ -231,6 +246,11 @@
         <div id="wm-panel-market" role="tabpanel" aria-labelledby="wm-tab-market" class="modal-panel">
           {#if marketState === "loading"}
             <p class="modal-sum muted">Analyse du marché...</p>
+          {:else if marketState === "pro"}
+            <div class="market-pro">
+              <div class="mp-title">Historique de prix</div>
+              <p class="modal-sum muted">L'historique des ventes est réservé aux membres Pro, comme sur le site officiel.</p>
+            </div>
           {:else if marketState === "error"}
             <p class="modal-sum muted">Marché indisponible pour le moment.</p>
           {:else if market}
