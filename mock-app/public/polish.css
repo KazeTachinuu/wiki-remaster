@@ -1,0 +1,40 @@
+/* =====================================================================
+   WikiMasters Polish  (SINGLE SOURCE OF TRUTH)
+   This exact file is loaded by the local test page AND injected by the
+   Tampermonkey userscript on the real site. Do not fork it. The userscript
+   is generated from this file (see build-userscript.js), so they cannot drift.
+
+   Goal: flat, elegant, modern. Kill the loud rarity-PNG card fill and glow.
+   Rarity becomes one precise accent. Nothing about data or behaviour changes.
+   ===================================================================== */
+
+/* rarity accent colour per card (muted from the neon rarity set) */
+.glow-c  { --wm-r:#7fd8b4; }
+.glow-pc { --wm-r:#7fb0e6; }
+.glow-r  { --wm-r:#b18fe0; }
+.glow-sr { --wm-r:#e46f9f; }
+.glow-ur { --wm-r:#f0912f; }
+.glow-l  { --wm-r:#e8c93a; }
+
+/* the card: flat dark surface, hairline border, one rarity accent line, no glow */
+[class*="glow-"] {
+  background: #141613 !important;
+  box-shadow: none !important;
+  border: 1px solid #262a26 !important;
+  border-bottom: 3px solid var(--wm-r, #262a26) !important;
+}
+
+/* remove the rarity-PNG backdrop (the giant scaled image behind the card) */
+[class*="glow-"] > img:first-child { display: none !important; }
+
+/* remove the inset gradient overlay and the tint over the article image */
+[class*="glow-"] > div.absolute.inset-0 { background-image: none !important; }
+[class*="glow-"] .bg-black\/20 { background: transparent !important; }
+
+/* card text: light and readable on the dark surface */
+[class*="glow-"] > div:last-child,
+[class*="glow-"] > div:last-child * { color: #e8eae7 !important; }
+[class*="glow-"] > div:last-child p { color: #98a29a !important; }
+
+/* stats divider as a hairline */
+[class*="glow-"] .border-t { border-color: #262a26 !important; }

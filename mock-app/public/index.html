@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WikiMasters</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside class="side">
+      <div class="brand"><span class="mk"></span><b>WikiMasters</b></div>
+      <nav class="nav">
+        <a data-view="pulls" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>Ouvrir des paquets</a>
+        <a data-view="collection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>Ma collection</a>
+      </nav>
+      <div class="side-foot">
+        <button id="reset" class="ghost">Réinitialiser</button>
+        <div class="hintline">Serveur de test local</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div id="crumb" class="crumb">Ouvrir des paquets</div>
+        <div class="wallet">
+          <span class="chip"><i class="pk"></i><b id="packs">–</b>/<span id="packcap">10</span></span>
+          <span class="chip"><i class="coin"></i><b id="coins">–</b></span>
+        </div>
+      </header>
+      <section id="view"></section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
