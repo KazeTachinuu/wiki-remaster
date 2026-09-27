@@ -1,6 +1,6 @@
 <script>
   import Reveal from "./Reveal.svelte";
-  import { data, session, recordPull } from "./data.js";
+  import { data, session, recordPull } from "../wm/index.js";
   let { profile, onchanged } = $props();
   let phase = $state("ready");
   let cards = $state([]);

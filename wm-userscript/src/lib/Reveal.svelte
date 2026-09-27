@@ -1,7 +1,7 @@
 <script>
   import Card from "./Card.svelte";
   import CardModal from "./CardModal.svelte";
-  import { RNAME } from "./data.js";
+  import { RNAME } from "../wm/index.js";
   let { cards, ondone } = $props();
   let i = $state(0);
   let showAll = $state(false);

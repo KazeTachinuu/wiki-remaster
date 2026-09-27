@@ -1,7 +1,7 @@
 import { mount, unmount } from "svelte";
 import App from "./App.svelte";
 import appCss from "./app.css?inline";
-import { initCapture } from "./lib/data.js";
+import { initCapture } from "./wm/index.js";
 
 // Patch fetch early (document-start) so we can read the app's own profile call.
 initCapture();

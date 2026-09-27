@@ -1,6 +1,6 @@
 <script>
   import Card from "./Card.svelte";
-  import { data, RNAME } from "./data.js";
+  import { data, RNAME } from "../wm/index.js";
   let { auction, balance = null, onclose, onwallet } = $props();
 
   const nf = (n) => (n == null ? "-" : Number(n).toLocaleString("fr"));

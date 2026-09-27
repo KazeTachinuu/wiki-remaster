@@ -1,13 +1,20 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import monkey from "vite-plugin-monkey";
+import mockApi from "./plugins/vite-mock-api.js";
 
-// Dev (`npm run dev`): plain Vite + Svelte with HMR, served from index.html,
-//   proxying /api to the local mock server. Open http://localhost:5173.
+// Single source of truth for the version: package.json. Bump it there, nowhere else.
+const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"));
+
+// Dev (`npm run dev`): Vite + Svelte with HMR, serving index.html, with the mock API
+//   mounted on /api by a plugin (no second process). Open http://localhost:5173.
 // Build (`npm run build`): adds vite-plugin-monkey to emit the userscript.
 export default defineConfig(({ command }) => ({
   plugins: [
     svelte(),
+    ...(command === "serve" ? [mockApi()] : []),
     ...(command === "build"
       ? [
           monkey({
@@ -15,7 +22,7 @@ export default defineConfig(({ command }) => ({
             userscript: {
               name: "wiki-remaster",
               namespace: "hugo.wikimasters",
-              version: "0.1.0",
+              version: pkg.version,
               description:
                 "Redesigned client for wiki-masters.com. Uses the real API and session.",
               author: "Hugo Sibony",
@@ -37,6 +44,5 @@ export default defineConfig(({ command }) => ({
   ],
   server: {
     port: 5173,
-    proxy: { "/api": "http://localhost:8799" },
   },
 }));

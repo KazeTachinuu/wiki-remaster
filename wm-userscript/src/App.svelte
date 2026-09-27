@@ -1,5 +1,5 @@
 <script>
-  import { data, refreshProfile } from "./lib/data.js";
+  import { data, refreshProfile } from "./wm/index.js";
   import Pulls from "./lib/Pulls.svelte";
   import Collection from "./lib/Collection.svelte";
   import Catalog from "./lib/Catalog.svelte";

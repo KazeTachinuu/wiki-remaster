@@ -1,7 +1,7 @@
 <script>
   import Card from "./Card.svelte";
   import AuctionModal from "./AuctionModal.svelte";
-  import { data, RNAME } from "./data.js";
+  import { data, RNAME } from "../wm/index.js";
   let { profile, onwallet } = $props();
 
   const nf = (n) => (n == null ? "-" : Number(n).toLocaleString("fr"));

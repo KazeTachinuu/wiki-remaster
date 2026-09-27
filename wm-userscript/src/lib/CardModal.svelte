@@ -1,6 +1,6 @@
 <script>
   import Card from "./Card.svelte";
-  import { data, RNAME, marketValueFor } from "./data.js";
+  import { data, RNAME, marketValueFor } from "../wm/index.js";
   import { settings } from "./settings.svelte.js";
   let { item, onclose, onaction, readonly = false, wishlisted = false, onwishlist = null, extra = null } = $props();
   const c = $derived(item.card);

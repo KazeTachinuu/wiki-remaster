@@ -3941,7 +3941,107 @@
 		});
 	}
 	if (typeof window !== "undefined") ((window.__svelte ??= {}).v ??= new Set()).add("5");
-	var isReal = /(^|\.)wiki-masters\.com$/.test(location.hostname);
+	var isReal$1 = /(^|\.)wiki-masters\.com$/.test(location.hostname);
+	var json = (p, opts) => fetch(p, {
+		credentials: "include",
+		...opts
+	}).then((r) => {
+		if (!r.ok) throw new Error(p + " -> " + r.status);
+		return r.json();
+	});
+	var postJson = (p, body) => json(p, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body)
+	});
+	var capturedProfile = null;
+	var localEpoch = 0;
+	var origFetch = null;
+	var syncReq = null;
+	var sbBase = null;
+	var sbHeaders = null;
+	var sbUserId = null;
+	var getProfile = () => capturedProfile;
+	function patchProfile(patch) {
+		capturedProfile = {
+			...capturedProfile || {},
+			...patch
+		};
+		window.dispatchEvent(new Event("wm:profile"));
+		return capturedProfile;
+	}
+	var bumpEpoch = () => {
+		localEpoch++;
+	};
+	var getUserId = () => sbUserId;
+	function headerVal(init, name) {
+		const h = init && init.headers;
+		if (!h) return null;
+		if (typeof h.get === "function") return h.get(name);
+		if (Array.isArray(h)) {
+			const f = h.find(([k]) => String(k).toLowerCase() === name);
+			return f ? f[1] : null;
+		}
+		for (const k in h) if (String(k).toLowerCase() === name) return h[k];
+		return null;
+	}
+	async function refreshProfile() {
+		if (!origFetch) return null;
+		try {
+			let res;
+			if (sbBase && sbHeaders && sbUserId) res = await origFetch.call(window, `${sbBase}/rest/v1/rpc/sync_profile_packs`, {
+				method: "POST",
+				headers: {
+					...sbHeaders,
+					"content-type": "application/json"
+				},
+				body: JSON.stringify({ user_id: sbUserId })
+			});
+			else if (syncReq) res = await origFetch.call(window, syncReq.url, syncReq.init);
+			else return null;
+			const j = await res.json();
+			if (j && typeof j === "object") return patchProfile(j);
+		} catch {}
+		return null;
+	}
+	function initCapture() {
+		if (!isReal$1 || typeof window === "undefined") return;
+		const orig = window.fetch;
+		origFetch = orig;
+		window.fetch = function(...args) {
+			const ret = orig.apply(window, args);
+			try {
+				const url = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
+				if (url && url.includes(".supabase.co/rest/v1/") && args[1]) try {
+					if (!sbBase) sbBase = new URL(url).origin;
+					const apikey = headerVal(args[1], "apikey");
+					const auth = headerVal(args[1], "authorization");
+					if (apikey && auth) sbHeaders = {
+						apikey,
+						authorization: auth
+					};
+					const m = url.match(/(?:^|[?&])(?:id|user_id)=eq\.([0-9a-f-]{36})/i);
+					if (m) sbUserId = m[1];
+				} catch {}
+				if (url && url.includes("/rpc/sync_profile_packs")) {
+					if (typeof args[0] === "string" && args[1]) syncReq = {
+						url: args[0],
+						init: args[1]
+					};
+					const issuedEpoch = localEpoch;
+					ret.then((res) => res.clone().json().then((j) => {
+						if (localEpoch !== issuedEpoch) return;
+						patchProfile(j);
+					}).catch(() => {})).catch(() => {});
+				}
+				if (url && url.includes("/rest/v1/profiles")) ret.then((res) => res.clone().json().then((j) => {
+					const row = Array.isArray(j) ? j[0] : j;
+					if (row && typeof row.is_pro !== "undefined") patchProfile({ is_pro: row.is_pro });
+				}).catch(() => {})).catch(() => {});
+			} catch {}
+			return ret;
+		};
+	}
 	var RNAME = {
 		C: "Commun",
 		PC: "Peu Commun",
@@ -4020,113 +4120,43 @@
 			at: b.placed_at || null
 		};
 	}
-	var json = (p, opts) => fetch(p, {
-		credentials: "include",
-		...opts
-	}).then((r) => {
-		if (!r.ok) throw new Error(p + " -> " + r.status);
-		return r.json();
-	});
-	var postJson = (p, body) => json(p, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body)
-	});
-	var capturedProfile = null;
-	var localEpoch = 0;
-	var origFetch = null;
-	var syncReq = null;
-	var sbBase = null;
-	var sbHeaders = null;
-	var sbUserId = null;
-	function headerVal(init, name) {
-		const h = init && init.headers;
-		if (!h) return null;
-		if (typeof h.get === "function") return h.get(name);
-		if (Array.isArray(h)) {
-			const f = h.find(([k]) => String(k).toLowerCase() === name);
-			return f ? f[1] : null;
-		}
-		for (const k in h) if (String(k).toLowerCase() === name) return h[k];
-		return null;
-	}
-	async function refreshProfile() {
-		if (!origFetch) return null;
-		try {
-			let res;
-			if (sbBase && sbHeaders && sbUserId) res = await origFetch.call(window, `${sbBase}/rest/v1/rpc/sync_profile_packs`, {
-				method: "POST",
-				headers: {
-					...sbHeaders,
-					"content-type": "application/json"
-				},
-				body: JSON.stringify({ user_id: sbUserId })
-			});
-			else if (syncReq) res = await origFetch.call(window, syncReq.url, syncReq.init);
-			else return null;
-			const j = await res.json();
-			if (j && typeof j === "object") {
-				capturedProfile = {
-					...capturedProfile || {},
-					...j
-				};
-				window.dispatchEvent(new Event("wm:profile"));
-				return j;
-			}
-		} catch {}
-		return null;
-	}
-	function initCapture() {
-		if (!isReal || typeof window === "undefined") return;
-		const orig = window.fetch;
-		origFetch = orig;
-		window.fetch = function(...args) {
-			const ret = orig.apply(window, args);
-			try {
-				const url = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
-				if (url && url.includes(".supabase.co/rest/v1/") && args[1]) try {
-					if (!sbBase) sbBase = new URL(url).origin;
-					const apikey = headerVal(args[1], "apikey");
-					const auth = headerVal(args[1], "authorization");
-					if (apikey && auth) sbHeaders = {
-						apikey,
-						authorization: auth
-					};
-					const m = url.match(/(?:^|[?&])(?:id|user_id)=eq\.([0-9a-f-]{36})/i);
-					if (m) sbUserId = m[1];
-				} catch {}
-				if (url && url.includes("/rpc/sync_profile_packs")) {
-					if (typeof args[0] === "string" && args[1]) syncReq = {
-						url: args[0],
-						init: args[1]
-					};
-					const issuedEpoch = localEpoch;
-					ret.then((res) => res.clone().json().then((j) => {
-						if (localEpoch !== issuedEpoch) return;
-						capturedProfile = {
-							...capturedProfile || {},
-							...j
-						};
-						window.dispatchEvent(new Event("wm:profile"));
-					}).catch(() => {})).catch(() => {});
-				}
-				if (url && url.includes("/rest/v1/profiles")) ret.then((res) => res.clone().json().then((j) => {
-					const row = Array.isArray(j) ? j[0] : j;
-					if (row && typeof row.is_pro !== "undefined") {
-						capturedProfile = {
-							...capturedProfile || {},
-							is_pro: row.is_pro
-						};
-						window.dispatchEvent(new Event("wm:profile"));
-					}
-				}).catch(() => {})).catch(() => {});
-			} catch {}
-			return ret;
+	function nNotification(n) {
+		return {
+			id: n.id,
+			title: n.data?.title || NTYPE[n.type] || "Notification",
+			message: n.data?.message || "",
+			read: !!n.read,
+			at: n.created_at || null,
+			href: notifHref(n)
 		};
+	}
+	function countsFrom(items) {
+		const counts = {
+			C: 0,
+			PC: 0,
+			R: 0,
+			SR: 0,
+			UR: 0,
+			L: 0
+		};
+		for (const it of items) if (counts[it.card.rarity] != null) counts[it.card.rarity] += 1;
+		return counts;
+	}
+	function validateCards(endpoint, cards) {
+		if (!cards.length) return true;
+		const broken = cards.filter((c) => c.id == null && !c.rarity).length;
+		const rate = broken / cards.length;
+		if (rate > .5) {
+			console.warn(`[wiki-remaster] ${endpoint}: ${Math.round(rate * 100)}% of cards failed to normalize (${broken}/${cards.length}). The API shape may have changed. Check src/wm/schema.js.`);
+			return false;
+		}
+		return true;
 	}
 	var MockData = {
 		isReal: false,
 		canReset: true,
+		canAct: true,
+		userId: "me",
 		async profile() {
 			const p = await json("/api/profile");
 			return {
@@ -4187,12 +4217,14 @@
 			const d = await json(`/api/cards?page=${opts.page ?? 0}&sort=${opts.sort || "rarity"}&q=${encodeURIComponent(opts.q || "")}${rarity}${wishlist}`);
 			const owned = new Set(d.ownedCardIds || []);
 			const wish = new Set(d.wishlistCardIds || []);
+			const cards = (d.cards || []).map((c) => ({
+				...nCard(c),
+				owned: owned.has(c.id),
+				wishlisted: wish.has(c.id)
+			}));
+			validateCards("catalog", cards);
 			return {
-				cards: (d.cards || []).map((c) => ({
-					...nCard(c),
-					owned: owned.has(c.id),
-					wishlisted: wish.has(c.id)
-				})),
+				cards,
 				total: d.total ?? null,
 				hasMore: !!d.searchHasMore,
 				rarityCounts: d.rarityCounts || null
@@ -4239,25 +4271,16 @@
 				bids: (d.bids || []).map(nBid)
 			};
 		},
-		userId: "me",
 		wishlistAdd: (cardId) => postJson("/api/wishlist", { card_id: cardId }),
 		wishlistRemove: (cardId) => postJson("/api/unwishlist", { card_id: cardId }),
 		async notifications() {
 			try {
-				return ((await json("/api/notifications")).notifications || []).map((n) => ({
-					id: n.id,
-					title: n.data?.title || NTYPE[n.type] || "Notification",
-					message: n.data?.message || "",
-					read: !!n.read,
-					at: n.created_at || null,
-					href: notifHref(n)
-				}));
+				return ((await json("/api/notifications")).notifications || []).map(nNotification);
 			} catch {
 				return [];
 			}
 		},
 		reset: () => json("/api/reset", { method: "POST" }),
-		canAct: true,
 		discard: (ucId) => postJson("/api/discard", { user_card_id: ucId }),
 		async marketStats(card) {
 			const base = {
@@ -4295,29 +4318,18 @@
 			return false;
 		}
 	};
-	function countsFrom(items) {
-		const counts = {
-			C: 0,
-			PC: 0,
-			R: 0,
-			SR: 0,
-			UR: 0,
-			L: 0
-		};
-		for (const it of items) if (counts[it.card.rarity] != null) counts[it.card.rarity] += 1;
-		return counts;
-	}
 	var ownedIds = new Set();
 	var ownedLoaded = false;
-	var data = isReal ? {
+	var RealData = {
 		isReal: true,
 		canReset: false,
+		canAct: true,
 		async profile() {
 			let balance = null;
 			try {
 				balance = (await json("/api/wikibidous")).balance;
 			} catch {}
-			const cap = capturedProfile || {};
+			const cap = getProfile() || {};
 			const packs = cap.packs_remaining ?? null;
 			let nextRegen = null;
 			if (packs != null && packs < 10 && cap.packs_last_regen_at) {
@@ -4347,12 +4359,8 @@
 			} catch {}
 			if (!r.ok || d.error) {
 				if (d.packs_remaining != null) {
-					capturedProfile = {
-						...capturedProfile || {},
-						packs_remaining: d.packs_remaining
-					};
-					localEpoch++;
-					window.dispatchEvent(new Event("wm:profile"));
+					bumpEpoch();
+					patchProfile({ packs_remaining: d.packs_remaining });
 				}
 				if (d.human_verification_required) {
 					const e = new Error("Vérification humaine requise");
@@ -4371,11 +4379,8 @@
 				};
 			});
 			if (d.packs_remaining != null) {
-				capturedProfile = {
-					...capturedProfile || {},
-					packs_remaining: d.packs_remaining
-				};
-				localEpoch++;
+				bumpEpoch();
+				patchProfile({ packs_remaining: d.packs_remaining });
 			}
 			let currency = null;
 			try {
@@ -4384,7 +4389,7 @@
 			return {
 				cards,
 				packs_remaining: d.packs_remaining,
-				currency: currency ?? capturedProfile?.wikibidous_balance ?? null
+				currency: currency ?? getProfile()?.wikibidous_balance ?? null
 			};
 		},
 		async collection(opts = {}) {
@@ -4429,13 +4434,7 @@
 			ownedLoaded = true;
 			return {
 				items,
-				stats: {
-					unique: total ?? items.length,
-					total: items.reduce((n, it) => n + it.count, 0),
-					catalog: null,
-					counts: realCounts || countsFrom(items),
-					loading: false
-				}
+				stats: statsOf(false)
 			};
 		},
 		async cards() {
@@ -4447,13 +4446,15 @@
 			const owned = new Set(d.ownedCardIds || []);
 			const wish = new Set(d.wishlistCardIds || []);
 			const friends = d.friendOwners || {};
+			const cards = (d.cards || []).map((c) => ({
+				...nCard(c),
+				owned: owned.has(c.id),
+				wishlisted: wish.has(c.id),
+				friendCount: Array.isArray(friends[c.id]) ? friends[c.id].length : 0
+			}));
+			validateCards("catalog", cards);
 			return {
-				cards: (d.cards || []).map((c) => ({
-					...nCard(c),
-					owned: owned.has(c.id),
-					wishlisted: wish.has(c.id),
-					friendCount: Array.isArray(friends[c.id]) ? friends[c.id].length : 0
-				})),
+				cards,
 				total: d.total ?? null,
 				hasMore: !!d.searchHasMore,
 				rarityCounts: d.rarityCounts || null
@@ -4502,25 +4503,17 @@
 			};
 		},
 		get userId() {
-			return sbUserId;
+			return getUserId();
 		},
 		wishlistAdd: (cardId) => postJson(`/api/cards/${cardId}/wishlist`, {}),
 		wishlistRemove: (cardId) => json(`/api/cards/${cardId}/wishlist`, { method: "DELETE" }),
 		async notifications() {
 			try {
-				return ((await json("/api/notifications")).notifications || []).map((n) => ({
-					id: n.id,
-					title: n.data?.title || NTYPE[n.type] || "Notification",
-					message: n.data?.message || "",
-					read: !!n.read,
-					at: n.created_at || null,
-					href: notifHref(n)
-				}));
+				return ((await json("/api/notifications")).notifications || []).map(nNotification);
 			} catch {
 				return [];
 			}
 		},
-		canAct: true,
 		discard: (ucId) => postJson(`/api/user-cards/${ucId}/discard`, {}),
 		async marketStats(card) {
 			let d;
@@ -4558,7 +4551,18 @@
 				return false;
 			}
 		}
-	} : MockData;
+	};
+	var session = {
+		packs: 0,
+		cards: 0,
+		newCards: 0
+	};
+	function recordPull(cards) {
+		session.packs += 1;
+		session.cards += cards.length;
+		session.newCards += cards.filter((c) => c.is_new).length;
+	}
+	var data = /(^|\.)wiki-masters\.com$/.test(location.hostname) ? RealData : MockData;
 	var marketCache = new Map();
 	async function marketValueFor(card) {
 		if (marketCache.has(card.id)) return marketCache.get(card.id);
@@ -4570,16 +4574,6 @@
 		} catch {
 			return null;
 		}
-	}
-	var session = {
-		packs: 0,
-		cards: 0,
-		newCards: 0
-	};
-	function recordPull(cards) {
-		session.packs += 1;
-		session.cards += cards.length;
-		session.newCards += cards.filter((c) => c.is_new).length;
 	}
 	var KEY = "wm-settings";
 	function load() {

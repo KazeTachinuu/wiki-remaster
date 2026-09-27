@@ -120,4 +120,4 @@ const CATALOG = [
 
 CATALOG.forEach((c, i) => (c.id = "card_" + (i + 1)));
 
-module.exports = { CATALOG, RARITY_WEIGHTS, RARITY_ORDER };
+export { CATALOG, RARITY_WEIGHTS, RARITY_ORDER };

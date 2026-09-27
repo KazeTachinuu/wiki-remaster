@@ -1,29 +1,29 @@
-# WikiMasters — What's actually available (data & API inventory)
+# WikiMasters - What's actually available (data & API inventory)
 
 Captured live from the authenticated app (account KazeTachinuu). Session tokens seen
-in headers were **not** stored or reused. This is the real, non-hallucinated surface —
+in headers were **not** stored or reused. This is the real, non-hallucinated surface -
 use it as the data-model spec for the rewrite.
 
 ## Architecture in one line
-Next.js (Vercel) → **Next.js API routes** (`/api/*`) are the primary data layer →
+Next.js (Vercel) -> **Next.js API routes** (`/api/*`) are the primary data layer ->
 Supabase Postgres behind them. A few reads hit Supabase REST directly (`profiles`, `tags`).
 
 ---
 
 ## The data we can see (core entities)
 
-### Card (the master catalog entity)  — from `/api/cards`, `/api/packs/open`
+### Card (the master catalog entity) - from `/api/cards`, `/api/packs/open`
 | field | type | notes |
 |---|---|---|
 | id | uuid | |
 | wikipedia_title | string | e.g. "Georges Seurat" |
 | wikipedia_url | string | fr.wikipedia.org link |
 | summary | string \| null | article extract |
-| image_url | string \| null | **Wikimedia thumbnail** (330px) — often null |
+| image_url | string \| null | **Wikimedia thumbnail** (330px) - often null |
 | category | string \| null | short descriptor ("peintre français") |
-| q_score | decimal | quality score → **drives rarity** |
+| q_score | decimal | quality score -> **drives rarity** |
 | rarity | `C·PC·R·SR·UR·L` | 6 tiers |
-| rarity_order | 0–5 | |
+| rarity_order | 0-5 | |
 | atk | int | **tracks pageviews** |
 | def | int | **tracks content_length** |
 | pageviews | int | |
@@ -33,18 +33,18 @@ Supabase Postgres behind them. A few reads hit Supabase REST directly (`profiles
 | in_global_collection | bool | |
 | created_at, pageviews_refreshed_at, qscore_refreshed_at, info_refreshed_at | ts | data freshness |
 
-*Art comes from the article's own Wikimedia image — the 24 `/cards/*.jpg` files are marketing only. The pool is essentially all of fr.wikipedia.*
+*Art comes from the article's own Wikimedia image - the 24 `/cards/*.jpg` files are marketing only. The pool is essentially all of fr.wikipedia.*
 
-### UserCard (ownership) — from `/api/my-collection`
-`id, card_id, user_id, card{…}, count, starred, is_shiny (foil variant), obtained_at, tags[]`
+### UserCard (ownership) - from `/api/my-collection`
+`id, card_id, user_id, card{...}, count, starred, is_shiny (foil variant), obtained_at, tags[]`
 
-### Profile — from `sync_profile_packs` / `/rest/v1/profiles`
+### Profile - from `sync_profile_packs` / `/rest/v1/profiles`
 `id, username, is_pro, is_vip, is_admin, is_public, avatar_url, avatar_pos_x/y,`
 `packs_remaining (cap 10/day), packs_last_regen_at, wikibidous_balance,`
 `pity_counter, cheat_strikes, hide_sensitive, pack_human_verified_at,`
 `last_normal_pack_opened_at, leaderboard_excluded, sanction fields, deleted_at`
 
-### Tag — `/rest/v1/tags`  → user-defined collection labels
+### Tag - `/rest/v1/tags`  -> user-defined collection labels
 
 ---
 
@@ -62,7 +62,7 @@ Supabase Postgres behind them. A few reads hit Supabase REST directly (`profiles
 | `GET /api/guilds` | guilds |
 | `GET /api/notifications` | notifications |
 | `POST /rest/v1/rpc/sync_profile_packs` | your profile + pack regen |
-| `GET /rest/v1/profiles?select=…` | profile flags (is_pro/is_admin) |
+| `GET /rest/v1/profiles?select=...` | profile flags (is_pro/is_admin) |
 | `GET /rest/v1/tags` | your tags |
 | `GET /auth/v1/.well-known/jwks.json` | auth verification |
 | (same pattern, not yet opened) `/api/friends` · `/api/dms` · `/api/achievements` · `/api/profile` | social / progression |
@@ -72,7 +72,7 @@ Static assets we can use: `/audio/pack-rip.mp3`, `/audio/card-flip.mp3`, `/audio
 ---
 
 ## Systems to model in the rewrite
-- **Rarity engine:** `q_score` (Wikipedia quality) → rarity tier; `atk`←pageviews, `def`←content_length.
+- **Rarity engine:** `q_score` (Wikipedia quality) -> rarity tier; `atk` <- pageviews, `def` <- content_length.
 - **Economy:** WikiBidous (soft currency), packs (10/day, timed regen), pity_counter (rare guarantee), is_pro/is_vip tiers.
 - **Anti-cheat / integrity:** cheat_strikes, pack_human_verified_at (Turnstile), sanctions, leaderboard_excluded.
 - **Collection:** duplicates (count), starred, shiny variants, tags, NSFW hiding.
@@ -107,12 +107,12 @@ Read directly via the browser session on wiki-masters.com. Corrections and confi
 - **`/api/trades?active=1`** returns `{ trades[] }`.
 - **`/api/notifications`** returns `{ notifications[] }` with `{ id, type, data{title,message,...}, read,
   created_at }`.
-- **`/api/profile` returns 404** — it does not exist as a JSON route.
+- **`/api/profile` returns 404** - it does not exist as a JSON route.
 - **Profile / packs come from Supabase directly**, not same-origin: `POST
   https://<project>.supabase.co/rest/v1/rpc/sync_profile_packs` (needs apikey + bearer). `is_pro`
   is fetched separately: `GET .../rest/v1/profiles?select=id,is_pro&id=eq.<uid>`. The wrapper must intercept
   these (a same-origin call 404s / lacks the Supabase auth headers). `is_vip` is NOT fetched by the app.
-- **`/api/packs/open` is POST-only** (GET → 405).
+- **`/api/packs/open` is POST-only** (GET -> 405).
 
 Integration consequences applied to the code: collection is now fetched across all pages (50/page) using the
 real `total`/`rarityCounts`; currency uses `/api/wikibidous`; `is_pro` is captured from the profiles call;

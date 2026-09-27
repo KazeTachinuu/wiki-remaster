@@ -5,8 +5,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const SCAN_DIRS = ["src"];
-const EXTRA_FILES = ["../README.md"];
+const SCAN_DIRS = ["src", "plugins", "mock", "../docs"];
+const EXTRA_FILES = ["../README.md", "vite.config.js"];
 const EXTS = new Set([".svelte", ".js", ".mjs", ".css", ".md"]);
 
 const BANNED = {

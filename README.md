@@ -5,13 +5,16 @@ A userscript that reskins wiki-masters.com with a custom UI, running on the site
 ![wiki-remaster](docs/screenshot.png)
 
 ## Install
-1. Install the [Tampermonkey](https://www.tampermonkey.net/) browser extension.
-2. Click **[Install](https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js)**; Tampermonkey will prompt to install.
-3. Open [wiki-masters.com](https://www.wiki-masters.com).
 
-It auto-updates when a new version is pushed here (the version number lives in the userscript header). Turn it off with "Version originale du site" in the sidebar.
+> Requires [Tampermonkey](https://www.tampermonkey.net/) (Chrome, Firefox, Edge).
 
-Svelte 5, Vite, vite-plugin-monkey. Build output: `wm-userscript/dist/wikimasters-app.user.js`.
+[![Install wiki-remaster](https://img.shields.io/badge/Install-wiki--remaster-3CCB8E?style=for-the-badge&logo=tampermonkey&logoColor=white)](https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js)
+
+Click the button, Tampermonkey opens an install page, click **Install**. Then open [wiki-masters.com](https://www.wiki-masters.com).
+
+Auto-updates are built in. Switch back to the original site anytime with "Version originale du site" in the sidebar.
+
+Svelte 5 and Vite. Build output: `wm-userscript/dist/wikimasters-app.user.js`.
 
 ## Rebuilt screens
 - Ouvrir des paquets: foil booster, open animation, reveal.
@@ -27,12 +30,31 @@ Everything else falls back to the native site.
 ```
 cd wm-userscript
 npm install
-npm run dev                  # open the printed URL, install in Tampermonkey, hot-reloads
-npm run build                # dist/wikimasters-app.user.js
-npm run check                # style check (no em dashes or glyph icons)
-node ../mock-app/server.js   # mock API on :8799
+npm run dev      # http://localhost:5173, mock API built in, hot reload
+npm run build    # dist/wikimasters-app.user.js
+npm run test     # unit tests (vitest)
+npm run check    # style check (no em dashes or glyph icons)
 ```
 
-`src/lib/data.js` uses the real API on wiki-masters.com and the mock locally, by hostname.
+## Layout
+```
+src/
+  wm/            domain layer, one interface, two adapters by hostname
+    api.js       thin HTTP client and live-session capture
+    schema.js    labels, normalizers, and API drift detection
+    session.js   pulls tally
+    index.js     adapter selection, market value cache, public exports
+    adapters/    real.js (wiki-masters.com), mock.js (dev)
+  lib/*.svelte   view layer
+  App.svelte main.js app.css
+plugins/         vite-mock-api.js (dev API), no second process
+mock/catalog.js  dev card fixture
+```
+
+`src/wm/index.js` picks the real API on wiki-masters.com and the mock locally, by hostname.
+The mock lives in a Vite dev plugin, so `npm run dev` serves the app and the API together.
 
 Runs against your real account. Writes not verified against the live API (create auction, buy, cancel, wishlist) open the original site instead of guessing.
+
+## Reference
+The verified API surface and per-feature integration status, captured live from the app, drive what gets built and what stays a fallback: [docs/API_REFERENCE.md](docs/API_REFERENCE.md), [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md).

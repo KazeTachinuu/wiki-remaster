@@ -1,7 +1,7 @@
 <script>
   import Card from "./Card.svelte";
   import CardModal from "./CardModal.svelte";
-  import { data, RNAME, marketValueFor } from "./data.js";
+  import { data, RNAME, marketValueFor } from "../wm/index.js";
   import { createQueue } from "./queue.js";
   import { settings, toggleHideStats, toggleHideSensitive } from "./settings.svelte.js";
 

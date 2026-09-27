@@ -1,7 +1,7 @@
 <script>
   import Card from "./Card.svelte";
   import CardModal from "./CardModal.svelte";
-  import { data, RNAME, normSearch, marketValueFor } from "./data.js";
+  import { data, RNAME, normSearch, marketValueFor } from "../wm/index.js";
   import { settings, toggleHideStats } from "./settings.svelte.js";
   import { createQueue } from "./queue.js";
 
@@ -22,7 +22,7 @@
   let selected = $state(null);
   // Lazy, cached market value per card. Cards enqueue as they scroll into view
   // (IntersectionObserver), a bounded queue fetches them, and each result is cached
-  // in data.js for the page's life. Unverified marketplace shape fails safe to null
+  // in wm/index.js for the page's life. Unverified marketplace shape fails safe to null
   // -> no badge, never a fabricated price. Nothing blocks first paint.
   let values = $state({}); // card.id -> number | null (undefined = not fetched yet)
   let valuesLoaded = $state(0); // count resolved (drives the "sort by value" progress hint)
