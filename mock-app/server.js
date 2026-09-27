@@ -1,10 +1,8 @@
-// Local WikiMasters prototype server. No dependencies (plain Node http).
-// Serves the redesigned client from ./public and mock API endpoints that
-// mirror the real app's shapes. State is in memory and resets on restart.
+// Local mock API for wiki-masters.com, mirroring the real response shapes.
+// No dependencies (plain Node http). State is in memory and resets on restart.
+// The UI runs via Vite (npm run dev), which proxies /api to this server.
 
 const http = require("http");
-const fs = require("fs");
-const path = require("path");
 const { CATALOG, RARITY_WEIGHTS } = require("./data.js");
 
 const PORT = 8799;
@@ -178,7 +176,6 @@ function send(res, status, body, type) {
   res.end(typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
 
-const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml" };
 
 function findUc(id) {
   for (const it of state.collection.values()) if (it.id === id) return it;
@@ -373,13 +370,8 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { ok: true });
   }
 
-  // static files
-  let file = p === "/" ? "/index.html" : p;
-  const full = path.join(__dirname, "public", path.normalize(file).replace(/^(\.\.[/\\])+/, ""));
-  fs.readFile(full, (err, data) => {
-    if (err) return send(res, 404, "Not found", "text/plain");
-    send(res, 200, data, MIME[path.extname(full)] || "application/octet-stream");
-  });
+  // API-only mock. The UI is served by Vite (npm run dev), which proxies /api here.
+  return send(res, 404, { error: "not found" });
 });
 
-server.listen(PORT, () => console.log(`WikiMasters prototype on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`WikiMasters mock API on http://localhost:${PORT}`));
