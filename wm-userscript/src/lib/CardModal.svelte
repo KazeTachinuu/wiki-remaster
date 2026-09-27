@@ -43,7 +43,7 @@
   // In-app listing. The create endpoint is a best guess (see data.createAuction), so it
   // fails safe: on any server rejection we surface the error and reveal a one-click native
   // fallback rather than pretend the card was listed.
-  const DURATIONS = [6, 12, 24, 48, 72];
+  const DURATIONS = [1, 3, 6, 12, 24, 48, 72];
   let sellOpen = $state(false);
   let price = $state("");
   let durationH = $state(24);

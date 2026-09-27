@@ -409,8 +409,8 @@
 .sell2-suggest{background:color-mix(in oklab,var(--r-l) 15%,transparent);border:1px solid color-mix(in oklab,var(--r-l) 30%,transparent);color:var(--r-l);border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;text-transform:none;letter-spacing:0;transition:.12s}
 .sell2-suggest:hover{background:color-mix(in oklab,var(--r-l) 24%,transparent)}
 .sell2 .af-input{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
-.sell2-durs{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
-.sell2-dur{background:var(--elev2);border:1px solid var(--line);color:var(--fg-soft);border-radius:9px;padding:9px 0;font-size:12.5px;font-weight:600;cursor:pointer;transition:.12s}
+.sell2-durs{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.sell2-dur{background:var(--elev2);border:1px solid var(--line);color:var(--fg-soft);border-radius:9px;padding:9px 2px;font-size:12px;font-weight:600;cursor:pointer;transition:.12s;font-variant-numeric:tabular-nums}
 .sell2-dur:hover{color:var(--fg);border-color:var(--line2)}
 .sell2-dur.on{background:color-mix(in oklab,var(--accent) 16%,transparent);border-color:var(--accent);color:var(--accent)}
 .sell-fallback{background:none;border:none;padding:0;color:var(--fg-soft);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;text-decoration:underline}
