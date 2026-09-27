@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.1.0
+// @version      0.2.0
 // @author       Hugo Sibony
 // @description  Redesigned client for wiki-masters.com. Uses the real API and session.
 // @homepage     https://github.com/KazeTachinuu/wiki-remaster
