@@ -300,10 +300,6 @@ const MockData = {
   reset: () => json("/api/reset", { method: "POST" }),
   canAct: true,
   discard: (ucId) => postJson("/api/discard", { user_card_id: ucId }),
-  createAuction: (ucId, price, durationMin) =>
-    postJson("/api/marketplace", { user_card_id: ucId, starting_price: price, duration_min: durationMin }),
-  addTag: (ucId, name) => postJson("/api/tags", { user_card_id: ucId, name }),
-  removeTag: (ucId, name) => postJson("/api/untag", { user_card_id: ucId, name }),
   async marketStats(card) {
     // Deterministic synthesis for local dev, seeded by card id so a card's value is stable.
     const base = { C: 8, PC: 20, R: 45, SR: 110, UR: 260, L: 600 }[card.rarity] || 20;
@@ -530,14 +526,10 @@ const RealData = {
       }));
     } catch { return []; }
   },
-  // Discard path is verified from the client bundle (/api/user-cards/{id}/discard).
-  // The other writes remain best-guess (only reads are in the reference) and fail safe:
-  // a rejected write shows an error and rolls back, it never lies about success.
-  //   create auction -> POST /api/marketplace   (only GET is documented)
+  // Verified writes only: discard and bid. Listing/buy/cancel/wishlist are not verified,
+  // so they route to the native site (see the components) instead of guessing an endpoint.
   canAct: true,
   discard: (ucId) => postJson(`/api/user-cards/${ucId}/discard`, {}),
-  createAuction: (ucId, price, durationMin) =>
-    postJson("/api/marketplace", { user_card_id: ucId, starting_price: price, duration_min: durationMin }),
   // Verified market source (from the client): GET /api/marketplace/cards/{cardId}/sales
   // -> { sales: [{ final_price, settled_at, rarity }] }. It is a PRO-only endpoint: a
   // non-PRO account gets 403 { code:"pro_required" }, which we treat as "no data" (null)

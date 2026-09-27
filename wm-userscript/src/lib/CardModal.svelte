@@ -4,7 +4,6 @@
   import { settings } from "./settings.svelte.js";
   let { item, onclose, onaction, readonly = false, wishlisted = false, onwishlist = null, extra = null } = $props();
   const c = $derived(item.card);
-  const DURATIONS = [ [10, "10 min"], [30, "30 min"], [60, "1 h"], [180, "3 h"], [360, "6 h"], [720, "12 h"] ];
 
   let tab = $state("details");
   let summary = $state(item.card.summary || "");
@@ -13,10 +12,7 @@
   let marketState = $state("idle");
   let mval = $state(null); // estimated market value, shown inline in Détails
 
-  let showAuction = $state(false);
   let confirmDiscard = $state(false);
-  let bid = $state("");
-  let duration = $state(60);
   let busy = $state(false);
   let done = $state(false);
   let msg = $state("");
@@ -42,17 +38,9 @@
   }
   $effect(() => { if (tab === "market") loadMarket(); });
 
-  function openAuction() { confirmDiscard = false; showAuction = true; }
-  async function launchAuction() {
-    const price = Number(bid);
-    if (!(price > 0)) { flash("Entrez une mise de départ valide."); return; }
-    busy = true; msg = "";
-    try {
-      await data.createAuction(item.id, price, duration);
-      onaction?.();
-      done = true; msgOk = true; msg = "Enchère lancée."; // the effect below closes after a short beat
-    } catch { flash("L'enchère a échoué."); busy = false; }
-  }
+  // Listing a card for auction is not a verified endpoint, so we send the user to the
+  // native marketplace flow instead of POSTing a guess.
+  function sellNative() { try { localStorage.setItem("wm-off", "1"); } catch {} location.assign("/collection"); }
   async function discard() {
     busy = true; msg = "";
     try {
@@ -177,26 +165,7 @@
           {#if extra}{@render extra()}{/if}
 
           {#if data.canAct && !readonly && !done}
-            {#if showAuction}
-              <div class="auction">
-                <label class="af-label" for="wm-bid">Mise de départ</label>
-                <div class="af-input-row">
-                  <input id="wm-bid" class="af-input" type="number" min="1" placeholder="Ex. 50" bind:value={bid} />
-                  <span class="af-unit">pts</span>
-                </div>
-                {#if mval != null}
-                  <button class="af-hint" onclick={() => (bid = mval)}>Valeur estimée {nf(mval)} pts · utiliser</button>
-                {/if}
-                <div class="af-label">Durée</div>
-                <div class="af-durations">
-                  {#each DURATIONS as [m, lbl]}<button class:on={duration === m} onclick={() => (duration = m)}>{lbl}</button>{/each}
-                </div>
-                <div class="af-actions">
-                  <button class="btn" disabled={busy} onclick={() => (showAuction = false)}>Annuler</button>
-                  <button class="btn primary" disabled={busy} onclick={launchAuction}>Lancer l'enchère</button>
-                </div>
-              </div>
-            {:else if confirmDiscard}
+            {#if confirmDiscard}
               <div class="confirm">
                 <div class="confirm-text">Défausser cette carte contre <b>1 point</b> ?</div>
                 <div class="af-actions">
@@ -206,8 +175,8 @@
               </div>
             {:else}
               <div class="actions">
-                <button class="btn primary" onclick={openAuction}>Mettre aux enchères</button>
-                <button class="btn danger" onclick={() => (confirmDiscard = true)}>Défausser · +1 pt</button>
+                <button class="btn primary" onclick={sellNative}>Mettre en vente sur le site</button>
+                <button class="btn danger" onclick={() => (confirmDiscard = true)}>Défausser, +1 pt</button>
               </div>
             {/if}
           {/if}

@@ -84,7 +84,7 @@
 .notif-title{font-weight:600;font-size:13.5px;line-height:1.3}
 .notif-msg{font-size:12.5px;color:var(--fg-soft);line-height:1.4;margin-top:2px}
 .notif-time{font-size:11px;color:var(--fg-faint);margin-top:4px}
-.view{padding:clamp(var(--s5),3.5vw,var(--s7));max-width:1340px;width:100%;margin:0 auto}
+.view{padding:clamp(var(--s5),3.5vw,var(--s7));max-width:1600px;width:100%;margin:0 auto}
 
 /* pulls ready */
 .pull-ready{min-height:64vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s5);text-align:center}
@@ -136,14 +136,11 @@
 .regen-line b{color:var(--fg);font-weight:600}
 .regen-line.err{color:#f0a3a3}
 .btn.big{font-size:16px;padding:14px 34px}
-.row{display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap;justify-content:center}
 .btn{font-family:var(--display);font-weight:600;font-size:15px;padding:13px 28px;border-radius:12px;border:1px solid var(--line2);background:transparent;color:var(--fg);transition:.15s}
 .btn:hover{border-color:var(--fg-soft)}
 .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .btn.primary:hover{filter:brightness(1.06)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
-.timer{color:var(--fg-faint);font-size:13px}
-.timer .regen{display:block;margin-top:6px;color:var(--fg-soft)}
 .session-recap{color:var(--fg-faint);font-size:12.5px;margin-top:var(--s2)}
 
 /* reveal */
@@ -226,7 +223,6 @@
 .wc.is-noimg .wc-face{background:
   radial-gradient(130% 90% at 50% 14%, color-mix(in oklab,var(--rc) 45%, transparent), transparent 64%),
   linear-gradient(180deg, color-mix(in oklab,var(--rc) 22%, #171b15), #0c0e0b)}
-.wc.is-noimg .wc-mono{color:color-mix(in oklab,var(--rc) 55%, transparent)}
 /* Brillante: the real site's resting sheen, a gold rim + a soft highlight that drifts
    slowly across the card (no constant diagonal sweep). Rarity colour is left intact. */
 .wc.is-shiny{box-shadow:inset 0 0 0 1px #e9c15a8c, 0 0 16px #e9c15a4d, 0 0 30px #00000080}
@@ -277,7 +273,6 @@
 .wc-big .wc-name{font-size:22px}
 .wc-big .wc-cat{font-size:13px;white-space:normal}
 .wc-big .wc-stats{font-size:14px;margin-top:12px;padding-top:12px}
-.wc-big .wc-mono{font-size:132px}
 .wc-big .wc-cap{padding:18px 20px 20px}
 .wc-big .wc-rtag{font-size:12px;padding:4px 10px}
 .wc-big .wc-top{top:14px;left:14px;right:14px}
@@ -326,7 +321,6 @@
 .rl-n{color:var(--fg);font-weight:700;font-variant-numeric:tabular-nums}
 .rl-sep{width:1px;height:22px;background:var(--line2);margin:0 4px}
 .rl-ico{width:14px;height:14px;flex:none}
-.rl-spark{font-size:13px;line-height:1;flex:none}
 .rl.fav.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}
 .rl.fav.on .rl-ico{fill:var(--r-l);stroke:var(--r-l)}
 .rl.shiny.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}
@@ -395,17 +389,10 @@
 .actions .btn{flex:1}
 .btn.danger{border-color:#5a2b2b;color:#f0a0a0}
 .btn.danger:hover{border-color:#f26d6d;color:#f8caca}
-.auction{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px}
-.af-label{font-size:12px;color:var(--fg-soft)}
 .af-input-row{position:relative;display:flex;align-items:center}
 .af-input{flex:1;background:var(--surface);border:1px solid var(--line2);border-radius:9px;padding:9px 40px 9px 12px;color:var(--fg);font-family:var(--body);font-size:14px;width:100%}
 .af-unit{position:absolute;right:12px;color:var(--fg-faint);font-size:13px;pointer-events:none}
-.af-hint{align-self:flex-start;background:none;border:none;color:var(--accent);font-family:var(--body);font-size:12px;font-weight:600;cursor:pointer;padding:0;margin-top:-2px}
-.af-hint:hover{text-decoration:underline;text-underline-offset:2px}
 .af-input:focus{border-color:var(--accent)}
-.af-durations{display:flex;flex-wrap:wrap;gap:6px}
-.af-durations button{background:var(--surface);border:1px solid var(--line2);color:var(--fg-soft);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer}
-.af-durations button.on{border-color:var(--accent);color:var(--accent)}
 .af-actions{display:flex;gap:8px;margin-top:4px}
 .af-actions .btn{flex:1}
 .modal-msg{font-size:12.5px;color:#f0a0a0}
@@ -444,7 +431,7 @@
 
 /* ---------------- catalog + marketplace ---------------- */
 /* unowned catalog cards read as "not yet collected"; hover previews full colour */
-.wc.is-unowned{filter:saturate(.5) brightness(.82)}
+.wc.is-unowned{filter:saturate(.72) brightness(.9)}
 .card-btn:hover .wc.is-unowned{filter:saturate(1) brightness(1)}
 /* wishlist heart marker, sits in .wc-flags */
 .wc-wish{background:rgba(0,0,0,.55);border:1px solid color-mix(in oklab,var(--r-sr) 60%,rgba(255,255,255,.3));color:var(--r-sr);font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;backdrop-filter:blur(3px)}
