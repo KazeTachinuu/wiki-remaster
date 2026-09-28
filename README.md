@@ -17,44 +17,48 @@ Auto-updates are built in. Switch back to the original site anytime with "Versio
 Svelte 5 and Vite. Build output: `wm-userscript/dist/wikimasters-app.user.js`.
 
 ## Rebuilt screens
-- Ouvrir des paquets: foil booster, open animation, reveal.
-- Ma collection: search, sort, rarity and favourite filters, market value, bulk discard.
-- Toutes les cartes: full catalog, server-side search and paging, rarity and wishlist filters.
-- Marche: live auctions browse, filters, and real-time bidding (bid history, countdown, activity feed).
-- Card detail: summary, stats, market chart.
-- Nav, wallet, notifications.
+- Ouvrir des paquets: foil booster, open animation, reveal, "Tout ouvrir" with a combined haul.
+- Ma collection: search, sort (incl. market value), rarity/favourite/shiny filters, bulk discard.
+- Toutes les cartes: the full 2.7M-card catalog, server-side search, sorts and filters.
+- Marché: browse with sorts and filters, live bidding, and your listings, bids, wins and history
+  (cancel, lower the price, finalize).
+- Card detail: summary, stats, market value and chart, sell and discard.
+- Nav, wallet, live notifications (toasts and tab badge), keyboard shortcuts (press `?`).
 
-Everything else falls back to the native site.
+Filters and sorts are remembered per screen; the collection and market values are cached
+locally so returning is instant. Everything else falls back to the native site.
 
 ## Run
 ```
 cd wm-userscript
-npm install
-npm run dev      # http://localhost:5173, mock API built in, hot reload
-npm run build    # dist/wikimasters-app.user.js
-npm run test     # unit tests (vitest)
-npm run check    # style check (no em dashes or glyph icons)
+bun install
+bun run dev        # http://localhost:5173, mock API built in, hot reload
+bun run build      # dist/wikimasters-app.user.js
+bun test src       # unit tests
+bun run check      # style check (no em dashes or glyph icons)
+bun run test:prod  # local build against the real site, in your logged-in Brave
 ```
+
+`test:prod` attaches to your running Brave over CDP (`Bun.WebView`): open `brave://inspect/#remote-debugging`, flip the toggle, then run it. Read-only by default; `--only=estimate,market` picks features, `--write=wishlist,discard` opts into real-account writes (see `scripts/prod-test.mjs`).
 
 ## Layout
 ```
 src/
-  wm/            domain layer, one interface, two adapters by hostname
-    api.js       thin HTTP client and live-session capture
-    schema.js    labels, normalizers, and API drift detection
-    session.js   pulls tally
-    index.js     adapter selection, market value cache, public exports
-    adapters/    real.js (wiki-masters.com), mock.js (dev)
-  lib/*.svelte   view layer
+  wm/              domain layer
+    api.js         HTTP client (retries reads, clean errors) and live-session capture
+    schema.js      labels, normalizers, API drift detection
+    cache.js       versioned localStorage cache
+    index.js       adapter selection, cached market values and collection
+    adapters/      real.js (wiki-masters.com), mock.js (dev: real adapter minus Supabase)
+  lib/             Svelte views and small shared pieces (Icon, SearchBox, Pager, format.js)
   App.svelte main.js app.css
-plugins/         vite-mock-api.js (dev API), no second process
-mock/catalog.js  dev card fixture
+plugins/           vite-mock-api.js: dev API mirroring the real routes and shapes
+scripts/           prod-test.mjs (real-site checks), check-style.mjs
+mock/catalog.js    dev card fixture
 ```
 
 `src/wm/index.js` picks the real API on wiki-masters.com and the mock locally, by hostname.
-The mock lives in a Vite dev plugin, so `npm run dev` serves the app and the API together.
-
-Runs against your real account. Opening packs, the collection, catalog, marketplace browse, bidding, selling, and discarding all use verified endpoints (selling is `POST /api/marketplace` with `card_id`, `base_amount`, `duration_minutes`, captured from the native form). Wishlist writes are a best guess and fail safe. Buy and cancel are not wired and stay on the native site.
+The mock serves the same routes and shapes as the live site, so dev runs the real adapter.
 
 ## Reference
-The verified API surface and per-feature integration status, captured live from the app, drive what gets built and what stays a fallback: [docs/API_REFERENCE.md](docs/API_REFERENCE.md), [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md).
+Every endpoint, request and response shape, verified live: [docs/API_REFERENCE.md](docs/API_REFERENCE.md).

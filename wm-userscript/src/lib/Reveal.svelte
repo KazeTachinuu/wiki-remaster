@@ -1,10 +1,15 @@
 <script>
   import Card from "./Card.svelte";
   import CardModal from "./CardModal.svelte";
+  import Icon from "./Icon.svelte";
   import { RNAME } from "../wm/index.js";
-  let { cards, ondone } = $props();
+  let { cards, ondone, packs = 1 } = $props();
   let i = $state(0);
-  let showAll = $state(false);
+  // Several packs at once go straight to the grid, rarest first.
+  let showAll = $state(packs > 1);
+  const RANK = { L: 5, UR: 4, SR: 3, R: 2, PC: 1, C: 0 };
+  const gridCards = $derived(packs > 1 ? [...cards].sort((a, b) => RANK[b.rarity] - RANK[a.rarity]) : cards);
+  const tally = $derived(Object.keys(RANK).reverse().map((r) => [r, cards.filter((c) => c.rarity === r).length]).filter(([, n]) => n));
   let selected = $state(null);
   let last = $derived(i === cards.length - 1);
   let newCount = $derived(cards.filter((c) => c.is_new).length);
@@ -47,12 +52,17 @@
 {#if showAll}
   <div class="reveal reveal-all">
     <div class="reveal-all-head">
-      <h2>Votre paquet</h2>
+      <h2>{packs > 1 ? `Vos ${packs} paquets` : "Votre paquet"}</h2>
       <div class="sub">{cards.length} cartes{newCount ? `, ${newCount} nouvelle${newCount > 1 ? "s" : ""}` : ""}</div>
+      {#if packs > 1}
+        <div class="haul">
+          {#each tally as [r, n]}<span class="haul-chip" style="--rc:var(--r-{r.toLowerCase()})"><b>{n}</b> {RNAME[r]}</span>{/each}
+        </div>
+      {/if}
     </div>
     <div class="reveal-grid">
-      {#each cards as c, k (k)}
-        <div class="rg-card" style="animation-delay:{k * 70}ms">
+      {#each gridCards as c, k (k)}
+        <div class="rg-card" style="animation-delay:{Math.min(k, 20) * 50}ms">
           <div class="rg-aura" data-r={c.rarity}></div>
           <button class="card-btn" onclick={() => openCard(c)} aria-label={c.title}>
             <Card card={c} isNew={c.is_new} shiny={c.is_shiny} />
@@ -85,11 +95,11 @@
     </div>
     <div class="navrow">
       <button class="arrow" onclick={() => i > 0 && (i -= 1)} disabled={i === 0} aria-label="Précédent">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+        <Icon name="prev" width={2} />
       </button>
       <button class="btn primary" onclick={() => (last ? ondone?.() : (i += 1))}>{last ? "Terminé" : "Suivant"}</button>
       <button class="arrow" onclick={() => !last && (i += 1)} disabled={last} aria-label="Suivant">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+        <Icon name="next" width={2} />
       </button>
     </div>
     <button class="reveal-skip" onclick={() => (showAll = true)}>Tout révéler</button>

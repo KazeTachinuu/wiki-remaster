@@ -1,144 +1,110 @@
 /**
- * Low-level HTTP client and live-session capture.
+ * HTTP client and live-session capture.
  *
- * Two jobs, both environment-level (no domain logic, that lives in the adapters):
- *   1. `json` / `postJson`: same-origin fetch against /api/* with the real session cookie.
- *   2. Capture: on wiki-masters.com the app talks to Supabase directly for the profile.
- *      We monkey-patch fetch at document-start to read those calls (packs, currency, is_pro)
- *      so our overlay shows a live profile on every route, not just /pulls where the app syncs.
- *
- * The captured profile and epoch counter live here because both the capture hook and the
- * real adapter's openPack mutate them; keeping the state in one module avoids a circular
- * import between api.js and adapters/real.js.
+ * `/api/*` routes are same-origin and cookie-authenticated, so we call them directly.
+ * The profile (packs, is_pro) lives in Supabase and needs the app's bearer token, so we
+ * patch fetch at document-start, read the app's own Supabase calls, and keep their
+ * credentials to replay `sync_profile_packs` ourselves on any route.
  */
 
 const isReal = /(^|\.)wiki-masters\.com$/.test(location.hostname);
 
-// --- HTTP -----------------------------------------------------------------------
-
-/** GET/POST JSON against a path, sending the session cookie. Throws on non-2xx. */
-export const json = (p, opts) =>
-  fetch(p, { credentials: "include", ...opts }).then((r) => {
-    if (!r.ok) throw new Error(p + " -> " + r.status);
-    return r.json();
+/**
+ * JSON request with the session cookie. GETs retry once on a 5xx. On non-2xx, throws an
+ * Error carrying the server's message plus `status`, `code`, `min` and the raw body as `data`.
+ */
+export async function api(path, { method = "GET", body } = {}, retried = false) {
+  const r = await fetch(path, {
+    method,
+    credentials: "include",
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body && JSON.stringify(body),
   });
-
-/** POST a JSON body and parse the JSON response. */
-export const postJson = (p, body) =>
-  json(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-
-// --- Captured session state -----------------------------------------------------
-
-let capturedProfile = null;
-let localEpoch = 0; // bumped on each local pack-open so a stale in-flight sync cannot clobber it
-let origFetch = null; // the real fetch, kept so we can call Supabase ourselves
-let syncReq = null; // { url, init } of the app's sync_profile_packs call, if we saw it
-// Captured from the app's Supabase calls so we can fetch the profile on any route
-// (the app only calls sync_profile_packs on /pulls, so /collection would otherwise show "-").
-let sbBase = null; // e.g. https://xxxx.supabase.co
-let sbHeaders = null; // { apikey, authorization, ... }
-let sbUserId = null;
-
-/** The last captured profile payload, or null before the app has synced. */
-export const getProfile = () => capturedProfile;
-
-/** Merge a patch into the captured profile and notify the UI to re-read it. */
-export function patchProfile(patch) {
-  capturedProfile = { ...(capturedProfile || {}), ...patch };
-  window.dispatchEvent(new Event("wm:profile"));
-  return capturedProfile;
+  // The backend has transient upstream 5xx: a read is safe to repeat once.
+  if (r.status >= 500 && method === "GET" && !retried) {
+    await new Promise((res) => setTimeout(res, 400));
+    return api(path, { method, body }, true);
+  }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    // Upstream outages come back as an HTML page inside `error`: never show that to the user.
+    const msg = typeof d.error === "string" && !d.error.trimStart().startsWith("<") ? d.error : `Erreur serveur (${r.status}), réessayez.`;
+    throw Object.assign(new Error(msg), { status: r.status, code: d.code, min: d.min, data: d });
+  }
+  return d;
 }
 
-/** Invalidate any profile sync already in flight (call right after a local pack-open). */
-export const bumpEpoch = () => { localEpoch++; };
+// --- Captured session ------------------------------------------------------------
 
-/** Our own user id, captured from the app's Supabase calls (to tell if we are top bidder). */
-export const getUserId = () => sbUserId;
+let profile = null;
+let epoch = 0; // bumped on each local pack-open so an older in-flight sync cannot roll it back
+let origFetch = null;
+let sb = null; // { base, headers, userId } from the app's Supabase traffic
 
-// --- Capture --------------------------------------------------------------------
+export const getProfile = () => profile;
+export const getUserId = () => sb?.userId ?? null;
+export const bumpEpoch = () => { epoch++; };
 
-function headerVal(init, name) {
-  const h = init && init.headers;
+/** Merge into the captured profile and tell the UI to re-read it. */
+export function patchProfile(patch) {
+  profile = { ...profile, ...patch };
+  window.dispatchEvent(new Event("wm:profile"));
+  return profile;
+}
+
+/** Replay the app's `sync_profile_packs` with its captured credentials. */
+export async function refreshProfile() {
+  if (!sb?.headers || !sb.userId) return null;
+  try {
+    const r = await origFetch.call(window, `${sb.base}/rest/v1/rpc/sync_profile_packs`, {
+      method: "POST",
+      headers: { ...sb.headers, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: sb.userId }),
+    });
+    return patchProfile(await r.json());
+  } catch {
+    return null;
+  }
+}
+
+function header(init, name) {
+  const h = init?.headers;
   if (!h) return null;
   if (typeof h.get === "function") return h.get(name);
-  if (Array.isArray(h)) { const f = h.find(([k]) => String(k).toLowerCase() === name); return f ? f[1] : null; }
-  for (const k in h) if (String(k).toLowerCase() === name) return h[k];
-  return null;
+  const entries = Array.isArray(h) ? h : Object.entries(h);
+  return entries.find(([k]) => k.toLowerCase() === name)?.[1] ?? null;
 }
 
-/**
- * Fetch the live profile ourselves via Supabase, using credentials captured from the app.
- * Works on every route, so packs/currency never stay stuck on "-".
- */
-export async function refreshProfile() {
-  if (!origFetch) return null;
-  try {
-    let res;
-    if (sbBase && sbHeaders && sbUserId) {
-      res = await origFetch.call(window, `${sbBase}/rest/v1/rpc/sync_profile_packs`, {
-        method: "POST",
-        headers: { ...sbHeaders, "content-type": "application/json" },
-        body: JSON.stringify({ user_id: sbUserId }),
-      });
-    } else if (syncReq) {
-      res = await origFetch.call(window, syncReq.url, syncReq.init);
-    } else {
-      return null;
-    }
-    const j = await res.json();
-    if (j && typeof j === "object") return patchProfile(j);
-  } catch {}
-  return null;
-}
+// Read a response body without consuming the app's copy.
+const peek = (ret, fn) => ret.then((res) => res.clone().json()).then(fn).catch(() => {});
 
-/** Patch window.fetch (document-start) to capture the app's own Supabase profile calls. */
+/** Patch window.fetch (document-start) to capture the app's Supabase profile calls. */
 export function initCapture() {
-  if (!isReal || typeof window === "undefined") return;
-  const orig = window.fetch;
-  origFetch = orig;
+  if (!isReal) return;
+  origFetch = window.fetch;
   window.fetch = function (...args) {
-    const ret = orig.apply(window, args);
-    try {
-      const url = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
-      // Capture Supabase base + auth headers + our user id from any /rest/v1 call, so we
-      // can fetch the profile ourselves on routes where the app never syncs.
-      if (url && url.includes(".supabase.co/rest/v1/") && args[1]) {
-        try {
-          if (!sbBase) sbBase = new URL(url).origin;
-          const apikey = headerVal(args[1], "apikey");
-          const auth = headerVal(args[1], "authorization");
-          if (apikey && auth) sbHeaders = { apikey, authorization: auth };
-          const m = url.match(/(?:^|[?&])(?:id|user_id)=eq\.([0-9a-f-]{36})/i);
-          if (m) sbUserId = m[1];
-        } catch {}
-      }
-      if (url && url.includes("/rpc/sync_profile_packs")) {
-        // Remember the request so we can replay it on demand.
-        if (typeof args[0] === "string" && args[1]) syncReq = { url: args[0], init: args[1] };
-        const issuedEpoch = localEpoch;
-        ret
-          .then((res) =>
-            res.clone().json().then((j) => {
-              // Ignore a sync that was already in flight when we opened a pack:
-              // its data predates our local decrement and would roll it back.
-              if (localEpoch !== issuedEpoch) return;
-              patchProfile(j);
-            }).catch(() => {})
-          )
-          .catch(() => {});
-      }
-      // The app fetches is_pro from Supabase directly; capture it for the profile header.
-      if (url && url.includes("/rest/v1/profiles")) {
-        ret
-          .then((res) =>
-            res.clone().json().then((j) => {
-              const row = Array.isArray(j) ? j[0] : j;
-              if (row && typeof row.is_pro !== "undefined") patchProfile({ is_pro: row.is_pro });
-            }).catch(() => {})
-          )
-          .catch(() => {});
-      }
-    } catch {}
+    const ret = origFetch.apply(window, args);
+    const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
+    if (!url?.includes(".supabase.co/rest/v1/")) return ret;
+
+    const apikey = header(args[1], "apikey");
+    const authorization = header(args[1], "authorization");
+    const userId = url.match(/[?&](?:id|user_id)=eq\.([0-9a-f-]{36})/i)?.[1];
+    sb = {
+      base: new URL(url).origin,
+      headers: apikey && authorization ? { apikey, authorization } : sb?.headers,
+      userId: userId || sb?.userId,
+    };
+
+    if (url.includes("/rpc/sync_profile_packs")) {
+      const issued = epoch;
+      peek(ret, (j) => { if (epoch === issued) patchProfile(j); });
+    } else if (url.includes("/rest/v1/profiles")) {
+      peek(ret, (j) => {
+        const row = Array.isArray(j) ? j[0] : j;
+        if (row?.is_pro !== undefined) patchProfile({ is_pro: row.is_pro });
+      });
+    }
     return ret;
   };
 }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.5.0
+// @version      0.6.0
 // @author       Hugo Sibony
 // @description  Redesigned client for wiki-masters.com. Uses the real API and session.
 // @homepage     https://github.com/KazeTachinuu/wiki-remaster
@@ -15,6 +15,16 @@
 
 (function() {
 	"use strict";
+	var __defProp = Object.defineProperty;
+	var __exportAll = (all, no_symbols) => {
+		let target = {};
+		for (var name in all) __defProp(target, name, {
+			get: all[name],
+			enumerable: true
+		});
+		if (!no_symbols) __defProp(target, Symbol.toStringTag, { value: "Module" });
+		return target;
+	};
 	var is_array = Array.isArray;
 	var index_of = Array.prototype.indexOf;
 	var includes = Array.prototype.includes;
@@ -1541,6 +1551,13 @@
 	}
 	function create_user_effect(fn) {
 		return create_effect(4 | USER_EFFECT, fn);
+	}
+	function effect_root(fn) {
+		Batch.ensure();
+		const effect = create_effect(64 | EFFECT_PRESERVED, fn);
+		return () => {
+			destroy_effect(effect);
+		};
 	}
 	function component_root(fn) {
 		Batch.ensure();
@@ -3229,13 +3246,6 @@
 			else anchor.before(node);
 		});
 	}
-	function snippet(node, get_snippet, ...args) {
-		var branches = new BranchManager(node);
-		block(() => {
-			const snippet = get_snippet() ?? null;
-			branches.ensure(snippet, snippet && ((anchor) => snippet(anchor, ...args)));
-		}, EFFECT_TRANSPARENT);
-	}
 	function element(node, get_tag, is_svg, render_fn, get_namespace, location) {
 		let was_hydrating = hydrating;
 		if (hydrating) hydrate_next();
@@ -3941,104 +3951,99 @@
 		});
 	}
 	if (typeof window !== "undefined") ((window.__svelte ??= {}).v ??= new Set()).add("5");
-	var isReal$1 = /(^|\.)wiki-masters\.com$/.test(location.hostname);
-	var json = (p, opts) => fetch(p, {
-		credentials: "include",
-		...opts
-	}).then((r) => {
-		if (!r.ok) throw new Error(p + " -> " + r.status);
-		return r.json();
-	});
-	var postJson = (p, body) => json(p, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body)
-	});
-	var capturedProfile = null;
-	var localEpoch = 0;
+	var isReal = /(^|\.)wiki-masters\.com$/.test(location.hostname);
+	async function api(path, { method = "GET", body } = {}, retried = false) {
+		const r = await fetch(path, {
+			method,
+			credentials: "include",
+			headers: body ? { "content-type": "application/json" } : void 0,
+			body: body && JSON.stringify(body)
+		});
+		if (r.status >= 500 && method === "GET" && !retried) {
+			await new Promise((res) => setTimeout(res, 400));
+			return api(path, {
+				method,
+				body
+			}, true);
+		}
+		const d = await r.json().catch(() => ({}));
+		if (!r.ok) {
+			const msg = typeof d.error === "string" && !d.error.trimStart().startsWith("<") ? d.error : `Erreur serveur (${r.status}), réessayez.`;
+			throw Object.assign(new Error(msg), {
+				status: r.status,
+				code: d.code,
+				min: d.min,
+				data: d
+			});
+		}
+		return d;
+	}
+	var profile = null;
+	var epoch = 0;
 	var origFetch = null;
-	var syncReq = null;
-	var sbBase = null;
-	var sbHeaders = null;
-	var sbUserId = null;
-	var getProfile = () => capturedProfile;
+	var sb = null;
+	var getProfile = () => profile;
+	var getUserId = () => sb?.userId ?? null;
+	var bumpEpoch = () => {
+		epoch++;
+	};
 	function patchProfile(patch) {
-		capturedProfile = {
-			...capturedProfile || {},
+		profile = {
+			...profile,
 			...patch
 		};
 		window.dispatchEvent(new Event("wm:profile"));
-		return capturedProfile;
-	}
-	var bumpEpoch = () => {
-		localEpoch++;
-	};
-	var getUserId = () => sbUserId;
-	function headerVal(init, name) {
-		const h = init && init.headers;
-		if (!h) return null;
-		if (typeof h.get === "function") return h.get(name);
-		if (Array.isArray(h)) {
-			const f = h.find(([k]) => String(k).toLowerCase() === name);
-			return f ? f[1] : null;
-		}
-		for (const k in h) if (String(k).toLowerCase() === name) return h[k];
-		return null;
+		return profile;
 	}
 	async function refreshProfile() {
-		if (!origFetch) return null;
+		if (!sb?.headers || !sb.userId) return null;
 		try {
-			let res;
-			if (sbBase && sbHeaders && sbUserId) res = await origFetch.call(window, `${sbBase}/rest/v1/rpc/sync_profile_packs`, {
+			return patchProfile(await (await origFetch.call(window, `${sb.base}/rest/v1/rpc/sync_profile_packs`, {
 				method: "POST",
 				headers: {
-					...sbHeaders,
+					...sb.headers,
 					"content-type": "application/json"
 				},
-				body: JSON.stringify({ user_id: sbUserId })
-			});
-			else if (syncReq) res = await origFetch.call(window, syncReq.url, syncReq.init);
-			else return null;
-			const j = await res.json();
-			if (j && typeof j === "object") return patchProfile(j);
-		} catch {}
-		return null;
+				body: JSON.stringify({ user_id: sb.userId })
+			})).json());
+		} catch {
+			return null;
+		}
 	}
+	function header(init, name) {
+		const h = init?.headers;
+		if (!h) return null;
+		if (typeof h.get === "function") return h.get(name);
+		return (Array.isArray(h) ? h : Object.entries(h)).find(([k]) => k.toLowerCase() === name)?.[1] ?? null;
+	}
+	var peek = (ret, fn) => ret.then((res) => res.clone().json()).then(fn).catch(() => {});
 	function initCapture() {
-		if (!isReal$1 || typeof window === "undefined") return;
-		const orig = window.fetch;
-		origFetch = orig;
+		if (!isReal) return;
+		origFetch = window.fetch;
 		window.fetch = function(...args) {
-			const ret = orig.apply(window, args);
-			try {
-				const url = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
-				if (url && url.includes(".supabase.co/rest/v1/") && args[1]) try {
-					if (!sbBase) sbBase = new URL(url).origin;
-					const apikey = headerVal(args[1], "apikey");
-					const auth = headerVal(args[1], "authorization");
-					if (apikey && auth) sbHeaders = {
-						apikey,
-						authorization: auth
-					};
-					const m = url.match(/(?:^|[?&])(?:id|user_id)=eq\.([0-9a-f-]{36})/i);
-					if (m) sbUserId = m[1];
-				} catch {}
-				if (url && url.includes("/rpc/sync_profile_packs")) {
-					if (typeof args[0] === "string" && args[1]) syncReq = {
-						url: args[0],
-						init: args[1]
-					};
-					const issuedEpoch = localEpoch;
-					ret.then((res) => res.clone().json().then((j) => {
-						if (localEpoch !== issuedEpoch) return;
-						patchProfile(j);
-					}).catch(() => {})).catch(() => {});
-				}
-				if (url && url.includes("/rest/v1/profiles")) ret.then((res) => res.clone().json().then((j) => {
-					const row = Array.isArray(j) ? j[0] : j;
-					if (row && typeof row.is_pro !== "undefined") patchProfile({ is_pro: row.is_pro });
-				}).catch(() => {})).catch(() => {});
-			} catch {}
+			const ret = origFetch.apply(window, args);
+			const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
+			if (!url?.includes(".supabase.co/rest/v1/")) return ret;
+			const apikey = header(args[1], "apikey");
+			const authorization = header(args[1], "authorization");
+			const userId = url.match(/[?&](?:id|user_id)=eq\.([0-9a-f-]{36})/i)?.[1];
+			sb = {
+				base: new URL(url).origin,
+				headers: apikey && authorization ? {
+					apikey,
+					authorization
+				} : sb?.headers,
+				userId: userId || sb?.userId
+			};
+			if (url.includes("/rpc/sync_profile_packs")) {
+				const issued = epoch;
+				peek(ret, (j) => {
+					if (epoch === issued) patchProfile(j);
+				});
+			} else if (url.includes("/rest/v1/profiles")) peek(ret, (j) => {
+				const row = Array.isArray(j) ? j[0] : j;
+				if (row?.is_pro !== void 0) patchProfile({ is_pro: row.is_pro });
+			});
 			return ret;
 		};
 	}
@@ -4050,6 +4055,15 @@
 		UR: "Ultra Rare",
 		L: "Légendaire"
 	};
+	var RARITIES = [
+		"C",
+		"PC",
+		"R",
+		"SR",
+		"UR",
+		"L"
+	];
+	var RARITIES_DESC = [...RARITIES].reverse();
 	var NTYPE = {
 		marketplace_wishlist_listed: "Liste de souhaits",
 		marketplace_auction_sold: "Carte vendue",
@@ -4063,10 +4077,11 @@
 	};
 	function notifHref(n) {
 		const d = n.data || {};
-		if (/^marketplace_/.test(n.type) && (d.auction_id || n.auction_id)) return `/marketplace/${d.auction_id || n.auction_id}`;
-		if (n.type === "battle_invite" && d.battle_id) return `/battle`;
-		if (n.type === "friend_request") return `/friends`;
-		if (n.type === "guild_invite") return `/guild`;
+		const auctionId = d.auction_id || n.auction_id;
+		if (/^marketplace_/.test(n.type) && auctionId) return `/marketplace/${auctionId}`;
+		if (n.type === "battle_invite" && d.battle_id) return "/battle";
+		if (n.type === "friend_request") return "/friends";
+		if (n.type === "guild_invite") return "/guild";
 		return null;
 	}
 	function normSearch(s) {
@@ -4106,8 +4121,13 @@
 			status: a.status || "active",
 			endAt: a.end_at || null,
 			createdAt: a.created_at || null,
+			settledAt: a.settled_at || null,
+			repricedAt: a.base_repriced_at || null,
 			seller: a.seller?.username || null,
 			currentBidderId: a.current_bidder_id ?? null,
+			bidder: a.current_bidder?.username || null,
+			winnerId: a.winner_id ?? null,
+			winner: a.winner?.username || null,
 			owned: !!a.owned
 		};
 	}
@@ -4131,475 +4151,271 @@
 		};
 	}
 	function countsFrom(items) {
-		const counts = {
-			C: 0,
-			PC: 0,
-			R: 0,
-			SR: 0,
-			UR: 0,
-			L: 0
-		};
-		for (const it of items) if (counts[it.card.rarity] != null) counts[it.card.rarity] += 1;
+		const counts = Object.fromEntries(RARITIES.map((r) => [r, 0]));
+		for (const it of items) if (it.card.rarity in counts) counts[it.card.rarity] += 1;
 		return counts;
 	}
 	function validateCards(endpoint, cards) {
 		if (!cards.length) return true;
 		const broken = cards.filter((c) => c.id == null && !c.rarity).length;
-		const rate = broken / cards.length;
-		if (rate > .5) {
-			console.warn(`[wiki-remaster] ${endpoint}: ${Math.round(rate * 100)}% of cards failed to normalize (${broken}/${cards.length}). The API shape may have changed. Check src/wm/schema.js.`);
-			return false;
-		}
-		return true;
+		if (broken / cards.length <= .5) return true;
+		console.warn(`[wiki-remaster] ${endpoint}: ${broken}/${cards.length} cards failed to normalize. The API shape may have changed, see src/wm/schema.js.`);
+		return false;
 	}
-	var MockData = {
-		isReal: false,
-		canReset: true,
-		canAct: true,
-		userId: "me",
-		async profile() {
-			const p = await json("/api/profile");
+	var PAGE = 50;
+	var PACK_CAP = 10;
+	var REGEN_MS = 6e5;
+	var ownedIds = null;
+	var qs = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== "" && v !== false)).toString();
+	function mapCollection(rows) {
+		return rows.map((it) => {
+			const card = nCard(it.card);
 			return {
-				username: p.username,
-				packs_remaining: p.packs_remaining,
-				pack_cap: p.pack_cap,
-				currency: p.currency_balance,
-				next_regen_seconds: p.next_regen_seconds,
+				id: it.id,
+				card,
+				count: it.count ?? 1,
+				is_shiny: !!it.is_shiny,
+				starred: !!it.starred,
+				obtained_at: it.obtained_at || null,
+				_s: normSearch(card.title + " " + card.category)
+			};
+		});
+	}
+	var RealData = {
+		isReal: true,
+		canReset: false,
+		get userId() {
+			return getUserId();
+		},
+		async profile() {
+			if (getProfile()?.packs_remaining == null) await refreshProfile();
+			const p = getProfile() || {};
+			const balance = await api("/api/wikibidous").then((d) => d.balance, () => p.wikibidous_balance ?? null);
+			const packs = p.packs_remaining ?? null;
+			const last = Date.parse(p.packs_last_regen_at || "");
+			const regen = packs != null && packs < PACK_CAP && !isNaN(last);
+			return {
+				username: p.username || null,
+				packs_remaining: packs,
+				pack_cap: PACK_CAP,
+				currency: balance,
+				next_regen_seconds: regen ? Math.max(0, Math.round((last + REGEN_MS - Date.now()) / 1e3)) : null,
 				is_pro: !!p.is_pro
 			};
 		},
 		async openPack() {
-			const d = await json("/api/packs/open", { method: "POST" });
-			if (d.error) throw new Error(d.error);
-			return {
-				cards: d.cards.map((c) => ({
-					...nCard(c),
-					is_new: c.is_new,
-					is_shiny: c.is_shiny
-				})),
-				packs_remaining: d.packs_remaining,
-				currency: d.currency_balance
-			};
-		},
-		async collection(opts = {}) {
-			const d = await json("/api/my-collection");
-			const items = d.collection.map((it) => {
-				const card = nCard(it.card);
-				return {
-					id: it.id,
-					card,
-					count: it.count,
-					is_shiny: it.is_shiny,
-					starred: it.starred,
-					obtained_at: it.obtained_at || null,
-					_s: normSearch(card.title + " " + (card.category || ""))
-				};
-			});
-			const stats = {
-				...d.stats,
-				loading: false
-			};
-			opts.onPartial?.({
-				items: items.slice(),
-				stats
-			});
-			return {
-				items,
-				stats
-			};
-		},
-		async cards() {
-			return { cards: (await json("/api/cards")).cards.map(nCard) };
-		},
-		async catalog(opts = {}) {
-			const rarity = opts.rarity ? `&rarity=${opts.rarity}` : "";
-			const wishlist = opts.wishlist ? "&wishlist=1" : "";
-			const d = await json(`/api/cards?page=${opts.page ?? 0}&sort=${opts.sort || "rarity"}&q=${encodeURIComponent(opts.q || "")}${rarity}${wishlist}`);
-			const owned = new Set(d.ownedCardIds || []);
-			const wish = new Set(d.wishlistCardIds || []);
-			const cards = (d.cards || []).map((c) => ({
-				...nCard(c),
-				owned: owned.has(c.id),
-				wishlisted: wish.has(c.id)
-			}));
-			validateCards("catalog", cards);
-			return {
-				cards,
-				total: d.total ?? null,
-				hasMore: !!d.searchHasMore,
-				rarityCounts: d.rarityCounts || null
-			};
-		},
-		async marketplace(opts = {}) {
-			const rarity = opts.rarity ? `&rarity=${opts.rarity}` : "";
-			const d = await json(`/api/marketplace?page=${opts.page ?? 0}&q=${encodeURIComponent(opts.q || "")}${rarity}`);
-			return {
-				auctions: (d.auctions || []).map(nAuction),
-				page: d.page ?? 0,
-				hasMore: !!d.hasMore
-			};
-		},
-		async marketplaceMine() {
-			try {
-				return await json("/api/marketplace/mine");
-			} catch {
-				return {
-					sellingCount: 0,
-					maxConcurrentAuctions: 5
-				};
-			}
-		},
-		async createAuction(item, { price, durationHours } = {}) {
-			const r = await fetch(`/api/marketplace`, {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({
-					card_id: item.card?.id,
-					base_amount: price,
-					duration_minutes: Math.round((durationHours || 0) * 60)
-				})
-			});
-			const d = await r.json().catch(() => ({}));
-			if (!r.ok) {
-				const e = new Error(d.error || "Mise en vente refusée.");
-				e.code = d.code;
-				throw e;
-			}
-			return d;
-		},
-		async placeBid(auctionId, amount) {
-			const r = await fetch(`/api/marketplace/${auctionId}/bid`, {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ amount })
-			});
-			const d = await r.json().catch(() => ({}));
-			if (!r.ok) {
-				const e = new Error(d.error || "Enchère refusée.");
-				e.code = d.code;
-				e.min = d.min;
-				throw e;
-			}
-			return d;
-		},
-		async auction(id) {
-			const d = await json(`/api/marketplace/${id}`);
-			return {
-				...nAuction(d.auction || {}),
-				bids: (d.bids || []).map(nBid)
-			};
-		},
-		wishlistAdd: (cardId) => postJson("/api/wishlist", { card_id: cardId }),
-		wishlistRemove: (cardId) => postJson("/api/unwishlist", { card_id: cardId }),
-		async notifications() {
-			try {
-				return ((await json("/api/notifications")).notifications || []).map(nNotification);
-			} catch {
-				return [];
-			}
-		},
-		reset: () => json("/api/reset", { method: "POST" }),
-		discard: (ucId) => postJson("/api/discard", { user_card_id: ucId }),
-		async marketStats(card) {
-			const base = {
-				C: 8,
-				PC: 20,
-				R: 45,
-				SR: 110,
-				UR: 260,
-				L: 600
-			}[card.rarity] || 20;
-			let s = [...String(card.id)].reduce((a, c) => a * 31 + c.charCodeAt(0) >>> 0, 7);
-			const next = () => {
-				s = s * 1103515245 + 12345 >>> 0;
-				return s / 4294967296;
-			};
-			const count = 3 + Math.floor(next() * 6);
-			const sold = Array.from({ length: count }, () => Math.round(base * (.7 + next() * .8)));
-			const mean = (a) => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
-			const now = Date.now();
-			const soldSeries = sold.map((price, i) => ({
-				price,
-				t: now - (count - i) * 864e5
-			}));
-			return {
-				soldCount: sold.length,
-				soldAvg: mean(sold),
-				soldMin: Math.min(...sold),
-				soldMax: Math.max(...sold),
-				soldSeries,
-				activeCount: 1 + Math.floor(next() * 3),
-				lowestAsk: Math.round(base * .9),
-				isPro: true
-			};
-		},
-		async specialAvailable() {
-			return false;
-		}
-	};
-	var ownedIds = new Set();
-	var ownedLoaded = false;
-	var RealData = {
-		isReal: true,
-		canReset: false,
-		canAct: true,
-		async profile() {
-			let balance = null;
-			try {
-				balance = (await json("/api/wikibidous")).balance;
-			} catch {}
-			const cap = getProfile() || {};
-			const packs = cap.packs_remaining ?? null;
-			let nextRegen = null;
-			if (packs != null && packs < 10 && cap.packs_last_regen_at) {
-				const last = Date.parse(cap.packs_last_regen_at);
-				if (!isNaN(last)) nextRegen = Math.max(0, Math.round((last + 6e5 - Date.now()) / 1e3));
-			}
-			return {
-				username: cap.username || null,
-				packs_remaining: packs,
-				pack_cap: 10,
-				currency: balance ?? cap.wikibidous_balance ?? null,
-				next_regen_seconds: nextRegen,
-				is_pro: !!cap.is_pro
-			};
-		},
-		async openPack() {
-			if (!ownedLoaded) try {
-				await this.collection();
-			} catch {}
-			const r = await fetch("/api/packs/open", {
-				method: "POST",
-				credentials: "include"
-			});
-			let d = {};
-			try {
-				d = await r.json();
-			} catch {}
-			if (!r.ok || d.error) {
-				if (d.packs_remaining != null) {
-					bumpEpoch();
-					patchProfile({ packs_remaining: d.packs_remaining });
-				}
-				if (d.human_verification_required) {
-					const e = new Error("Vérification humaine requise");
-					e.code = "human_verification";
-					throw e;
-				}
-				throw new Error(d.error || "Ouverture du paquet impossible.");
-			}
-			const cards = (d.cards || []).map((c) => {
-				const isNew = ownedLoaded ? !ownedIds.has(c.id) : false;
-				ownedIds.add(c.id);
-				return {
-					...nCard(c),
-					is_new: isNew,
-					is_shiny: !!c.is_shiny
-				};
-			});
-			if (d.packs_remaining != null) {
-				bumpEpoch();
-				patchProfile({ packs_remaining: d.packs_remaining });
-			}
-			let currency = null;
-			try {
-				currency = (await json("/api/wikibidous")).balance;
-			} catch {}
-			return {
-				cards,
-				packs_remaining: d.packs_remaining,
-				currency: currency ?? getProfile()?.wikibidous_balance ?? null
-			};
-		},
-		async collection(opts = {}) {
-			const map = (arr) => arr.map((it) => {
-				const card = nCard(it.card);
-				return {
-					id: it.id,
-					card,
-					count: it.count ?? 1,
-					is_shiny: !!it.is_shiny,
-					starred: !!it.starred,
-					obtained_at: it.obtained_at || null,
-					_s: normSearch(card.title + " " + (card.category || ""))
-				};
-			});
-			const first = await json("/api/my-collection?sort=rarity&page=0&stats=1");
-			const total = first.total ?? null;
-			const realCounts = first.rarityCounts || null;
-			let items = map(first.collection || []);
-			const statsOf = (loading) => ({
-				unique: total ?? items.length,
-				total: items.reduce((n, it) => n + it.count, 0),
-				catalog: null,
-				counts: realCounts || countsFrom(items),
-				loading
-			});
-			if (total && total > items.length) {
-				opts.onPartial?.({
-					items: items.slice(),
-					stats: statsOf(true)
-				});
-				const pages = Math.ceil(total / 50);
-				await Promise.all(Array.from({ length: pages - 1 }, (_, i) => json(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`).then((d) => {
-					items = items.concat(map(d.collection || []));
-					opts.onPartial?.({
-						items: items.slice(),
-						stats: statsOf(true)
-					});
-				}).catch(() => {})));
-			}
-			ownedIds = new Set(items.map((it) => it.card.id));
-			ownedLoaded = true;
-			return {
-				items,
-				stats: statsOf(false)
-			};
-		},
-		async cards() {
-			const d = await json("/api/cards?page=0&sort=rarity");
-			return { cards: (d.cards || d.items || []).map(nCard) };
-		},
-		async catalog(opts = {}) {
-			const d = await json(`/api/cards?page=${opts.page ?? 0}&sort=${opts.sort || "rarity"}${opts.q ? `&q=${encodeURIComponent(opts.q)}` : ""}${opts.rarity ? `&rarity=${opts.rarity}` : ""}${opts.wishlist ? "&wishlist=1" : ""}`);
-			const owned = new Set(d.ownedCardIds || []);
-			const wish = new Set(d.wishlistCardIds || []);
-			const friends = d.friendOwners || {};
-			const cards = (d.cards || []).map((c) => ({
-				...nCard(c),
-				owned: owned.has(c.id),
-				wishlisted: wish.has(c.id),
-				friendCount: Array.isArray(friends[c.id]) ? friends[c.id].length : 0
-			}));
-			validateCards("catalog", cards);
-			return {
-				cards,
-				total: d.total ?? null,
-				hasMore: !!d.searchHasMore,
-				rarityCounts: d.rarityCounts || null
-			};
-		},
-		async marketplace(opts = {}) {
-			const page = opts.page ?? 0;
-			const d = await json(`/api/marketplace?page=${page}${opts.q ? `&q=${encodeURIComponent(opts.q)}` : ""}${opts.rarity ? `&rarity=${opts.rarity}` : ""}`);
-			return {
-				auctions: (d.auctions || []).map(nAuction),
-				page: d.page ?? page,
-				hasMore: !!d.hasMore
-			};
-		},
-		async marketplaceMine() {
-			try {
-				return await json("/api/marketplace/mine");
-			} catch {
-				return {
-					sellingCount: 0,
-					maxConcurrentAuctions: 5
-				};
-			}
-		},
-		async createAuction(item, { price, durationHours } = {}) {
-			const r = await fetch(`/api/marketplace`, {
-				method: "POST",
-				credentials: "include",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({
-					card_id: item.card?.id,
-					base_amount: price,
-					duration_minutes: Math.round((durationHours || 0) * 60)
-				})
-			});
-			const d = await r.json().catch(() => ({}));
-			if (!r.ok) {
-				const e = new Error(d.error || "Mise en vente refusée.");
-				e.code = d.code;
-				throw e;
-			}
-			return d;
-		},
-		async placeBid(auctionId, amount) {
-			const r = await fetch(`/api/marketplace/${auctionId}/bid`, {
-				method: "POST",
-				credentials: "include",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ amount })
-			});
-			const d = await r.json().catch(() => ({}));
-			if (!r.ok) {
-				const e = new Error(d.error || "Enchère refusée.");
-				e.code = d.code;
-				e.min = d.min;
-				throw e;
-			}
-			return d;
-		},
-		async auction(id) {
-			const d = await json(`/api/marketplace/${id}`);
-			return {
-				...nAuction(d.auction || {}),
-				bids: (d.bids || []).map(nBid)
-			};
-		},
-		get userId() {
-			return getUserId();
-		},
-		wishlistAdd: (cardId) => postJson(`/api/cards/${cardId}/wishlist`, {}),
-		wishlistRemove: (cardId) => json(`/api/cards/${cardId}/wishlist`, { method: "DELETE" }),
-		async notifications() {
-			try {
-				return ((await json("/api/notifications")).notifications || []).map(nNotification);
-			} catch {
-				return [];
-			}
-		},
-		discard: (ucId) => postJson(`/api/user-cards/${ucId}/discard`, {}),
-		async marketStats(card) {
+			ownedIds ??= await this.collection().then((c) => new Set(c.items.map((it) => it.card.id)), () => null);
 			let d;
 			try {
-				const r = await fetch(`/api/marketplace/cards/${card.id}/sales?scope=summary`, { credentials: "include" });
-				d = await r.json().catch(() => ({}));
-				if (!r.ok) return null;
-			} catch {
-				return null;
+				d = await api("/api/packs/open", { method: "POST" });
+			} catch (e) {
+				if (e.data?.packs_remaining != null) {
+					bumpEpoch();
+					patchProfile({ packs_remaining: e.data.packs_remaining });
+				}
+				if (e.data?.human_verification_required) e.code = "human_verification";
+				throw e;
 			}
-			const avg = d.summary?.[card.rarity]?.average ?? null;
+			bumpEpoch();
+			patchProfile({ packs_remaining: d.packs_remaining });
+			return {
+				cards: (d.cards || []).map((c) => {
+					const is_new = !!ownedIds && !ownedIds.has(c.id);
+					ownedIds?.add(c.id);
+					return {
+						...nCard(c),
+						is_new,
+						is_shiny: !!c.is_shiny
+					};
+				}),
+				packs_remaining: d.packs_remaining
+			};
+		},
+		async collection({ onPartial } = {}) {
+			const first = await api("/api/my-collection?sort=rarity&page=0&stats=1");
+			const rows = new Map();
+			const add = (list) => {
+				for (const it of mapCollection(list || [])) rows.set(it.id, it);
+			};
+			add(first.collection);
+			const items = () => [...rows.values()];
+			const total = first.total ?? rows.size;
+			const stats = (loading) => ({
+				unique: total,
+				total: items().reduce((n, it) => n + it.count, 0),
+				counts: first.rarityCounts || countsFrom(items()),
+				loading
+			});
+			const pages = Math.ceil(total / PAGE);
+			if (pages > 1) {
+				onPartial?.({
+					items: items(),
+					stats: stats(true)
+				});
+				await Promise.all(Array.from({ length: pages - 1 }, (_, i) => api(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`).then((d) => {
+					add(d.collection);
+					onPartial?.({
+						items: items(),
+						stats: stats(true)
+					});
+				})));
+			}
+			ownedIds = new Set(items().map((it) => it.card.id));
+			return {
+				items: items(),
+				stats: stats(false)
+			};
+		},
+		async catalog({ page = 0, sort = "rarity", q, rarity, wishlist } = {}) {
+			const d = await api(`/api/cards?${qs({
+				page,
+				sort,
+				q,
+				rarity,
+				wishlist: wishlist && 1
+			})}`);
+			const owned = new Set(d.ownedCardIds);
+			const wished = new Set(d.wishlistCardIds);
+			const cards = (d.cards || []).map((c) => ({
+				...nCard(c),
+				owned: owned.has(c.id),
+				wishlisted: wished.has(c.id)
+			}));
+			validateCards("catalog", cards);
+			return {
+				cards,
+				total: d.total ?? null,
+				hasMore: !!d.searchHasMore,
+				rarityCounts: d.rarityCounts || null
+			};
+		},
+		async marketplace({ page = 0, sort = "recent", q, rarity } = {}) {
+			const d = await api(`/api/marketplace?${qs({
+				page: page + 1,
+				limit: PAGE,
+				sort,
+				q,
+				rarity
+			})}`);
+			return {
+				auctions: (d.auctions || []).map(nAuction),
+				hasMore: !!d.hasMore
+			};
+		},
+		async myMarket() {
+			const d = await api("/api/marketplace?page=1&limit=1&mine=1");
+			const list = (k) => (d[k] || []).map(nAuction);
+			return {
+				selling: list("selling"),
+				bidding: list("bidding"),
+				won: list("won"),
+				history: list("history"),
+				max: d.maxConcurrentAuctions ?? 5
+			};
+		},
+		async auction(id) {
+			const d = await api(`/api/marketplace/${id}`);
+			return {
+				...nAuction(d.auction),
+				bids: (d.bids || []).map(nBid)
+			};
+		},
+		createAuction: (item, { price, durationHours }) => api("/api/marketplace", {
+			method: "POST",
+			body: {
+				card_id: item.id,
+				base_amount: price,
+				duration_minutes: Math.round(durationHours * 60)
+			}
+		}),
+		placeBid: (id, amount) => api(`/api/marketplace/${id}/bid`, {
+			method: "POST",
+			body: { amount }
+		}),
+		reprice: (id, amount) => api(`/api/marketplace/${id}/reprice`, {
+			method: "POST",
+			body: { new_base_amount: amount }
+		}),
+		cancelAuction: (id) => api(`/api/marketplace/${id}`, { method: "DELETE" }),
+		settle: (id) => api(`/api/marketplace/${id}/settle`, { method: "POST" }),
+		async marketStats(card) {
+			const d = await api(`/api/marketplace/cards/${card.id}/sales?scope=summary`);
 			const stats = {
-				soldAvg: avg,
+				soldAvg: d.summary?.[card.rarity]?.average ?? null,
+				soldSeries: [],
 				soldCount: 0,
 				soldMin: null,
 				soldMax: null,
-				soldSeries: [],
-				activeCount: 0,
-				lowestAsk: null,
 				isPro: !!d.isPro
 			};
-			if (avg == null && !d.isPro) return null;
 			if (!d.isPro) return stats;
-			try {
-				const r2 = await fetch(`/api/marketplace/cards/${card.id}/sales`, { credentials: "include" });
-				const d2 = await r2.json().catch(() => ({}));
-				const priced = (r2.ok && Array.isArray(d2.sales) ? d2.sales : []).filter((s) => s.final_price != null);
-				const prices = priced.map((s) => s.final_price);
-				stats.soldSeries = priced.map((s) => ({
-					price: s.final_price,
-					t: Date.parse(s.settled_at || "") || 0
-				})).sort((a, b) => a.t - b.t);
-				stats.soldCount = prices.length;
-				stats.soldMin = prices.length ? Math.min(...prices) : null;
-				stats.soldMax = prices.length ? Math.max(...prices) : null;
-				if (avg == null && prices.length) stats.soldAvg = Math.round(prices.reduce((s, x) => s + x, 0) / prices.length);
-			} catch {}
+			const series = ((await api(`/api/marketplace/cards/${card.id}/sales`).catch(() => ({}))).sales || []).filter((s) => s.final_price != null).map((s) => ({
+				price: s.final_price,
+				t: Date.parse(s.settled_at || "") || 0
+			})).sort((a, b) => a.t - b.t);
+			const prices = series.map((s) => s.price);
+			if (prices.length) {
+				Object.assign(stats, {
+					soldSeries: series,
+					soldCount: prices.length,
+					soldMin: Math.min(...prices),
+					soldMax: Math.max(...prices)
+				});
+				stats.soldAvg ??= Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
+			}
 			return stats;
 		},
-		async specialAvailable() {
-			try {
-				const d = await json("/api/packs/special");
-				return !!(d && (d.available || (d.packs || []).length));
-			} catch {
-				return false;
-			}
-		}
+		notifications: () => api("/api/notifications").then((d) => (d.notifications || []).map(nNotification)),
+		markRead: (ids) => api("/api/notifications", {
+			method: "PATCH",
+			body: ids ? { ids } : {}
+		}),
+		discard: (userCardId) => api(`/api/user-cards/${userCardId}/discard`, { method: "POST" }),
+		bulkDiscard: (userCardIds) => api("/api/user-cards/bulk-discard", {
+			method: "POST",
+			body: { card_ids: userCardIds }
+		}),
+		specialAvailable: () => api("/api/packs/special").then((d) => !!d.available, () => false)
 	};
+	var MockData = {
+		...RealData,
+		isReal: false,
+		canReset: true,
+		userId: "me",
+		async profile() {
+			const p = await api("/api/profile");
+			return {
+				username: p.username,
+				packs_remaining: p.packs_remaining,
+				pack_cap: p.pack_cap,
+				currency: p.wikibidous_balance,
+				next_regen_seconds: p.next_regen_seconds,
+				is_pro: !!p.is_pro
+			};
+		},
+		reset: () => api("/api/reset", { method: "POST" })
+	};
+	var PREFIX = "wm-cache:v2:";
+	function load$1(key, maxAgeMs) {
+		try {
+			const e = JSON.parse(localStorage.getItem(PREFIX + key));
+			if (e && Date.now() - e.t < maxAgeMs) return e.v;
+		} catch {}
+		return null;
+	}
+	function save(key, v) {
+		try {
+			localStorage.setItem(PREFIX + key, JSON.stringify({
+				t: Date.now(),
+				v
+			}));
+		} catch {}
+	}
+	function drop(key) {
+		try {
+			localStorage.removeItem(PREFIX + key);
+		} catch {}
+	}
 	var session = {
 		packs: 0,
 		cards: 0,
@@ -4610,67 +4426,179 @@
 		session.cards += cards.length;
 		session.newCards += cards.filter((c) => c.is_new).length;
 	}
+	var wm_exports = __exportAll({
+		RARITIES: () => RARITIES,
+		RARITIES_DESC: () => RARITIES_DESC,
+		RNAME: () => RNAME,
+		data: () => data,
+		forgetCollection: () => forgetCollection,
+		initCapture: () => initCapture,
+		loadCollection: () => loadCollection,
+		marketValueFor: () => marketValueFor,
+		normSearch: () => normSearch,
+		recordPull: () => recordPull,
+		refreshProfile: () => refreshProfile,
+		session: () => session
+	});
 	var data = /(^|\.)wiki-masters\.com$/.test(location.hostname) ? RealData : MockData;
-	var marketCache = new Map();
-	async function marketValueFor(card) {
-		if (marketCache.has(card.id)) return marketCache.get(card.id);
-		try {
-			const s = await data.marketStats(card);
-			const v = s ? s.soldAvg ?? s.lowestAsk ?? null : null;
-			marketCache.set(card.id, v);
-			return v;
-		} catch {
-			return null;
-		}
+	var VALUE_TTL = 216e5;
+	var saved$1 = Object.fromEntries(Object.entries(load$1("values", Infinity) || {}).filter(([, [, t]]) => Date.now() - t < VALUE_TTL));
+	var inflight = new Map();
+	var saveTimer = null;
+	function marketValueFor(card) {
+		const hit = saved$1[card.id];
+		if (hit) return Promise.resolve(hit[0]);
+		if (!inflight.has(card.id)) inflight.set(card.id, data.marketStats(card).then((s) => {
+			saved$1[card.id] = [s.soldAvg, Date.now()];
+			saveTimer ??= setTimeout(() => {
+				saveTimer = null;
+				save("values", saved$1);
+			}, 1e3);
+			return s.soldAvg;
+		}, () => null).finally(() => inflight.delete(card.id)));
+		return inflight.get(card.id);
+	}
+	var COLLECTION_TTL = 6048e5;
+	async function loadCollection({ onCached, onPartial } = {}) {
+		const cached = load$1("collection", COLLECTION_TTL);
+		if (cached) onCached?.(cached);
+		const fresh = await data.collection({ onPartial: cached ? void 0 : onPartial });
+		save("collection", fresh);
+		return fresh;
+	}
+	var forgetCollection = () => drop("collection");
+	var PATHS = {
+		close: "<path d=\"M6 6l12 12M18 6L6 18\"/>",
+		search: "<circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"M20 20l-3.4-3.4\"/>",
+		prev: "<path d=\"M15 18l-6-6 6-6\"/>",
+		next: "<path d=\"M9 6l6 6-6 6\"/>",
+		sort: "<path d=\"M7 5v14M7 19l-3-3M7 5l3 3M17 19V5M17 5l3 3M17 19l-3-3\"/>",
+		eye: "<path d=\"M2.5 11.5S6 4.5 12 4.5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z\"/><circle cx=\"12\" cy=\"11.5\" r=\"3\"/>",
+		eyeOff: "<path d=\"M3 3l18 18\"/><path d=\"M10.6 10.7a3 3 0 0 0 3.9 3.9\"/><path d=\"M9.8 4.7A10.4 10.4 0 0 1 12 4.5c6 0 9.5 7 9.5 7a17.6 17.6 0 0 1-2.9 3.8M6 6.2A17.3 17.3 0 0 0 2.5 11.5s3.5 7 9.5 7c1 0 1.9-.1 2.8-.4\"/>",
+		heart: "<path d=\"M12 20.5S3.5 14.7 3.5 9.2A4.2 4.2 0 0 1 12 6.5a4.2 4.2 0 0 1 8.5 2.7c0 5.5-8.5 11.3-8.5 11.3z\"/>",
+		star: "<path d=\"M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z\"/>",
+		sparkle: "<path d=\"M12 2l1.9 6.4L20 10l-6.1 1.6L12 18l-1.9-6.4L4 10l6.1-1.6z\"/>",
+		check: "<path d=\"M5 12.5l4.5 4.5L19 7.5\"/>",
+		select: "<rect x=\"3.5\" y=\"3.5\" width=\"17\" height=\"17\" rx=\"4\"/><path d=\"M8 12l2.8 2.8L16.5 9\"/>",
+		bell: "<path d=\"M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9\"/><path d=\"M13.5 21a2 2 0 0 1-3 0\"/>",
+		coin: "<circle cx=\"12\" cy=\"12\" r=\"9\"/><circle cx=\"12\" cy=\"12\" r=\"3.4\"/>",
+		pulls: "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M3 9h18\"/>",
+		collection: "<rect x=\"4\" y=\"3\" width=\"16\" height=\"18\" rx=\"2\"/><path d=\"M8 7h8M8 11h8M8 15h5\"/>",
+		catalog: "<rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/>",
+		market: "<path d=\"M4.5 9 6 5h12l1.5 4M5.5 9v10h13V9M9.5 19v-6h5v6\"/>",
+		trades: "<path d=\"M4 9h13l-3-3M20 15H7l3 3\"/>",
+		battle: "<path d=\"M4.5 19.5l1-3 9-9 2 2-9 9zM19.5 19.5l-1-3-9-9-2 2 9 9z\"/>",
+		guild: "<path d=\"M12 3l7 2.5v5.5c0 4.2-2.9 7.4-7 9-4.1-1.6-7-4.8-7-9V5.5z\"/>",
+		friends: "<circle cx=\"9\" cy=\"8\" r=\"3.2\"/><path d=\"M3.5 20a5.5 5.5 0 0 1 11 0\"/><path d=\"M16 5.2a3.2 3.2 0 0 1 0 5.6M20.5 20a5.5 5.5 0 0 0-3.5-5.1\"/>",
+		dms: "<path d=\"M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4 19.5l1.3-4A7.5 7.5 0 1 1 20 11.5z\"/>",
+		leaderboard: "<path d=\"M4 20h16M6 20v-6M12 20V5M18 20v-9\"/>",
+		achievements: "<path d=\"M7 4h10v5a5 5 0 0 1-10 0zM7 6H4.5v1.5A3 3 0 0 0 7.5 10.5M17 6h2.5v1.5a3 3 0 0 1-3 3M12 14v3M8.5 20h7l-.6-3H9.1z\"/>",
+		profile: "<circle cx=\"12\" cy=\"8\" r=\"4\"/><path d=\"M4.5 20a7.5 7.5 0 0 1 15 0\"/>",
+		settings: "<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M12 2.5v2.5M12 19v2.5M21.5 12H19M5 12H2.5M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8M18.4 18.4l-1.8-1.8M7.4 7.4 5.6 5.6\"/>"
+	};
+	var root$11 = from_svg(`<svg viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>`);
+	function Icon($$anchor, $$props) {
+		let filled = prop($$props, "filled", 3, false), width = prop($$props, "width", 3, 1.8), cls = prop($$props, "class", 3, "");
+		var svg = root$11();
+		html(svg, () => PATHS[$$props.name], true);
+		reset(svg);
+		template_effect(() => {
+			set_class(svg, 0, clsx(cls()));
+			set_attribute(svg, "fill", filled() ? "currentColor" : "none");
+			set_attribute(svg, "stroke-width", width());
+		});
+		append($$anchor, svg);
 	}
 	var KEY = "wm-settings";
+	var DEFAULTS = {
+		hideStats: false,
+		hideSensitive: true,
+		collection: {
+			sort: "rarity",
+			filter: "ALL",
+			favOnly: false,
+			shinyOnly: false
+		},
+		catalog: {
+			sort: "rarity",
+			rarity: "",
+			wishOnly: false
+		},
+		market: {
+			tab: "browse",
+			sort: "recent",
+			rarity: ""
+		}
+	};
 	function load() {
 		try {
-			return JSON.parse(localStorage.getItem(KEY) || "{}");
+			return JSON.parse(localStorage.getItem(KEY)) || {};
 		} catch {
 			return {};
 		}
 	}
-	var settings = proxy({
-		hideStats: false,
-		hideSensitive: true,
-		...load()
+	var saved = load();
+	var settings = proxy(Object.fromEntries(Object.entries(DEFAULTS).map(([k, v]) => [k, typeof v === "object" ? {
+		...v,
+		...saved[k]
+	} : saved[k] ?? v])));
+	effect_root(() => {
+		user_effect(() => {
+			const json = JSON.stringify(settings);
+			try {
+				localStorage.setItem(KEY, json);
+			} catch {}
+		});
 	});
-	function persist() {
+	var toggleHideStats = () => settings.hideStats = !settings.hideStats;
+	var toggleHideSensitive = () => settings.hideSensitive = !settings.hideSensitive;
+	function useOriginalSite(path) {
 		try {
-			localStorage.setItem(KEY, JSON.stringify({
-				hideStats: settings.hideStats,
-				hideSensitive: settings.hideSensitive
-			}));
+			localStorage.setItem("wm-off", "1");
 		} catch {}
+		path ? location.assign(path) : location.reload();
 	}
-	function toggleHideStats() {
-		settings.hideStats = !settings.hideStats;
-		persist();
+	var nf = (n) => n == null ? "-" : Number(n).toLocaleString("fr");
+	function ago(iso, now = Date.now()) {
+		const t = Date.parse(iso || "");
+		if (isNaN(t)) return "";
+		const m = Math.round(Math.max(0, now - t) / 6e4);
+		if (m < 1) return "à l'instant";
+		if (m < 60) return `il y a ${m} min`;
+		const h = Math.round(m / 60);
+		return h < 24 ? `il y a ${h} h` : `il y a ${Math.round(h / 24)} j`;
 	}
-	function toggleHideSensitive() {
-		settings.hideSensitive = !settings.hideSensitive;
-		persist();
+	function countdown(s, { seconds = false } = {}) {
+		if (s <= 0) return "Terminée";
+		const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+		const pad = (x) => String(x).padStart(2, "0");
+		if (d) return `${d} j ${h} h`;
+		if (h) return `${h} h ${pad(m)}`;
+		if (m) return seconds ? `${m} min ${pad(sec)} s` : `${m} min`;
+		return seconds ? `${sec} s` : "< 1 min";
 	}
-	var root$8 = from_html(`<img class="wc-photo onyx-photo" loading="lazy" crossorigin="anonymous"/>`);
-	var root_1$8 = from_html(`<img class="wc-bg onyx" alt="" aria-hidden="true" loading="lazy"/> <span class="ox ox-shade" aria-hidden="true"></span> <span class="ox ox-tint" aria-hidden="true"></span> <span class="ox ox-wash" aria-hidden="true"></span> <!> <span class="ox ox-lines" aria-hidden="true"></span> <span class="ox ox-shine" aria-hidden="true"></span>`, 1);
+	function secondsUntil(iso, now = Date.now()) {
+		const t = Date.parse(iso || "");
+		return isNaN(t) ? null : Math.max(0, Math.round((t - now) / 1e3));
+	}
+	var root$10 = from_html(`<img class="wc-photo onyx-photo" loading="lazy" crossorigin="anonymous"/>`);
+	var root_1$9 = from_html(`<img class="wc-bg onyx" alt="" aria-hidden="true" loading="lazy"/> <span class="ox ox-shade" aria-hidden="true"></span> <span class="ox ox-tint" aria-hidden="true"></span> <span class="ox ox-wash" aria-hidden="true"></span> <!> <span class="ox ox-lines" aria-hidden="true"></span> <span class="ox ox-shine" aria-hidden="true"></span>`, 1);
 	var root_2$8 = from_html(`<img class="wc-blur" alt="" aria-hidden="true" loading="lazy" crossorigin="anonymous"/> <img class="wc-photo" loading="lazy" crossorigin="anonymous"/>`, 1);
 	var root_3$8 = from_html(`<img class="wc-bg" alt="" aria-hidden="true" loading="lazy"/>`);
 	var root_4$8 = from_html(`<span aria-hidden="true"></span>`);
 	var root_5$8 = from_html(`<span class="wc-nsfw" aria-hidden="true">Contenu sensible</span>`);
-	var root_6$8 = from_html(`<span class="wc-wish" title="Liste de souhaits" aria-label="Liste de souhaits"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 20.5S3.5 14.7 3.5 9.2A4.2 4.2 0 0 1 12 6.5a4.2 4.2 0 0 1 8.5 2.7c0 5.5-8.5 11.3-8.5 11.3z"></path></svg></span>`);
-	var root_7$7 = from_html(`<span class="wc-star" title="Favori" aria-label="Favori"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"></path></svg></span>`);
-	var root_8$6 = from_html(`<span class="wc-shiny" title="Brillante" aria-label="Brillante"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 6.4L20 10l-6.1 1.6L12 18l-1.9-6.4L4 10l6.1-1.6z"></path></svg></span>`);
+	var root_6$8 = from_html(`<span class="wc-wish" title="Liste de souhaits" aria-label="Liste de souhaits"><!></span>`);
+	var root_7$8 = from_html(`<span class="wc-star" title="Favori" aria-label="Favori"><!></span>`);
+	var root_8$8 = from_html(`<span class="wc-shiny" title="Brillante" aria-label="Brillante"><!></span>`);
 	var root_9$6 = from_html(`<span class="wc-count"> </span>`);
-	var root_10$5 = from_html(`<span class="wc-new">Nouvelle</span>`);
+	var root_10$6 = from_html(`<span class="wc-new">Nouvelle</span>`);
 	var root_11$5 = from_html(`<span class="wc-stats"><span>ATK <b> </b></span> <span>DEF <b> </b></span></span>`);
 	var root_12$4 = from_html(`<span class="wc-val" title="Valeur estimée d'après le marché"> </span>`);
-	var root_13$3 = from_html(`<div class="wc-meta"><!> <!></div>`);
-	var root_14$2 = from_html(`<article><div class="wc-face"><!> <!> <!></div> <div class="wc-scrim"></div> <div class="wc-top"><span class="wc-rtag"> </span> <span class="wc-flags"><!> <!> <!> <!> <!></span></div> <div class="wc-cap"><h3 class="wc-name"> </h3> <div class="wc-cat"> </div> <!></div></article>`);
+	var root_13$4 = from_html(`<div class="wc-meta"><!> <!></div>`);
+	var root_14$4 = from_html(`<article><div class="wc-face"><!> <!> <!></div> <div class="wc-scrim"></div> <div class="wc-top"><span class="wc-rtag"> </span> <span class="wc-flags"><!> <!> <!> <!> <!></span></div> <div class="wc-cap"><h3 class="wc-name"> </h3> <div class="wc-cat"> </div> <!></div></article>`);
 	function Card($$anchor, $$props) {
 		push($$props, true);
 		let count = prop($$props, "count", 3, 1), isNew = prop($$props, "isNew", 3, false), shiny = prop($$props, "shiny", 3, false), starred = prop($$props, "starred", 3, false), value = prop($$props, "value", 3, void 0), owned = prop($$props, "owned", 3, true), wishlisted = prop($$props, "wishlisted", 3, false), big = prop($$props, "big", 3, false), caption = prop($$props, "caption", 3, true);
-		const nf = (n) => Number(n).toLocaleString("fr");
 		let hasValue = user_derived(() => typeof value() === "number");
 		let blurred = user_derived(() => settings.hideSensitive && $$props.card.nsfw_image);
 		const ASSET_BASE = "https://www.wiki-masters.com";
@@ -4687,16 +4615,16 @@
 		let imgFailed = state(false);
 		let artFailed = state(false);
 		let showPhoto = user_derived(() => !!$$props.card.image_url && !get(imgFailed));
-		var article = root_14$2();
+		var article = root_14$4();
 		let classes;
 		var div = child(article);
 		var node = child(div);
 		var consequent_1 = ($$anchor) => {
-			var fragment = root_1$8();
+			var fragment = root_1$9();
 			var img = first_child(fragment);
 			var node_1 = sibling(img, 8);
 			var consequent = ($$anchor) => {
-				var img_1 = root$8();
+				var img_1 = root$10();
 				template_effect(() => {
 					set_attribute(img_1, "src", $$props.card.image_url);
 					set_attribute(img_1, "alt", $$props.card.title);
@@ -4761,40 +4689,61 @@
 		var span_3 = sibling(span_2, 2);
 		var node_4 = child(span_3);
 		var consequent_6 = ($$anchor) => {
-			append($$anchor, root_6$8());
+			var span_4 = root_6$8();
+			Icon(child(span_4), {
+				name: "heart",
+				filled: true,
+				width: 0
+			});
+			reset(span_4);
+			append($$anchor, span_4);
 		};
 		if_block(node_4, ($$render) => {
 			if (wishlisted()) $$render(consequent_6);
 		});
-		var node_5 = sibling(node_4, 2);
+		var node_6 = sibling(node_4, 2);
 		var consequent_7 = ($$anchor) => {
-			append($$anchor, root_7$7());
-		};
-		if_block(node_5, ($$render) => {
-			if (starred()) $$render(consequent_7);
-		});
-		var node_6 = sibling(node_5, 2);
-		var consequent_8 = ($$anchor) => {
-			append($$anchor, root_8$6());
+			var span_5 = root_7$8();
+			Icon(child(span_5), {
+				name: "star",
+				filled: true,
+				width: 0
+			});
+			reset(span_5);
+			append($$anchor, span_5);
 		};
 		if_block(node_6, ($$render) => {
+			if (starred()) $$render(consequent_7);
+		});
+		var node_8 = sibling(node_6, 2);
+		var consequent_8 = ($$anchor) => {
+			var span_6 = root_8$8();
+			Icon(child(span_6), {
+				name: "sparkle",
+				filled: true,
+				width: 0
+			});
+			reset(span_6);
+			append($$anchor, span_6);
+		};
+		if_block(node_8, ($$render) => {
 			if (shiny()) $$render(consequent_8);
 		});
-		var node_7 = sibling(node_6, 2);
+		var node_10 = sibling(node_8, 2);
 		var consequent_9 = ($$anchor) => {
 			var span_7 = root_9$6();
 			var text_1 = only_child(span_7);
 			template_effect(() => set_text(text_1, `x${count() ?? ""}`));
 			append($$anchor, span_7);
 		};
-		if_block(node_7, ($$render) => {
+		if_block(node_10, ($$render) => {
 			if (count() > 1) $$render(consequent_9);
 		});
-		var node_8 = sibling(node_7, 2);
+		var node_11 = sibling(node_10, 2);
 		var consequent_10 = ($$anchor) => {
-			append($$anchor, root_10$5());
+			append($$anchor, root_10$6());
 		};
-		if_block(node_8, ($$render) => {
+		if_block(node_11, ($$render) => {
 			if (isNew()) $$render(consequent_10);
 		});
 		reset(span_3);
@@ -4804,10 +4753,10 @@
 		var text_2 = only_child(h3, true);
 		var div_3 = sibling(h3, 2);
 		var text_3 = only_child(div_3, true);
-		var node_9 = sibling(div_3, 2);
+		var node_12 = sibling(div_3, 2);
 		var consequent_13 = ($$anchor) => {
-			var div_4 = root_13$3();
-			var node_10 = child(div_4);
+			var div_4 = root_13$4();
+			var node_13 = child(div_4);
 			var consequent_11 = ($$anchor) => {
 				var span_9 = root_11$5();
 				var span_10 = child(span_9);
@@ -4823,23 +4772,23 @@
 				}, [() => nf($$props.card.atk), () => nf($$props.card.def)]);
 				append($$anchor, span_9);
 			};
-			if_block(node_10, ($$render) => {
+			if_block(node_13, ($$render) => {
 				if (!settings.hideStats) $$render(consequent_11);
 			});
-			var node_11 = sibling(node_10, 2);
+			var node_14 = sibling(node_13, 2);
 			var consequent_12 = ($$anchor) => {
 				var span_12 = root_12$4();
 				var text_6 = only_child(span_12, true);
 				template_effect(($0) => set_text(text_6, $0), [() => nf(value())]);
 				append($$anchor, span_12);
 			};
-			if_block(node_11, ($$render) => {
+			if_block(node_14, ($$render) => {
 				if (get(hasValue)) $$render(consequent_12);
 			});
 			reset(div_4);
 			append($$anchor, div_4);
 		};
-		if_block(node_9, ($$render) => {
+		if_block(node_12, ($$render) => {
 			if (!settings.hideStats || get(hasValue)) $$render(consequent_13);
 		});
 		reset(div_2);
@@ -4862,37 +4811,35 @@
 		append($$anchor, article);
 		pop();
 	}
-	var root$7 = from_html(`<div class="modal-cat"> </div>`);
-	var root_1$7 = from_html(`<p class="modal-sum muted">Chargement du résumé...</p>`);
+	var root$9 = from_html(`<div class="modal-cat"> </div>`);
+	var root_1$8 = from_html(`<p class="modal-sum muted">Chargement du résumé...</p>`);
 	var root_2$7 = from_html(`<p class="modal-sum"> </p>`);
 	var root_3$7 = from_html(`<div class="fact"><div class="fk">Valeur estimée</div><div class="fv val"> </div></div>`);
 	var root_4$7 = from_html(`<div class="fact"><div class="fk">Exemplaires</div><div class="fv"> <!></div></div>`);
 	var root_5$7 = from_html(`<div class="fact"><div class="fk" title="Vues de l'article Wikipédia sur 30 jours">Popularité (30 j)</div><div class="fv"> </div></div>`);
 	var root_6$7 = from_html(`<div class="fact"><div class="fk">Attaque</div><div class="fv atk"> </div></div> <div class="fact"><div class="fk">Défense</div><div class="fv def"> </div></div>`, 1);
-	var root_7$6 = from_html(`<div class="modal-obtained"> </div>`);
-	var root_8$5 = from_html(`<a class="modal-wiki" target="_blank" rel="noopener noreferrer">Voir l'article Wikipédia</a>`);
-	var root_9$5 = from_html(`<button><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 20.5S3.5 14.7 3.5 9.2A4.2 4.2 0 0 1 12 6.5a4.2 4.2 0 0 1 8.5 2.7c0 5.5-8.5 11.3-8.5 11.3z"></path></svg> </button>`);
-	var root_10$4 = from_html(`<div class="confirm"><div class="confirm-text">Défausser cette carte contre <b>1 point</b> ?</div> <div class="af-actions"><button class="btn">Annuler</button> <button class="btn danger">Défausser</button></div></div>`);
-	var root_11$4 = from_html(`<button type="button" class="sell2-suggest"> </button>`);
-	var root_12$3 = from_html(`<button type="button"> </button>`);
-	var root_13$2 = from_html(`<button type="button" class="sell-fallback">Le marché a refusé la vente. Vendre sur le site officiel ?</button>`);
-	var root_14$1 = from_html(`<div class="sell2"><div class="sell2-head">Mettre en vente</div> <div class="sell2-block"><div class="sell2-lab"><span>Prix de départ</span> <!></div> <div class="af-input-row"><input class="af-input" type="number" min="1" step="1" inputmode="numeric" placeholder="0"/> <span class="af-unit">pts</span></div></div> <div class="sell2-block"><div class="sell2-lab"><span>Durée de l'enchère</span></div> <div class="sell2-durs"></div></div> <div class="af-actions"><button class="btn">Annuler</button> <button class="btn primary"> </button></div> <!></div>`);
-	var root_15$1 = from_html(`<div class="actions"><button class="btn primary">Mettre en vente</button> <button class="btn danger">Défausser, +1 pt</button></div>`);
-	var root_16$1 = from_html(`<div id="wm-panel-details" role="tabpanel" aria-labelledby="wm-tab-details" class="modal-panel"><!> <div class="facts"><!> <!> <!> <!></div> <!> <!> <!> <!> <!> <div class="modal-credit">Texte de l'article sous licence CC BY-SA 4.0</div></div>`);
-	var root_17$1 = from_html(`<p class="modal-sum muted">Analyse du marché...</p>`);
-	var root_18$1 = from_html(`<p class="modal-sum muted">Marché indisponible pour le moment.</p>`);
-	var root_19$1 = from_html(`<div class="market-avg"><div class="ma-label">Prix moyen du marché</div> <div class="ma-value"> <span>pts</span></div></div>`);
-	var root_20$1 = from_html(`<div class="market-chart"><div class="mc-head">Prix de vente dans le temps</div> <div class="mc-plot"><div class="mc-y"><span> </span><span> </span></div> <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Prix de vente dans le temps"><path fill="var(--accent)" fill-opacity="0.12"></path><path fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path></svg></div> <div class="mc-x"><span> </span><span> </span></div></div>`);
-	var root_21$1 = from_html(`<div class="market-grid"><div class="mstat"><div class="l">Prix moyen</div><div class="v"> </div></div> <div class="mstat"><div class="l">Min</div><div class="v"> </div></div> <div class="mstat"><div class="l">Max</div><div class="v"> </div></div> <div class="mstat"><div class="l">Ventes</div><div class="v"> </div></div></div>`);
-	var root_22$1 = from_html(`<p class="modal-sum muted">Aucune vente enregistrée pour cette carte.</p>`);
-	var root_23$1 = from_html(`<div class="rarity-note">Historique détaillé des ventes réservé aux membres Pro. La moyenne reste visible.</div>`);
-	var root_24$1 = from_html(`<!> <!> <!> <!> <!>`, 1);
-	var root_25 = from_html(`<div id="wm-panel-market" role="tabpanel" aria-labelledby="wm-tab-market" class="modal-panel"><!></div>`);
-	var root_26 = from_html(`<div> </div>`);
-	var root_27 = from_html(`<div class="modal-backdrop" role="presentation"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-modal-title" tabindex="-1"><button class="modal-close" aria-label="Fermer"><svg class="x-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button> <div class="modal-card"><!></div> <div class="modal-info"><span class="modal-rar"> </span> <h2 class="modal-name" id="wm-modal-title"> </h2> <!> <div class="modal-tabs" role="tablist" aria-label="Détails de la carte"><button role="tab" id="wm-tab-details" aria-controls="wm-panel-details">Détails</button> <button role="tab" id="wm-tab-market" aria-controls="wm-panel-market">Marché</button></div> <!> <!></div></div></div>`);
+	var root_7$7 = from_html(`<div class="modal-obtained"> </div>`);
+	var root_8$7 = from_html(`<a class="modal-wiki" target="_blank" rel="noopener noreferrer">Voir l'article Wikipédia</a>`);
+	var root_9$5 = from_html(`<div class="confirm"><div class="confirm-text">Défausser cette carte contre <b>1 point</b> ?</div> <div class="af-actions"><button class="btn">Annuler</button> <button class="btn danger">Défausser</button></div></div>`);
+	var root_10$5 = from_html(`<button type="button" class="sell2-suggest"> </button>`);
+	var root_11$4 = from_html(`<button type="button"> </button>`);
+	var root_12$3 = from_html(`<div class="sell2"><div class="sell2-head">Mettre en vente</div> <div class="sell2-block"><div class="sell2-lab"><span>Prix de départ</span> <!></div> <div class="af-input-row"><input class="af-input" type="number" min="1" step="1" inputmode="numeric" placeholder="0"/> <span class="af-unit">pts</span></div></div> <div class="sell2-block"><div class="sell2-lab"><span>Durée de l'enchère</span></div> <div class="sell2-durs"></div></div> <div class="af-actions"><button class="btn">Annuler</button> <button class="btn primary"> </button></div></div>`);
+	var root_13$3 = from_html(`<div class="actions"><button class="btn primary">Mettre en vente</button> <button class="btn danger">Défausser, +1 pt</button></div>`);
+	var root_14$3 = from_html(`<div role="tabpanel" class="modal-panel"><!> <div class="facts"><!> <!> <!> <!></div> <!> <!> <!> <div class="modal-credit">Texte de l'article sous licence CC BY-SA 4.0</div></div>`);
+	var root_15$3 = from_html(`<p class="modal-sum muted">Analyse du marché...</p>`);
+	var root_16$3 = from_html(`<p class="modal-sum muted">Marché indisponible pour le moment.</p>`);
+	var root_17$3 = from_html(`<div class="market-avg"><div class="ma-label">Prix moyen du marché</div> <div class="ma-value"> <span>pts</span></div></div>`);
+	var root_18$2 = from_html(`<p class="modal-sum muted">Aucune vente enregistrée pour cette carte.</p>`);
+	var root_19$2 = from_html(`<div class="market-chart"><div class="mc-head">Prix de vente dans le temps</div> <div class="mc-plot"><div class="mc-y"><span> </span><span> </span></div> <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Prix de vente dans le temps"><path fill="var(--accent)" fill-opacity="0.12"></path><path fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path></svg></div> <div class="mc-x"><span> </span><span> </span></div></div>`);
+	var root_20$2 = from_html(`<div class="market-grid"><div class="mstat"><div class="l">Prix moyen</div><div class="v"> </div></div> <div class="mstat"><div class="l">Min</div><div class="v"> </div></div> <div class="mstat"><div class="l">Max</div><div class="v"> </div></div> <div class="mstat"><div class="l">Ventes</div><div class="v"> </div></div></div>`);
+	var root_21$2 = from_html(`<div class="rarity-note">Historique détaillé des ventes réservé aux membres Pro. La moyenne reste visible.</div>`);
+	var root_22$2 = from_html(`<!> <!> <!> <!>`, 1);
+	var root_23$1 = from_html(`<div role="tabpanel" class="modal-panel"><!></div>`);
+	var root_24$1 = from_html(`<div> </div>`);
+	var root_25 = from_html(`<div class="modal-backdrop" role="presentation"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-modal-title" tabindex="-1"><button class="modal-close" aria-label="Fermer"><!></button> <div class="modal-card"><!></div> <div class="modal-info"><span class="modal-rar"> </span> <h2 class="modal-name" id="wm-modal-title"> </h2> <!> <div class="modal-tabs" role="tablist" aria-label="Détails de la carte"><button role="tab">Détails</button> <button role="tab">Marché</button></div> <!> <!></div></div></div>`);
 	function CardModal($$anchor, $$props) {
 		push($$props, true);
-		let readonly = prop($$props, "readonly", 3, false), wishlisted = prop($$props, "wishlisted", 3, false), onwishlist = prop($$props, "onwishlist", 3, null), extra = prop($$props, "extra", 3, null);
+		let readonly = prop($$props, "readonly", 3, false);
 		const c = user_derived(() => $$props.item.card);
 		let tab = state("details");
 		let summary = state(proxy($$props.item.card.summary || ""));
@@ -4901,33 +4848,21 @@
 		let marketState = state("idle");
 		let mval = state(null);
 		let confirmDiscard = state(false);
+		let sellOpen = state(false);
 		let busy = state(false);
 		let done = state(false);
 		let msg = state("");
 		let msgOk = state(false);
 		let modalEl;
-		async function loadSummary() {
-			if (get(c).summary) return;
-			try {
-				const r = await fetch("https://fr.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(get(c).title), { headers: { Accept: "application/json" } });
-				if (r.ok) set(summary, (await r.json()).extract || "", true);
-			} catch {}
-			set(sumState, get(summary) ? "done" : "none", true);
-		}
-		loadSummary();
-		marketValueFor(get(c)).then((v) => set(mval, v, true)).catch(() => {});
-		async function loadMarket() {
-			if (get(marketState) !== "idle") return;
-			set(marketState, "loading");
-			try {
-				set(market, await data.marketStats(get(c)), true);
-				set(marketState, get(market) ? "done" : "error", true);
-			} catch {
-				set(marketState, "error");
-			}
-		}
+		if (!get(c).summary) fetch("https://fr.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(get(c).title)).then((r) => r.ok ? r.json() : {}).then((d) => set(summary, d.extract || "", true), () => {}).finally(() => set(sumState, get(summary) ? "done" : "none", true));
+		marketValueFor(get(c)).then((v) => set(mval, v, true));
 		user_effect(() => {
-			if (get(tab) === "market") loadMarket();
+			if (get(tab) !== "market" || get(marketState) !== "idle") return;
+			set(marketState, "loading");
+			data.marketStats(get(c)).then((m) => {
+				set(market, m, true);
+				set(marketState, "done");
+			}, () => set(marketState, "error"));
 		});
 		const DURATIONS = [
 			1,
@@ -4938,104 +4873,57 @@
 			48,
 			72
 		];
-		let sellOpen = state(false);
 		let price = state("");
 		let durationH = state(24);
-		let sellErr = state(false);
 		function openSell() {
 			set(sellOpen, true);
-			set(sellErr, false);
 			set(msg, "");
-			if (!get(price)) set(price, get(mval) != null ? String(get(mval)) : "", true);
+			if (!get(price) && get(mval) != null) set(price, String(get(mval)), true);
 		}
-		async function sell() {
-			const p = Math.round(Number(get(price)));
-			if (!(p > 0)) {
-				flash("Entrez un prix de départ valide.");
-				return;
-			}
+		async function act(action, okMsg) {
 			set(busy, true);
 			set(msg, "");
-			set(sellErr, false);
 			try {
-				await data.createAuction($$props.item, {
-					price: p,
-					durationHours: get(durationH)
-				});
+				await action();
 				$$props.onaction?.();
 				set(done, true);
 				set(msgOk, true);
-				set(msg, "Carte mise en vente.");
+				set(msg, okMsg, true);
 			} catch (e) {
-				set(busy, false);
-				set(sellErr, true);
-				flash(e?.message || "La mise en vente a échoué.");
+				set(msgOk, false);
+				set(msg, e.message, true);
 			}
+			set(busy, false);
 		}
-		function sellNative() {
-			try {
-				localStorage.setItem("wm-off", "1");
-			} catch {}
-			location.assign("/collection");
-		}
-		async function discard() {
-			set(busy, true);
-			set(msg, "");
-			try {
-				await data.discard($$props.item.id);
-				$$props.onaction?.();
-				set(done, true);
-				set(msgOk, true);
-				set(msg, "Carte défaussée. +1 point.");
-			} catch {
-				flash("La défausse a échoué.");
-				set(busy, false);
-			}
-		}
-		function flash(m) {
-			set(msg, m, true);
-			set(msgOk, false);
-		}
+		const sell = () => act(() => data.createAuction($$props.item, {
+			price: Math.round(Number(get(price))),
+			durationHours: get(durationH)
+		}), "Carte mise en vente.");
+		const discard = () => act(() => data.discard($$props.item.id), "Carte défaussée. +1 point.");
 		function onKey(e) {
-			if (e.key === "Escape") {
-				$$props.onclose?.();
-				return;
-			}
-			if (e.key === "Tab" && modalEl) {
-				const f = [...modalEl.querySelectorAll("a[href],button:not([disabled]),input,[tabindex]:not([tabindex=\"-1\"])")].filter((el) => el.offsetParent !== null);
-				if (!f.length) return;
-				const first = f[0], last = f[f.length - 1];
-				if (e.shiftKey && document.activeElement === first) {
-					e.preventDefault();
-					last.focus();
-				} else if (!e.shiftKey && document.activeElement === last) {
-					e.preventDefault();
-					first.focus();
-				}
+			if (e.key === "Escape") return $$props.onclose?.();
+			if (e.key !== "Tab" || !modalEl) return;
+			const f = [...modalEl.querySelectorAll("a[href],button:not([disabled]),input,[tabindex]:not([tabindex=\"-1\"])")].filter((el) => el.offsetParent !== null);
+			if (!f.length) return;
+			const first = f[0], last = f.at(-1);
+			if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
 			}
 		}
-		const nf = (n) => n == null ? "-" : n.toLocaleString("fr");
-		const fmtDate = (s) => {
-			const d = new Date(s);
-			return isNaN(d.getTime()) ? "" : d.toLocaleDateString("fr", {
-				day: "numeric",
-				month: "long",
-				year: "numeric"
-			});
-		};
-		const obtainedLabel = user_derived(() => $$props.item.obtained_at ? fmtDate($$props.item.obtained_at) : "");
-		const dshort = (t) => {
-			if (!t) return "";
-			try {
-				return new Date(t).toLocaleDateString("fr", {
-					day: "numeric",
-					month: "short"
-				});
-			} catch {
-				return "";
-			}
-		};
-		let chart = user_derived(() => {
+		const obtained = user_derived(() => $$props.item.obtained_at ? new Date($$props.item.obtained_at).toLocaleDateString("fr", {
+			day: "numeric",
+			month: "long",
+			year: "numeric"
+		}) : "");
+		const dshort = (t) => t ? new Date(t).toLocaleDateString("fr", {
+			day: "numeric",
+			month: "short"
+		}) : "";
+		const chart = user_derived(() => {
 			const s = get(market)?.soldSeries;
 			if (!s || s.length < 2) return null;
 			const prices = s.map((p) => p.price);
@@ -5044,11 +4932,11 @@
 			const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
 			return {
 				d,
-				area: d + ` L${pts[pts.length - 1][0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`,
+				area: `${d} L${pts.at(-1)[0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`,
 				min,
 				max,
 				first: dshort(s[0].t),
-				last: dshort(s[s.length - 1].t)
+				last: dshort(s.at(-1).t)
 			};
 		});
 		user_effect(() => {
@@ -5071,10 +4959,16 @@
 			const t = setTimeout(() => $$props.onclose?.(), 1e3);
 			return () => clearTimeout(t);
 		});
-		var div = root_27();
+		var div = root_25();
 		event("keydown", $window, onKey);
 		var div_1 = child(div);
 		var button = child(div_1);
+		Icon(child(button), {
+			name: "close",
+			width: 2,
+			class: "x-ico"
+		});
+		reset(button);
 		var div_2 = sibling(button, 2);
 		Card(child(div_2), {
 			get card() {
@@ -5098,28 +4992,28 @@
 		var text$2 = only_child(span_1, true);
 		var h2 = sibling(span_1, 2);
 		var text_1 = only_child(h2, true);
-		var node_1 = sibling(h2, 2);
+		var node_2 = sibling(h2, 2);
 		var consequent = ($$anchor) => {
-			var div_4 = root$7();
+			var div_4 = root$9();
 			var text_2 = only_child(div_4, true);
 			template_effect(() => set_text(text_2, get(c).category));
 			append($$anchor, div_4);
 		};
-		if_block(node_1, ($$render) => {
+		if_block(node_2, ($$render) => {
 			if (get(c).category) $$render(consequent);
 		});
-		var div_5 = sibling(node_1, 2);
+		var div_5 = sibling(node_2, 2);
 		var button_1 = child(div_5);
 		let classes;
 		var button_2 = sibling(button_1, 2);
 		let classes_1;
 		reset(div_5);
-		var node_2 = sibling(div_5, 2);
-		var consequent_17 = ($$anchor) => {
-			var div_6 = root_16$1();
-			var node_3 = child(div_6);
+		var node_3 = sibling(div_5, 2);
+		var consequent_14 = ($$anchor) => {
+			var div_6 = root_14$3();
+			var node_4 = child(div_6);
 			var consequent_1 = ($$anchor) => {
-				append($$anchor, root_1$7());
+				append($$anchor, root_1$8());
 			};
 			var consequent_2 = ($$anchor) => {
 				var p_2 = root_2$7();
@@ -5127,12 +5021,12 @@
 				template_effect(() => set_text(text_3, get(summary)));
 				append($$anchor, p_2);
 			};
-			if_block(node_3, ($$render) => {
+			if_block(node_4, ($$render) => {
 				if (get(sumState) === "loading") $$render(consequent_1);
 				else if (get(summary)) $$render(consequent_2, 1);
 			});
-			var div_7 = sibling(node_3, 2);
-			var node_4 = child(div_7);
+			var div_7 = sibling(node_4, 2);
+			var node_5 = child(div_7);
 			var consequent_3 = ($$anchor) => {
 				var div_8 = root_3$7();
 				var text_4 = only_child(sibling(child(div_8)));
@@ -5140,19 +5034,19 @@
 				template_effect(($0) => set_text(text_4, `${$0 ?? ""} pts`), [() => nf(get(mval))]);
 				append($$anchor, div_8);
 			};
-			if_block(node_4, ($$render) => {
+			if_block(node_5, ($$render) => {
 				if (get(mval) != null) $$render(consequent_3);
 			});
-			var node_5 = sibling(node_4, 2);
+			var node_6 = sibling(node_5, 2);
 			var consequent_5 = ($$anchor) => {
 				var div_10 = root_4$7();
 				var div_11 = sibling(child(div_10));
 				var text_5 = child(div_11, true);
-				var node_6 = sibling(text_5);
+				var node_7 = sibling(text_5);
 				var consequent_4 = ($$anchor) => {
 					append($$anchor, text("· brillante"));
 				};
-				if_block(node_6, ($$render) => {
+				if_block(node_7, ($$render) => {
 					if ($$props.item.is_shiny) $$render(consequent_4);
 				});
 				reset(div_11);
@@ -5160,10 +5054,10 @@
 				template_effect(() => set_text(text_5, $$props.item.count));
 				append($$anchor, div_10);
 			};
-			if_block(node_5, ($$render) => {
+			if_block(node_6, ($$render) => {
 				if (!readonly()) $$render(consequent_5);
 			});
-			var node_7 = sibling(node_5, 2);
+			var node_8 = sibling(node_6, 2);
 			var consequent_6 = ($$anchor) => {
 				var div_12 = root_5$7();
 				var text_7 = only_child(sibling(child(div_12)), true);
@@ -5171,10 +5065,10 @@
 				template_effect(($0) => set_text(text_7, $0), [() => nf(get(c).pageviews)]);
 				append($$anchor, div_12);
 			};
-			if_block(node_7, ($$render) => {
+			if_block(node_8, ($$render) => {
 				if (get(c).pageviews != null) $$render(consequent_6);
 			});
-			var node_8 = sibling(node_7, 2);
+			var node_9 = sibling(node_8, 2);
 			var consequent_7 = ($$anchor) => {
 				var fragment = root_6$7();
 				var div_14 = first_child(fragment);
@@ -5189,91 +5083,62 @@
 				}, [() => nf(get(c).atk), () => nf(get(c).def)]);
 				append($$anchor, fragment);
 			};
-			if_block(node_8, ($$render) => {
+			if_block(node_9, ($$render) => {
 				if (!settings.hideStats) $$render(consequent_7);
 			});
 			reset(div_7);
-			var node_9 = sibling(div_7, 2);
+			var node_10 = sibling(div_7, 2);
 			var consequent_8 = ($$anchor) => {
-				var div_18 = root_7$6();
+				var div_18 = root_7$7();
 				var text_10 = only_child(div_18);
-				template_effect(() => set_text(text_10, `Obtenue le ${get(obtainedLabel) ?? ""}`));
+				template_effect(() => set_text(text_10, `Obtenue le ${get(obtained) ?? ""}`));
 				append($$anchor, div_18);
 			};
-			if_block(node_9, ($$render) => {
-				if (get(obtainedLabel)) $$render(consequent_8);
+			if_block(node_10, ($$render) => {
+				if (get(obtained)) $$render(consequent_8);
 			});
-			var node_10 = sibling(node_9, 2);
+			var node_11 = sibling(node_10, 2);
 			var consequent_9 = ($$anchor) => {
-				var a = root_8$5();
+				var a = root_8$7();
 				template_effect(() => set_attribute(a, "href", get(c).wikipedia_url));
 				append($$anchor, a);
 			};
-			if_block(node_10, ($$render) => {
+			if_block(node_11, ($$render) => {
 				if (get(c).wikipedia_url) $$render(consequent_9);
 			});
-			var node_11 = sibling(node_10, 2);
-			var consequent_10 = ($$anchor) => {
-				var button_3 = root_9$5();
-				let classes_2;
-				var svg = child(button_3);
-				var text_11 = sibling(svg);
-				reset(button_3);
-				template_effect(() => {
-					classes_2 = set_class(button_3, 1, "btn wish-btn", null, classes_2, { on: wishlisted() });
-					set_attribute(svg, "fill", wishlisted() ? "currentColor" : "none");
-					set_text(text_11, ` ${wishlisted() ? "Dans la liste de souhaits" : "Ajouter à la liste de souhaits"}`);
-				});
-				delegated("click", button_3, function(...$$args) {
-					onwishlist()?.apply(this, $$args);
-				});
-				append($$anchor, button_3);
-			};
-			if_block(node_11, ($$render) => {
-				if (onwishlist()) $$render(consequent_10);
-			});
 			var node_12 = sibling(node_11, 2);
-			var consequent_11 = ($$anchor) => {
+			var consequent_13 = ($$anchor) => {
 				var fragment_1 = comment();
-				snippet(first_child(fragment_1), extra);
-				append($$anchor, fragment_1);
-			};
-			if_block(node_12, ($$render) => {
-				if (extra()) $$render(consequent_11);
-			});
-			var node_14 = sibling(node_12, 2);
-			var consequent_16 = ($$anchor) => {
-				var fragment_2 = comment();
-				var node_15 = first_child(fragment_2);
-				var consequent_12 = ($$anchor) => {
-					var div_19 = root_10$4();
+				var node_13 = first_child(fragment_1);
+				var consequent_10 = ($$anchor) => {
+					var div_19 = root_9$5();
 					var div_20 = sibling(child(div_19), 2);
-					var button_4 = child(div_20);
-					var button_5 = sibling(button_4, 2);
+					var button_3 = child(div_20);
+					var button_4 = sibling(button_3, 2);
 					reset(div_20);
 					reset(div_19);
 					template_effect(() => {
+						button_3.disabled = get(busy);
 						button_4.disabled = get(busy);
-						button_5.disabled = get(busy);
 					});
-					delegated("click", button_4, () => set(confirmDiscard, false));
-					delegated("click", button_5, discard);
+					delegated("click", button_3, () => set(confirmDiscard, false));
+					delegated("click", button_4, discard);
 					append($$anchor, div_19);
 				};
-				var consequent_15 = ($$anchor) => {
-					var div_21 = root_14$1();
+				var consequent_12 = ($$anchor) => {
+					var div_21 = root_12$3();
 					var div_22 = sibling(child(div_21), 2);
 					var div_23 = child(div_22);
-					var node_16 = sibling(child(div_23), 2);
-					var consequent_13 = ($$anchor) => {
-						var button_6 = root_11$4();
-						var text_12 = only_child(button_6);
-						template_effect(($0) => set_text(text_12, `Estimé ${$0 ?? ""}`), [() => nf(get(mval))]);
-						delegated("click", button_6, () => set(price, String(get(mval)), true));
-						append($$anchor, button_6);
+					var node_14 = sibling(child(div_23), 2);
+					var consequent_11 = ($$anchor) => {
+						var button_5 = root_10$5();
+						var text_11 = only_child(button_5);
+						template_effect(($0) => set_text(text_11, `Estimé ${$0 ?? ""}`), [() => nf(get(mval))]);
+						delegated("click", button_5, () => set(price, String(get(mval)), true));
+						append($$anchor, button_5);
 					};
-					if_block(node_16, ($$render) => {
-						if (get(mval) != null) $$render(consequent_13);
+					if_block(node_14, ($$render) => {
+						if (get(mval) != null) $$render(consequent_11);
 					});
 					reset(div_23);
 					var div_24 = sibling(div_23, 2);
@@ -5285,145 +5150,140 @@
 					var div_25 = sibling(div_22, 2);
 					var div_26 = sibling(child(div_25), 2);
 					each(div_26, 21, () => DURATIONS, index, ($$anchor, h) => {
-						var button_7 = root_12$3();
-						let classes_3;
-						var text_13 = only_child(button_7);
+						var button_6 = root_11$4();
+						let classes_2;
+						var text_12 = only_child(button_6);
 						template_effect(() => {
-							classes_3 = set_class(button_7, 1, "sell2-dur", null, classes_3, { on: get(durationH) === get(h) });
-							set_text(text_13, `${get(h) ?? ""} h`);
+							classes_2 = set_class(button_6, 1, "sell2-dur", null, classes_2, { on: get(durationH) === get(h) });
+							set_text(text_12, `${get(h) ?? ""} h`);
 						});
-						delegated("click", button_7, () => set(durationH, get(h), true));
-						append($$anchor, button_7);
+						delegated("click", button_6, () => set(durationH, get(h), true));
+						append($$anchor, button_6);
 					});
 					reset(div_26);
 					reset(div_25);
 					var div_27 = sibling(div_25, 2);
-					var button_8 = child(div_27);
-					var button_9 = sibling(button_8, 2);
-					var text_14 = only_child(button_9, true);
+					var button_7 = child(div_27);
+					var button_8 = sibling(button_7, 2);
+					var text_13 = only_child(button_8, true);
 					reset(div_27);
-					var node_17 = sibling(div_27, 2);
-					var consequent_14 = ($$anchor) => {
-						var button_10 = root_13$2();
-						delegated("click", button_10, sellNative);
-						append($$anchor, button_10);
-					};
-					if_block(node_17, ($$render) => {
-						if (get(sellErr)) $$render(consequent_14);
-					});
 					reset(div_21);
 					template_effect(($0) => {
-						button_8.disabled = get(busy);
-						button_9.disabled = $0;
-						set_text(text_14, get(busy) ? "Mise en vente..." : "Mettre en vente");
-					}, [() => get(busy) || !(Number(get(price)) > 0)]);
+						button_7.disabled = get(busy);
+						button_8.disabled = $0;
+						set_text(text_13, get(busy) ? "Mise en vente..." : "Mettre en vente");
+					}, [() => get(busy) || !(Number(get(price)) >= 1)]);
 					bind_value(input, () => get(price), ($$value) => set(price, $$value));
-					delegated("click", button_8, () => set(sellOpen, false));
-					delegated("click", button_9, sell);
+					delegated("click", button_7, () => set(sellOpen, false));
+					delegated("click", button_8, sell);
 					append($$anchor, div_21);
 				};
 				var alternate = ($$anchor) => {
-					var div_28 = root_15$1();
-					var button_11 = child(div_28);
-					var button_12 = sibling(button_11, 2);
+					var div_28 = root_13$3();
+					var button_9 = child(div_28);
+					var button_10 = sibling(button_9, 2);
 					reset(div_28);
-					delegated("click", button_11, openSell);
-					delegated("click", button_12, () => set(confirmDiscard, true));
+					delegated("click", button_9, openSell);
+					delegated("click", button_10, () => set(confirmDiscard, true));
 					append($$anchor, div_28);
 				};
-				if_block(node_15, ($$render) => {
-					if (get(confirmDiscard)) $$render(consequent_12);
-					else if (get(sellOpen)) $$render(consequent_15, 1);
+				if_block(node_13, ($$render) => {
+					if (get(confirmDiscard)) $$render(consequent_10);
+					else if (get(sellOpen)) $$render(consequent_12, 1);
 					else $$render(alternate, -1);
 				});
-				append($$anchor, fragment_2);
+				append($$anchor, fragment_1);
 			};
-			if_block(node_14, ($$render) => {
-				if (data.canAct && !readonly() && !get(done)) $$render(consequent_16);
+			if_block(node_12, ($$render) => {
+				if (!readonly() && !get(done)) $$render(consequent_13);
 			});
 			next(2);
 			reset(div_6);
 			append($$anchor, div_6);
 		};
-		var alternate_1 = ($$anchor) => {
-			var div_29 = root_25();
-			var node_18 = child(div_29);
-			var consequent_18 = ($$anchor) => {
-				append($$anchor, root_17$1());
+		var alternate_2 = ($$anchor) => {
+			var div_29 = root_23$1();
+			var node_15 = child(div_29);
+			var consequent_15 = ($$anchor) => {
+				append($$anchor, root_15$3());
 			};
-			var consequent_19 = ($$anchor) => {
-				append($$anchor, root_18$1());
+			var consequent_16 = ($$anchor) => {
+				append($$anchor, root_16$3());
 			};
-			var consequent_25 = ($$anchor) => {
-				var fragment_3 = root_24$1();
-				var node_19 = first_child(fragment_3);
-				var consequent_20 = ($$anchor) => {
-					var div_30 = root_19$1();
+			var consequent_21 = ($$anchor) => {
+				var fragment_2 = root_22$2();
+				var node_16 = first_child(fragment_2);
+				var consequent_17 = ($$anchor) => {
+					var div_30 = root_17$3();
 					var div_31 = sibling(child(div_30), 2);
-					var text_15 = child(div_31);
+					var text_14 = child(div_31);
 					next();
 					reset(div_31);
 					reset(div_30);
-					template_effect(($0) => set_text(text_15, `${$0 ?? ""} `), [() => nf(get(market).soldAvg)]);
+					template_effect(($0) => set_text(text_14, `${$0 ?? ""} `), [() => nf(get(market).soldAvg)]);
 					append($$anchor, div_30);
 				};
-				if_block(node_19, ($$render) => {
-					if (get(market).soldAvg != null) $$render(consequent_20);
+				var alternate_1 = ($$anchor) => {
+					append($$anchor, root_18$2());
+				};
+				if_block(node_16, ($$render) => {
+					if (get(market).soldAvg != null) $$render(consequent_17);
+					else $$render(alternate_1, -1);
 				});
-				var node_20 = sibling(node_19, 2);
-				var consequent_21 = ($$anchor) => {
-					var div_32 = root_20$1();
+				var node_17 = sibling(node_16, 2);
+				var consequent_18 = ($$anchor) => {
+					var div_32 = root_19$2();
 					var div_33 = sibling(child(div_32), 2);
 					var div_34 = child(div_33);
 					var span_2 = child(div_34);
-					var text_16 = only_child(span_2, true);
-					var text_17 = only_child(sibling(span_2), true);
+					var text_15 = only_child(span_2, true);
+					var text_16 = only_child(sibling(span_2), true);
 					reset(div_34);
-					var svg_1 = sibling(div_34, 2);
-					var path = child(svg_1);
+					var svg = sibling(div_34, 2);
+					var path = child(svg);
 					var path_1 = sibling(path);
-					reset(svg_1);
+					reset(svg);
 					reset(div_33);
 					var div_35 = sibling(div_33, 2);
 					var span_4 = child(div_35);
-					var text_18 = only_child(span_4, true);
-					var text_19 = only_child(sibling(span_4), true);
+					var text_17 = only_child(span_4, true);
+					var text_18 = only_child(sibling(span_4), true);
 					reset(div_35);
 					reset(div_32);
 					template_effect(($0, $1) => {
-						set_text(text_16, $0);
-						set_text(text_17, $1);
+						set_text(text_15, $0);
+						set_text(text_16, $1);
 						set_attribute(path, "d", get(chart).area);
 						set_attribute(path_1, "d", get(chart).d);
-						set_text(text_18, get(chart).first);
-						set_text(text_19, get(chart).last);
+						set_text(text_17, get(chart).first);
+						set_text(text_18, get(chart).last);
 					}, [() => nf(get(chart).max), () => nf(get(chart).min)]);
 					append($$anchor, div_32);
 				};
-				if_block(node_20, ($$render) => {
-					if (get(chart)) $$render(consequent_21);
+				if_block(node_17, ($$render) => {
+					if (get(chart)) $$render(consequent_18);
 				});
-				var node_21 = sibling(node_20, 2);
-				var consequent_22 = ($$anchor) => {
-					var div_36 = root_21$1();
+				var node_18 = sibling(node_17, 2);
+				var consequent_19 = ($$anchor) => {
+					var div_36 = root_20$2();
 					var div_37 = child(div_36);
-					var text_20 = only_child(sibling(child(div_37)), true);
+					var text_19 = only_child(sibling(child(div_37)), true);
 					reset(div_37);
 					var div_39 = sibling(div_37, 2);
-					var text_21 = only_child(sibling(child(div_39)), true);
+					var text_20 = only_child(sibling(child(div_39)), true);
 					reset(div_39);
 					var div_41 = sibling(div_39, 2);
-					var text_22 = only_child(sibling(child(div_41)), true);
+					var text_21 = only_child(sibling(child(div_41)), true);
 					reset(div_41);
 					var div_43 = sibling(div_41, 2);
-					var text_23 = only_child(sibling(child(div_43)), true);
+					var text_22 = only_child(sibling(child(div_43)), true);
 					reset(div_43);
 					reset(div_36);
 					template_effect(($0, $1, $2) => {
-						set_text(text_20, $0);
-						set_text(text_21, $1);
-						set_text(text_22, $2);
-						set_text(text_23, get(market).soldCount);
+						set_text(text_19, $0);
+						set_text(text_20, $1);
+						set_text(text_21, $2);
+						set_text(text_22, get(market).soldCount);
 					}, [
 						() => nf(get(market).soldAvg),
 						() => nf(get(market).soldMin),
@@ -5431,50 +5291,43 @@
 					]);
 					append($$anchor, div_36);
 				};
-				if_block(node_21, ($$render) => {
-					if (get(market).soldCount) $$render(consequent_22);
+				if_block(node_18, ($$render) => {
+					if (get(market).soldCount) $$render(consequent_19);
 				});
-				var node_22 = sibling(node_21, 2);
-				var consequent_23 = ($$anchor) => {
-					append($$anchor, root_22$1());
+				var node_19 = sibling(node_18, 2);
+				var consequent_20 = ($$anchor) => {
+					append($$anchor, root_21$2());
 				};
-				if_block(node_22, ($$render) => {
-					if (get(market).soldAvg == null && !get(market).soldCount) $$render(consequent_23);
+				if_block(node_19, ($$render) => {
+					if (!get(market).isPro) $$render(consequent_20);
 				});
-				var node_23 = sibling(node_22, 2);
-				var consequent_24 = ($$anchor) => {
-					append($$anchor, root_23$1());
-				};
-				if_block(node_23, ($$render) => {
-					if (!get(market).isPro) $$render(consequent_24);
-				});
-				append($$anchor, fragment_3);
+				append($$anchor, fragment_2);
 			};
-			if_block(node_18, ($$render) => {
-				if (get(marketState) === "loading") $$render(consequent_18);
-				else if (get(marketState) === "error") $$render(consequent_19, 1);
-				else if (get(market)) $$render(consequent_25, 2);
+			if_block(node_15, ($$render) => {
+				if (get(marketState) === "loading") $$render(consequent_15);
+				else if (get(marketState) === "error") $$render(consequent_16, 1);
+				else if (get(market)) $$render(consequent_21, 2);
 			});
 			reset(div_29);
 			append($$anchor, div_29);
 		};
-		if_block(node_2, ($$render) => {
-			if (get(tab) === "details") $$render(consequent_17);
-			else $$render(alternate_1, -1);
+		if_block(node_3, ($$render) => {
+			if (get(tab) === "details") $$render(consequent_14);
+			else $$render(alternate_2, -1);
 		});
-		var node_24 = sibling(node_2, 2);
-		var consequent_26 = ($$anchor) => {
-			var div_46 = root_26();
-			let classes_4;
-			var text_24 = only_child(div_46, true);
+		var node_20 = sibling(node_3, 2);
+		var consequent_22 = ($$anchor) => {
+			var div_46 = root_24$1();
+			let classes_3;
+			var text_23 = only_child(div_46, true);
 			template_effect(() => {
-				classes_4 = set_class(div_46, 1, "modal-msg", null, classes_4, { ok: get(msgOk) });
-				set_text(text_24, get(msg));
+				classes_3 = set_class(div_46, 1, "modal-msg", null, classes_3, { ok: get(msgOk) });
+				set_text(text_23, get(msg));
 			});
 			append($$anchor, div_46);
 		};
-		if_block(node_24, ($$render) => {
-			if (get(msg)) $$render(consequent_26);
+		if_block(node_20, ($$render) => {
+			if (get(msg)) $$render(consequent_22);
 		});
 		reset(div_3);
 		reset(div_1);
@@ -5498,17 +5351,30 @@
 		pop();
 	}
 	delegate(["click"]);
-	var root$6 = from_html(`<div class="rg-card"><div class="rg-aura"></div> <button class="card-btn"><!></button></div>`);
-	var root_1$6 = from_html(`<div class="reveal reveal-all"><div class="reveal-all-head"><h2>Votre paquet</h2> <div class="sub"> </div></div> <div class="reveal-grid"></div> <button class="btn primary">Terminé</button></div>`);
-	var root_2$6 = from_html(`<div class="stage-aura"></div> <div class="flip-in"><button class="card-btn"><!></button></div>`, 1);
-	var root_3$6 = from_html(`<div class="reveal-rarity"> </div>`);
-	var root_4$6 = from_html(`<span></span>`);
-	var root_5$6 = from_html(`<div class="reveal"><div class="count">Carte <b> </b> </div> <div class="stage" role="group" aria-label="Carte, glissez ou utilisez les flèches" style="touch-action:pan-y"><!></div> <!> <div class="dots"></div> <div class="navrow"><button class="arrow" aria-label="Précédent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></button> <button class="btn primary"> </button> <button class="arrow" aria-label="Suivant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></button></div> <button class="reveal-skip">Tout révéler</button></div>`);
-	var root_6$6 = from_html(`<!> <!>`, 1);
+	var root$8 = from_html(`<span class="haul-chip"><b> </b> </span>`);
+	var root_1$7 = from_html(`<div class="haul"></div>`);
+	var root_2$6 = from_html(`<div class="rg-card"><div class="rg-aura"></div> <button class="card-btn"><!></button></div>`);
+	var root_3$6 = from_html(`<div class="reveal reveal-all"><div class="reveal-all-head"><h2> </h2> <div class="sub"> </div> <!></div> <div class="reveal-grid"></div> <button class="btn primary">Terminé</button></div>`);
+	var root_4$6 = from_html(`<div class="stage-aura"></div> <div class="flip-in"><button class="card-btn"><!></button></div>`, 1);
+	var root_5$6 = from_html(`<div class="reveal-rarity"> </div>`);
+	var root_6$6 = from_html(`<span></span>`);
+	var root_7$6 = from_html(`<div class="reveal"><div class="count">Carte <b> </b> </div> <div class="stage" role="group" aria-label="Carte, glissez ou utilisez les flèches" style="touch-action:pan-y"><!></div> <!> <div class="dots"></div> <div class="navrow"><button class="arrow" aria-label="Précédent"><!></button> <button class="btn primary"> </button> <button class="arrow" aria-label="Suivant"><!></button></div> <button class="reveal-skip">Tout révéler</button></div>`);
+	var root_8$6 = from_html(`<!> <!>`, 1);
 	function Reveal($$anchor, $$props) {
 		push($$props, true);
+		let packs = prop($$props, "packs", 3, 1);
 		let i = state(0);
-		let showAll = state(false);
+		let showAll = state(packs() > 1);
+		const RANK = {
+			L: 5,
+			UR: 4,
+			SR: 3,
+			R: 2,
+			PC: 1,
+			C: 0
+		};
+		const gridCards = user_derived(() => packs() > 1 ? [...$$props.cards].sort((a, b) => RANK[b.rarity] - RANK[a.rarity]) : $$props.cards);
+		const tally = user_derived(() => Object.keys(RANK).reverse().map((r) => [r, $$props.cards.filter((c) => c.rarity === r).length]).filter(([, n]) => n));
 		let selected = state(null);
 		let last = user_derived(() => get(i) === $$props.cards.length - 1);
 		let newCount = user_derived(() => $$props.cards.filter((c) => c.is_new).length);
@@ -5554,20 +5420,47 @@
 				else set(i, get(i) + 1);
 			} else if (get(i) > 0) set(i, get(i) - 1);
 		}
-		var fragment = root_6$6();
+		var fragment = root_8$6();
 		event("keydown", $window, onKey);
 		var node = first_child(fragment);
-		var consequent = ($$anchor) => {
-			var div = root_1$6();
+		var consequent_1 = ($$anchor) => {
+			var div = root_3$6();
 			var div_1 = child(div);
-			var text = only_child(sibling(child(div_1), 2));
+			var h2 = child(div_1);
+			var text = only_child(h2, true);
+			var div_2 = sibling(h2, 2);
+			var text_1 = only_child(div_2);
+			var node_1 = sibling(div_2, 2);
+			var consequent = ($$anchor) => {
+				var div_3 = root_1$7();
+				each(div_3, 21, () => get(tally), index, ($$anchor, $$item) => {
+					var $$array = user_derived(() => to_array(get($$item), 2));
+					let r = () => get($$array)[0];
+					let n = () => get($$array)[1];
+					var span = root$8();
+					var b_1 = child(span);
+					var text_2 = only_child(b_1, true);
+					var text_3 = sibling(b_1);
+					reset(span);
+					template_effect(($0) => {
+						set_style(span, `--rc:var(--r-${$0 ?? ""})`);
+						set_text(text_2, n());
+						set_text(text_3, ` ${RNAME[r()] ?? ""}`);
+					}, [() => r().toLowerCase()]);
+					append($$anchor, span);
+				});
+				reset(div_3);
+				append($$anchor, div_3);
+			};
+			if_block(node_1, ($$render) => {
+				if (packs() > 1) $$render(consequent);
+			});
 			reset(div_1);
-			var div_3 = sibling(div_1, 2);
-			each(div_3, 21, () => $$props.cards, index, ($$anchor, c, k) => {
-				var div_4 = root$6();
-				set_style(div_4, `animation-delay:${k * 70}ms`);
-				var div_5 = child(div_4);
-				var button = sibling(div_5, 2);
+			var div_4 = sibling(div_1, 2);
+			each(div_4, 21, () => get(gridCards), index, ($$anchor, c, k) => {
+				var div_5 = root_2$6();
+				var div_6 = child(div_5);
+				var button = sibling(div_6, 2);
 				Card(child(button), {
 					get card() {
 						return get(c);
@@ -5580,34 +5473,38 @@
 					}
 				});
 				reset(button);
-				reset(div_4);
-				template_effect(() => {
-					set_attribute(div_5, "data-r", get(c).rarity);
+				reset(div_5);
+				template_effect(($0) => {
+					set_style(div_5, `animation-delay:${$0 ?? ""}ms`);
+					set_attribute(div_6, "data-r", get(c).rarity);
 					set_attribute(button, "aria-label", get(c).title);
-				});
+				}, [() => Math.min(k, 20) * 50]);
 				delegated("click", button, () => openCard(get(c)));
-				append($$anchor, div_4);
+				append($$anchor, div_5);
 			});
-			reset(div_3);
-			var button_1 = sibling(div_3, 2);
+			reset(div_4);
+			var button_1 = sibling(div_4, 2);
 			reset(div);
-			template_effect(() => set_text(text, `${$$props.cards.length ?? ""} cartes${get(newCount) ? `, ${get(newCount)} nouvelle${get(newCount) > 1 ? "s" : ""}` : ""}`));
+			template_effect(() => {
+				set_text(text, packs() > 1 ? `Vos ${packs()} paquets` : "Votre paquet");
+				set_text(text_1, `${$$props.cards.length ?? ""} cartes${get(newCount) ? `, ${get(newCount)} nouvelle${get(newCount) > 1 ? "s" : ""}` : ""}`);
+			});
 			delegated("click", button_1, () => $$props.ondone?.());
 			append($$anchor, div);
 		};
 		var alternate = ($$anchor) => {
-			var div_6 = root_5$6();
-			var div_7 = child(div_6);
-			var b = sibling(child(div_7));
-			var text_1 = only_child(b, true);
-			var text_2 = sibling(b);
-			reset(div_7);
-			var div_8 = sibling(div_7, 2);
-			key(child(div_8), () => get(i), ($$anchor) => {
-				var fragment_1 = root_2$6();
-				var div_9 = first_child(fragment_1);
-				var div_10 = sibling(div_9, 2);
-				var button_2 = child(div_10);
+			var div_7 = root_7$6();
+			var div_8 = child(div_7);
+			var b_2 = sibling(child(div_8));
+			var text_4 = only_child(b_2, true);
+			var text_5 = sibling(b_2);
+			reset(div_8);
+			var div_9 = sibling(div_8, 2);
+			key(child(div_9), () => get(i), ($$anchor) => {
+				var fragment_1 = root_4$6();
+				var div_10 = first_child(fragment_1);
+				var div_11 = sibling(div_10, 2);
+				var button_2 = child(div_11);
 				Card(child(button_2), {
 					get card() {
 						return $$props.cards[get(i)];
@@ -5621,67 +5518,77 @@
 					}
 				});
 				reset(button_2);
-				reset(div_10);
+				reset(div_11);
 				template_effect(() => {
-					set_attribute(div_9, "data-r", $$props.cards[get(i)].rarity);
+					set_attribute(div_10, "data-r", $$props.cards[get(i)].rarity);
 					set_attribute(button_2, "aria-label", `Détails de ${$$props.cards[get(i)].title ?? ""}`);
 				});
 				delegated("click", button_2, () => openCard($$props.cards[get(i)]));
 				append($$anchor, fragment_1);
 			});
-			reset(div_8);
-			var node_4 = sibling(div_8, 2);
-			key(node_4, () => get(i), ($$anchor) => {
-				var div_11 = root_3$6();
-				var text_3 = only_child(div_11, true);
+			reset(div_9);
+			var node_5 = sibling(div_9, 2);
+			key(node_5, () => get(i), ($$anchor) => {
+				var div_12 = root_5$6();
+				var text_6 = only_child(div_12, true);
 				template_effect(() => {
-					set_attribute(div_11, "data-r", $$props.cards[get(i)].rarity);
-					set_text(text_3, RNAME[$$props.cards[get(i)].rarity] || $$props.cards[get(i)].rarity);
+					set_attribute(div_12, "data-r", $$props.cards[get(i)].rarity);
+					set_text(text_6, RNAME[$$props.cards[get(i)].rarity] || $$props.cards[get(i)].rarity);
 				});
-				append($$anchor, div_11);
+				append($$anchor, div_12);
 			});
-			var div_12 = sibling(node_4, 2);
-			each(div_12, 21, () => $$props.cards, index, ($$anchor, _, k) => {
-				var span = root_4$6();
+			var div_13 = sibling(node_5, 2);
+			each(div_13, 21, () => $$props.cards, index, ($$anchor, _, k) => {
+				var span_1 = root_6$6();
 				let classes;
-				template_effect(() => classes = set_class(span, 1, "d", null, classes, {
+				template_effect(() => classes = set_class(span_1, 1, "d", null, classes, {
 					on: k === get(i),
 					seen: k < get(i)
 				}));
-				append($$anchor, span);
+				append($$anchor, span_1);
 			});
-			reset(div_12);
-			var div_13 = sibling(div_12, 2);
-			var button_3 = child(div_13);
-			var button_4 = sibling(button_3, 2);
-			var text_4 = only_child(button_4, true);
-			var button_5 = sibling(button_4, 2);
 			reset(div_13);
-			var button_6 = sibling(div_13, 2);
-			reset(div_6);
+			var div_14 = sibling(div_13, 2);
+			var button_3 = child(div_14);
+			Icon(child(button_3), {
+				name: "prev",
+				width: 2
+			});
+			reset(button_3);
+			var button_4 = sibling(button_3, 2);
+			var text_7 = only_child(button_4, true);
+			var button_5 = sibling(button_4, 2);
+			Icon(child(button_5), {
+				name: "next",
+				width: 2
+			});
+			reset(button_5);
+			reset(div_14);
+			var button_6 = sibling(div_14, 2);
+			reset(div_7);
 			template_effect(() => {
-				set_text(text_1, get(i) + 1);
-				set_text(text_2, ` / ${$$props.cards.length ?? ""}`);
-				set_attribute(div_8, "data-r", $$props.cards[get(i)].rarity);
+				set_text(text_4, get(i) + 1);
+				set_text(text_5, ` / ${$$props.cards.length ?? ""}`);
+				set_attribute(div_9, "data-r", $$props.cards[get(i)].rarity);
 				button_3.disabled = get(i) === 0;
-				set_text(text_4, get(last) ? "Terminé" : "Suivant");
+				set_text(text_7, get(last) ? "Terminé" : "Suivant");
 				button_5.disabled = get(last);
 			});
-			delegated("pointerdown", div_8, onDown);
-			delegated("pointerup", div_8, onUp);
-			event("pointercancel", div_8, () => sx = null);
+			delegated("pointerdown", div_9, onDown);
+			delegated("pointerup", div_9, onUp);
+			event("pointercancel", div_9, () => sx = null);
 			delegated("click", button_3, () => get(i) > 0 && set(i, get(i) - 1));
 			delegated("click", button_4, () => get(last) ? $$props.ondone?.() : set(i, get(i) + 1));
 			delegated("click", button_5, () => !get(last) && set(i, get(i) + 1));
 			delegated("click", button_6, () => set(showAll, true));
-			append($$anchor, div_6);
+			append($$anchor, div_7);
 		};
 		if_block(node, ($$render) => {
-			if (get(showAll)) $$render(consequent);
+			if (get(showAll)) $$render(consequent_1);
 			else $$render(alternate, -1);
 		});
-		var node_5 = sibling(node, 2);
-		var consequent_1 = ($$anchor) => {
+		var node_8 = sibling(node, 2);
+		var consequent_2 = ($$anchor) => {
 			CardModal($$anchor, {
 				get item() {
 					return get(selected);
@@ -5690,8 +5597,8 @@
 				onclose: () => set(selected, null)
 			});
 		};
-		if_block(node_5, ($$render) => {
-			if (get(selected)) $$render(consequent_1);
+		if_block(node_8, ($$render) => {
+			if (get(selected)) $$render(consequent_2);
 		});
 		append($$anchor, fragment);
 		pop();
@@ -5701,14 +5608,15 @@
 		"pointerdown",
 		"pointerup"
 	]);
-	var root$5 = from_html(`<div class="special-note">Un paquet spécial est disponible sur le site. <button class="link-btn">Ouvrir la version originale</button></div>`);
-	var root_1$5 = from_html(`<span class="booster-back b2"></span>`);
+	var root$7 = from_html(`<div class="special-note">Un paquet spécial est disponible sur le site. <button class="link-btn">Ouvrir la version originale</button></div>`);
+	var root_1$6 = from_html(`<span class="booster-back b2"></span>`);
 	var root_2$5 = from_html(`<span class="booster-back b1"></span>`);
-	var root_3$5 = from_html(`<div class="regen-line">Prochain paquet dans <b> </b></div>`);
-	var root_4$5 = from_html(`<div class="special-note">Vérification humaine requise par le jeu. <button class="link-btn">Ouvrir la version originale pour valider</button></div>`);
-	var root_5$5 = from_html(`<div class="regen-line err"> </div>`);
-	var root_6$5 = from_html(`<div class="session-recap"> </div>`);
-	var root_7$5 = from_html(`<div class="pull-ready"><!> <h1>Ouvrir un paquet</h1> <div class="sub">Découvrez 5 nouvelles cartes Wikipédia</div> <div class="booster-stage"><button aria-label="Ouvrir le paquet"><!> <!> <span class="booster-main"><img alt="Paquet WikiMasters" draggable="false"/> <span class="booster-shine"></span></span></button></div> <div><span class="pc-num"> </span> <span class="pc-lbl"> </span></div> <button class="btn primary big"> </button> <!> <!> <!> <!></div>`);
+	var root_3$5 = from_html(`<button class="btn big"> </button>`);
+	var root_4$5 = from_html(`<div class="regen-line">Prochain paquet dans <b> </b></div>`);
+	var root_5$5 = from_html(`<div class="special-note">Vérification humaine requise par le jeu. <button class="link-btn">Ouvrir la version originale pour valider</button></div>`);
+	var root_6$5 = from_html(`<div class="regen-line err"> </div>`);
+	var root_7$5 = from_html(`<div class="session-recap"> </div>`);
+	var root_8$5 = from_html(`<div class="pull-ready"><!> <h1>Ouvrir un paquet</h1> <div class="sub">Découvrez 5 nouvelles cartes Wikipédia</div> <div class="booster-stage"><button aria-label="Ouvrir le paquet"><!> <!> <span class="booster-main"><img alt="Paquet WikiMasters" draggable="false"/> <span class="booster-shine"></span></span></button></div> <div><span class="pc-num"> </span> <span class="pc-lbl"> </span></div> <div class="pull-actions"><button class="btn primary big"> </button> <!></div> <!> <!> <!> <!></div>`);
 	function Pulls($$anchor, $$props) {
 		push($$props, true);
 		let phase = state("ready");
@@ -5719,40 +5627,44 @@
 		let needVerify = state(false);
 		let special = state(false);
 		const PACK_IMG = "/card_pack.png";
-		data.specialAvailable?.().then((v) => set(special, v, true)).catch(() => {});
-		function toOriginal() {
-			try {
-				localStorage.setItem("wm-off", "1");
-			} catch {}
-			location.reload();
-		}
+		data.specialAvailable().then((v) => set(special, v, true));
 		let packs = user_derived(() => $$props.profile?.packs_remaining ?? null);
 		let empty = user_derived(() => !$$props.profile || get(packs) == null || get(packs) === 0);
 		let stackDepth = user_derived(() => Math.min(3, Math.max(1, get(packs) || 1)));
-		async function open() {
+		let batch = state(0);
+		async function openOne() {
+			const [d] = await Promise.all([data.openPack(), new Promise((r) => setTimeout(r, 900))]);
+			if (!d?.cards?.length) throw new Error("Aucune carte reçue. Réessayez dans un instant.");
+			recordPull(d.cards);
+			return d;
+		}
+		async function open(all = false) {
 			if (get(busy) || get(empty)) return;
 			set(busy, true);
 			set(opening, true);
 			set(error, "");
 			set(needVerify, false);
-			const minAnim = new Promise((r) => setTimeout(r, 900));
+			set(batch, 0);
+			const haul = [];
 			try {
-				const [d] = await Promise.all([data.openPack(), minAnim]);
-				if (!d?.cards?.length) {
-					set(error, "Aucune carte reçue. Réessayez dans un instant.");
-					set(opening, false);
-					set(busy, false);
-					return;
-				}
-				set(cards, d.cards, true);
-				recordPull(d.cards);
-				set(phase, "revealing");
-				$$props.onchanged?.();
+				let left = get(packs);
+				do {
+					const d = await openOne();
+					haul.push(...d.cards);
+					update(batch);
+					left = d.packs_remaining;
+					$$props.onchanged?.();
+				} while (all && left > 0);
 			} catch (e) {
-				if (e && e.code === "human_verification") set(needVerify, true);
-				else set(error, e?.message || "Ouverture du paquet impossible.", true);
-				set(opening, false);
+				if (e.code === "human_verification") set(needVerify, true);
+				else set(error, e.message || "Ouverture du paquet impossible.", true);
 			}
+			if (haul.length) {
+				forgetCollection();
+				set(cards, haul, true);
+				set(phase, "revealing");
+			}
+			set(opening, false);
 			set(busy, false);
 		}
 		function done() {
@@ -5785,23 +5697,31 @@
 			return `${sec} s`;
 		}
 		var fragment = comment();
+		event("keydown", $window, (e) => {
+			if (e.key !== " " || get(phase) !== "ready" || e.composedPath()[0]?.matches?.("input, select, textarea, button")) return;
+			e.preventDefault();
+			open();
+		});
 		var node = first_child(fragment);
 		var consequent = ($$anchor) => {
 			Reveal($$anchor, {
 				get cards() {
 					return get(cards);
 				},
+				get packs() {
+					return get(batch);
+				},
 				ondone: done
 			});
 		};
 		var alternate = ($$anchor) => {
-			var div = root_7$5();
+			var div = root_8$5();
 			var node_1 = child(div);
 			var consequent_1 = ($$anchor) => {
-				var div_1 = root$5();
+				var div_1 = root$7();
 				var button = sibling(child(div_1));
 				reset(div_1);
-				delegated("click", button, toOriginal);
+				delegated("click", button, () => useOriginalSite());
 				append($$anchor, div_1);
 			};
 			if_block(node_1, ($$render) => {
@@ -5812,7 +5732,7 @@
 			let classes;
 			var node_2 = child(button_1);
 			var consequent_2 = ($$anchor) => {
-				var span = root_1$5();
+				var span = root_1$6();
 				set_style(span, "background-image:url(/card_pack.png)");
 				append($$anchor, span);
 			};
@@ -5840,49 +5760,62 @@
 			var text = only_child(span_3, true);
 			var text_1 = only_child(sibling(span_3, 2));
 			reset(div_3);
-			var button_2 = sibling(div_3, 2);
+			var div_4 = sibling(div_3, 2);
+			var button_2 = child(div_4);
 			var text_2 = only_child(button_2, true);
 			var node_4 = sibling(button_2, 2);
 			var consequent_4 = ($$anchor) => {
-				var div_4 = root_3$5();
-				var text_3 = only_child(sibling(child(div_4)), true);
-				reset(div_4);
-				template_effect(($0) => set_text(text_3, $0), [() => fmt(get(secs))]);
-				append($$anchor, div_4);
+				var button_3 = root_3$5();
+				var text_3 = only_child(button_3);
+				template_effect(() => set_text(text_3, `Tout ouvrir (${get(packs) ?? ""})`));
+				delegated("click", button_3, () => open(true));
+				append($$anchor, button_3);
 			};
 			if_block(node_4, ($$render) => {
-				if (get(secs) != null) $$render(consequent_4);
+				if (get(packs) > 1 && !get(busy)) $$render(consequent_4);
 			});
-			var node_5 = sibling(node_4, 2);
+			reset(div_4);
+			var node_5 = sibling(div_4, 2);
 			var consequent_5 = ($$anchor) => {
 				var div_5 = root_4$5();
-				var button_3 = sibling(child(div_5));
+				var text_4 = only_child(sibling(child(div_5)), true);
 				reset(div_5);
-				delegated("click", button_3, toOriginal);
+				template_effect(($0) => set_text(text_4, $0), [() => fmt(get(secs))]);
 				append($$anchor, div_5);
 			};
 			if_block(node_5, ($$render) => {
-				if (get(needVerify)) $$render(consequent_5);
+				if (get(secs) != null) $$render(consequent_5);
 			});
 			var node_6 = sibling(node_5, 2);
 			var consequent_6 = ($$anchor) => {
 				var div_6 = root_5$5();
-				var text_4 = only_child(div_6, true);
-				template_effect(() => set_text(text_4, get(error)));
+				var button_4 = sibling(child(div_6));
+				reset(div_6);
+				delegated("click", button_4, () => useOriginalSite());
 				append($$anchor, div_6);
 			};
 			if_block(node_6, ($$render) => {
-				if (get(error)) $$render(consequent_6);
+				if (get(needVerify)) $$render(consequent_6);
 			});
 			var node_7 = sibling(node_6, 2);
 			var consequent_7 = ($$anchor) => {
 				var div_7 = root_6$5();
-				var text_5 = only_child(div_7);
-				template_effect(() => set_text(text_5, `Cette session : ${session.packs ?? ""} paquet${session.packs > 1 ? "s" : ""} ouvert${session.packs > 1 ? "s" : ""}, ${session.newCards ?? ""} nouvelle${session.newCards > 1 ? "s" : ""}`));
+				var text_5 = only_child(div_7, true);
+				template_effect(() => set_text(text_5, get(error)));
 				append($$anchor, div_7);
 			};
 			if_block(node_7, ($$render) => {
-				if (session.packs > 0) $$render(consequent_7);
+				if (get(error)) $$render(consequent_7);
+			});
+			var node_8 = sibling(node_7, 2);
+			var consequent_8 = ($$anchor) => {
+				var div_8 = root_7$5();
+				var text_6 = only_child(div_8);
+				template_effect(() => set_text(text_6, `Cette session : ${session.packs ?? ""} paquet${session.packs > 1 ? "s" : ""} ouvert${session.packs > 1 ? "s" : ""}, ${session.newCards ?? ""} nouvelle${session.newCards > 1 ? "s" : ""}`));
+				append($$anchor, div_8);
+			};
+			if_block(node_8, ($$render) => {
+				if (session.packs > 0) $$render(consequent_8);
 			});
 			reset(div);
 			template_effect(() => {
@@ -5895,10 +5828,10 @@
 				set_text(text, get(packs) ?? "-");
 				set_text(text_1, `paquet${get(packs) > 1 ? "s" : ""} disponible${get(packs) > 1 ? "s" : ""}${$$props.profile?.pack_cap ? ` sur ${$$props.profile.pack_cap}` : ""}`);
 				button_2.disabled = get(busy) || get(empty);
-				set_text(text_2, get(busy) ? "Ouverture..." : get(empty) ? "Aucun paquet" : "Ouvrir le paquet");
+				set_text(text_2, get(busy) ? get(batch) ? `Ouverture... ${get(batch) + 1} / ${get(packs) + get(batch)}` : "Ouverture..." : get(empty) ? "Aucun paquet" : "Ouvrir le paquet");
 			});
-			delegated("click", button_1, open);
-			delegated("click", button_2, open);
+			delegated("click", button_1, () => open());
+			delegated("click", button_2, () => open());
 			append($$anchor, div);
 		};
 		if_block(node, ($$render) => {
@@ -5906,6 +5839,41 @@
 			else $$render(alternate, -1);
 		});
 		append($$anchor, fragment);
+		pop();
+	}
+	delegate(["click"]);
+	var root$6 = from_html(`<button class="search-clear" aria-label="Effacer la recherche"><!></button>`);
+	var root_1$5 = from_html(`<div class="search-wrap"><!> <input class="search" type="search"/> <!></div>`);
+	function SearchBox($$anchor, $$props) {
+		push($$props, true);
+		let value = prop($$props, "value", 15, "");
+		var div = root_1$5();
+		var node = child(div);
+		Icon(node, {
+			name: "search",
+			class: "search-ico"
+		});
+		var input = sibling(node, 2);
+		remove_input_defaults(input);
+		var node_1 = sibling(input, 2);
+		var consequent = ($$anchor) => {
+			var button = root$6();
+			Icon(child(button), {
+				name: "close",
+				width: 2,
+				class: "x-ico"
+			});
+			reset(button);
+			delegated("click", button, () => value(""));
+			append($$anchor, button);
+		};
+		if_block(node_1, ($$render) => {
+			if (value()) $$render(consequent);
+		});
+		reset(div);
+		template_effect(() => set_attribute(input, "placeholder", $$props.placeholder));
+		bind_value(input, value);
+		append($$anchor, div);
 		pop();
 	}
 	delegate(["click"]);
@@ -5946,99 +5914,132 @@
 			}
 		};
 	}
-	var root$4 = from_html(`<div class="empty"><b> </b><div>Vérifiez que vous êtes connecté, puis réessayez.</div><button class="btn">Réessayer</button></div>`);
+	function lazyValues(onvalue, { concurrency = 5 } = {}) {
+		const queue = createQueue({ concurrency });
+		function load(card, front = false) {
+			queue.push(card.id, () => marketValueFor(card).then((v) => onvalue(card.id, v)));
+			if (front) queue.prioritize(card.id);
+		}
+		const io = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
+			for (const e of entries) {
+				if (!e.isIntersecting) continue;
+				io.unobserve(e.target);
+				load(e.target.__card, true);
+			}
+		}, { rootMargin: "300px" });
+		function watch(node, card) {
+			node.__card = card;
+			io?.observe(node);
+			return {
+				update: (c) => node.__card = c,
+				destroy: () => io?.unobserve(node)
+			};
+		}
+		return {
+			load,
+			watch,
+			destroy: () => io?.disconnect()
+		};
+	}
+	var root$5 = from_html(`<div class="empty"><b> </b><div>Vérifiez que vous êtes connecté, puis réessayez.</div><button class="btn">Réessayer</button></div>`);
 	var root_1$4 = from_html(`<div class="wc skeleton"></div>`);
 	var root_2$4 = from_html(`<div class="grid"></div>`);
-	var root_3$4 = from_html(`<button class="search-clear" aria-label="Effacer la recherche"><svg class="x-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>`);
-	var root_4$4 = from_html(`<option>Attaque</option> <option>Défense</option>`, 1);
-	var root_5$4 = from_svg(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"></path><path d="M10.6 10.7a3 3 0 0 0 3.9 3.9"></path><path d="M9.8 4.7A10.4 10.4 0 0 1 12 4.5c6 0 9.5 7 9.5 7a17.6 17.6 0 0 1-2.9 3.8M6 6.2A17.3 17.3 0 0 0 2.5 11.5s3.5 7 9.5 7c1 0 1.9-.1 2.8-.4"></path></svg>`);
-	var root_6$4 = from_svg(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 11.5S6 4.5 12 4.5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"></path><circle cx="12" cy="11.5" r="3"></circle></svg>`);
-	var root_7$4 = from_html(`<button class="iconbtn"> </button>`);
-	var root_8$4 = from_html(`<!> <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="4"></rect><path d="M8 12l2.8 2.8L16.5 9"></path></svg> <span> </span></button>`, 1);
-	var root_9$4 = from_html(`<div class="sort-hint"> </div>`);
-	var root_10$3 = from_html(`<button></button>`);
-	var root_11$3 = from_html(`<button><span class="rl-dot"></span> <span class="rl-name"> </span> <span class="rl-n"> </span></button>`);
-	var root_12$2 = from_html(`<span class="rl-sep" aria-hidden="true"></span>`);
-	var root_13$1 = from_html(`<button title="Cartes favorites"><svg class="rl-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"></path></svg> <span class="rl-name">Favoris</span><span class="rl-n"> </span></button>`);
-	var root_14 = from_html(`<button title="Cartes brillantes"><svg class="rl-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 6.4L20 10l-6.1 1.6L12 18l-1.9-6.4L4 10l6.1-1.6z"></path></svg> <span class="rl-name">Brillantes</span><span class="rl-n"> </span></button>`);
-	var root_15 = from_html(`<div class="rarity-panel"><div class="rarity-meter" role="img" aria-label="Répartition par rareté"></div> <div class="rarity-legend"><button><span class="rl-name">Toutes</span><span class="rl-n"> </span></button> <!> <!> <!> <!></div></div>`);
-	var root_16 = from_html(`<div class="loading-more"> </div>`);
-	var root_17 = from_html(`<div class="empty"><b> </b> <div> </div></div>`);
-	var root_18 = from_html(`<span><span class="pick-check"> </span></span>`);
-	var root_19 = from_html(`<button><!> <!></button>`);
-	var root_20 = from_html(`<div class="coll-head"><div><h1>Ma collection</h1> <div class="meta"> </div></div> <div class="coll-tools"><div class="search-wrap"><svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.4-3.4"></path></svg> <input class="search" type="search" placeholder="Rechercher une carte..."/> <!></div> <div class="tool-actions"><div class="isel" title="Trier les cartes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5v14M7 19l-3-3M7 5l3 3M17 19V5M17 5l3 3M17 19l-3-3"></path></svg> <select aria-label="Trier"><option>Rareté</option><option>Valeur estimée</option><!><option>Nom</option></select></div> <button title="Afficher ou masquer l'ATK et la DEF sur les cartes"><!> <span>ATK/DEF</span></button> <!></div></div></div> <!> <!> <!> <!>`, 1);
-	var root_21 = from_html(`<span class="bulk-text"> <b> </b> ?</span> <button class="btn">Annuler</button> <button class="btn danger"> </button>`, 1);
-	var root_22 = from_html(`<span class="bulk-text"> </span> <button class="btn danger"> </button>`, 1);
-	var root_23 = from_html(`<div class="bulk-bar"><!></div>`);
-	var root_24 = from_html(`<!> <!> <!>`, 1);
+	var root_3$4 = from_html(`<option>Attaque</option> <option>Défense</option>`, 1);
+	var root_4$4 = from_html(`<button class="iconbtn"> </button>`);
+	var root_5$4 = from_html(`<div class="sort-hint"> </div>`);
+	var root_6$4 = from_html(`<button></button>`);
+	var root_7$4 = from_html(`<button><span class="rl-dot"></span> <span class="rl-name"> </span><span class="rl-n"> </span></button>`);
+	var root_8$4 = from_html(`<span class="rl-sep" aria-hidden="true"></span>`);
+	var root_9$4 = from_html(`<button title="Cartes favorites"><!><span class="rl-name">Favoris</span><span class="rl-n"> </span></button>`);
+	var root_10$4 = from_html(`<button title="Cartes brillantes"><!><span class="rl-name">Brillantes</span><span class="rl-n"> </span></button>`);
+	var root_11$3 = from_html(`<div class="rarity-panel"><div class="rarity-meter" role="img" aria-label="Répartition par rareté"></div> <div class="rarity-legend"><button><span class="rl-name">Toutes</span><span class="rl-n"> </span></button> <!> <!> <!> <!></div></div>`);
+	var root_12$2 = from_html(`<div class="loading-more"> </div>`);
+	var root_13$2 = from_html(`<b>Aucune carte ne correspond</b><div>Essayez un autre filtre ou une autre recherche.</div>`, 1);
+	var root_14$2 = from_html(`<b>Rien ici pour l'instant</b><div>Ouvrez un paquet pour commencer votre collection.</div>`, 1);
+	var root_15$2 = from_html(`<div class="empty"><!></div>`);
+	var root_16$2 = from_html(`<span><span class="pick-check"><!></span></span>`);
+	var root_17$2 = from_html(`<button><!> <!></button>`);
+	var root_18$1 = from_html(`<div class="coll-head"><div><h1>Ma collection</h1> <div class="meta"> </div></div> <div class="coll-tools"><!> <div class="tool-actions"><div class="isel" title="Trier les cartes"><!> <select aria-label="Trier"><option>Rareté</option><option>Valeur estimée</option><!><option>Nom</option></select></div> <button title="Afficher ou masquer l'ATK et la DEF"><!><span>ATK/DEF</span></button> <!> <button><!><span> </span></button></div></div></div> <!> <!> <!> <!> <!>`, 1);
+	var root_19$1 = from_html(`<span class="bulk-text"> <b> </b> ?</span> <button class="btn">Annuler</button> <button class="btn danger"> </button>`, 1);
+	var root_20$1 = from_html(`<span class="bulk-text"> </span> <button class="btn danger"> </button>`, 1);
+	var root_21$1 = from_html(`<div class="bulk-bar"><!></div>`);
+	var root_22$1 = from_html(`<!> <!> <!>`, 1);
 	function Collection($$anchor, $$props) {
 		push($$props, true);
+		let items = state(null);
+		let stats = state(null);
+		let error = state("");
+		const prefs = settings.collection;
+		let filter = state(proxy(prefs.filter));
+		let search = state("");
+		let sort = state(proxy(prefs.sort));
+		let favOnly = state(proxy(prefs.favOnly));
+		let shinyOnly = state(proxy(prefs.shinyOnly));
+		user_effect(() => Object.assign(prefs, {
+			filter: get(filter),
+			sort: get(sort),
+			favOnly: get(favOnly),
+			shinyOnly: get(shinyOnly)
+		}));
+		let selected = state(null);
+		let values = proxy({});
+		let loaded = state(0);
+		let tick = state(0);
+		const sortVals = new Map();
+		let tickTimer = null;
+		const lazy = lazyValues((id, v) => {
+			values[id] = v;
+			sortVals.set(id, v ?? -1);
+			update(loaded);
+			tickTimer ??= setTimeout(() => {
+				tickTimer = null;
+				update(tick);
+			}, 200);
+		});
+		user_effect(() => () => {
+			lazy.destroy();
+			clearTimeout(tickTimer);
+		});
+		user_effect(() => {
+			if (get(sort) === "value" && get(items)) for (const it of get(items)) lazy.load(it.card);
+		});
 		function onToggleStats() {
 			toggleHideStats();
 			if (settings.hideStats && (get(sort) === "atk" || get(sort) === "def")) set(sort, "rarity");
 		}
-		let items = state(null);
-		let stats = state(null);
-		let error = state("");
-		let filter = state("ALL");
-		let search = state("");
-		let sort = state("rarity");
-		let favOnly = state(false);
-		let shinyOnly = state(false);
-		let selected = state(null);
-		let values = proxy({});
-		let valuesLoaded = state(0);
-		const sortVals = new Map();
-		let valuesTick = state(0);
-		const vq = createQueue({ concurrency: 5 });
-		const cardById = new Map();
-		let io = null;
-		let tickTimer = null;
-		function scheduleTick() {
-			if (tickTimer) return;
-			tickTimer = setTimeout(() => {
-				tickTimer = null;
-				update(valuesTick);
-			}, 200);
-		}
-		function enqueueValue(id, front = false) {
-			if (values[id] !== void 0 || !cardById.has(id)) return;
-			vq.push(id, async () => {
-				const v = await marketValueFor(cardById.get(id)).catch(() => null);
-				values[id] = v ?? null;
-				sortVals.set(id, typeof v === "number" ? v : -1);
-				update(valuesLoaded);
-				scheduleTick();
-			});
-			if (front) vq.prioritize(id);
-		}
-		function watchValue(node, it) {
-			if (typeof IntersectionObserver !== "undefined" && !io) io = new IntersectionObserver((entries) => {
-				for (const e of entries) {
-					if (!e.isIntersecting) continue;
-					const id = e.target.__cardId;
-					if (id != null) {
-						enqueueValue(id, true);
-						io.unobserve(e.target);
-					}
-				}
-			}, { rootMargin: "300px" });
-			node.__cardId = it.card.id;
-			io?.observe(node);
-			return {
-				update(next) {
-					node.__cardId = next.card.id;
-					if (values[next.card.id] === void 0) io?.observe(node);
-				},
-				destroy() {
-					io?.unobserve(node);
-				}
+		async function load() {
+			set(error, "");
+			const show = (d, loading) => {
+				set(items, d.items, true);
+				set(stats, {
+					...d.stats,
+					loading
+				}, true);
 			};
+			try {
+				show(await loadCollection({
+					onCached: (d) => show(d, true),
+					onPartial: (d) => show(d, true)
+				}), false);
+			} catch {
+				if (!get(items)) set(error, "Impossible de charger la collection.");
+				else set(stats, {
+					...get(stats),
+					loading: false
+				}, true);
+			}
 		}
+		load();
+		const reload = () => {
+			forgetCollection();
+			set(items, null);
+			load();
+		};
 		let selecting = state(false);
 		let picked = state(proxy(new Set()));
 		let bulkConfirm = state(false);
 		let bulkBusy = state(false);
+		let bulkMsg = state("");
 		function onCardClick(it) {
 			if (!get(selecting)) {
 				set(selected, it, true);
@@ -6050,111 +6051,51 @@
 		}
 		function toggleSelecting() {
 			set(selecting, !get(selecting));
-			if (!get(selecting)) {
-				set(picked, new Set(), true);
-				set(bulkConfirm, false);
-			}
-		}
-		function toggleSelectAll() {
-			set(picked, get(allShownPicked) ? new Set() : new Set(get(shown).map((it) => it.id)), true);
+			set(picked, new Set(), true);
+			set(bulkConfirm, false);
 		}
 		async function bulkDiscard() {
 			set(bulkBusy, true);
-			const ids = [...get(picked)];
 			try {
-				await Promise.all(ids.map((id) => data.discard(id).catch(() => {})));
-			} finally {
-				set(bulkBusy, false);
-				set(bulkConfirm, false);
-				set(selecting, false);
-				set(picked, new Set(), true);
-				await load();
-				$$props.onwallet?.();
-			}
-		}
-		const RARITIES = [
-			"L",
-			"UR",
-			"SR",
-			"R",
-			"PC",
-			"C"
-		];
-		const RANK = {
-			L: 5,
-			UR: 4,
-			SR: 3,
-			R: 2,
-			PC: 1,
-			C: 0
-		};
-		async function load() {
-			set(error, "");
-			set(items, null);
-			try {
-				const d = await data.collection({ onPartial: (p) => {
-					set(items, p.items, true);
-					set(stats, p.stats, true);
-				} });
-				set(items, d.items, true);
-				set(stats, d.stats, true);
-				cardById.clear();
-				for (const it of get(items)) cardById.set(it.card.id, it.card);
+				const r = await data.bulkDiscard([...get(picked)]);
+				const failed = r.failed?.length || 0;
+				set(bulkMsg, `${r.discarded_count} carte${r.discarded_count > 1 ? "s" : ""} défaussée${r.discarded_count > 1 ? "s" : ""}` + (failed ? `, ${failed} en échec` : ""));
 			} catch (e) {
-				set(error, "Impossible de charger la collection.");
-				set(items, [], true);
-				set(stats, {
-					unique: 0,
-					total: 0,
-					catalog: null,
-					counts: {}
-				}, true);
+				set(bulkMsg, e.message || "La défausse a échoué.", true);
 			}
+			set(bulkBusy, false);
+			toggleSelecting();
+			reload();
+			$$props.onwallet?.();
 		}
-		load();
-		user_effect(() => {
-			if (get(sort) === "value" && get(items)) for (const it of get(items)) enqueueValue(it.card.id);
-		});
-		user_effect(() => () => {
-			io?.disconnect();
-			io = null;
-			if (tickTimer) clearTimeout(tickTimer);
-		});
+		const RANK = Object.fromEntries(RARITIES_DESC.map((r, i) => [r, -i]));
+		const SORTS = {
+			rarity: (a, b) => RANK[b.card.rarity] - RANK[a.card.rarity] || b.count - a.count,
+			value: (a, b) => (sortVals.get(b.card.id) ?? -1) - (sortVals.get(a.card.id) ?? -1) || RANK[b.card.rarity] - RANK[a.card.rarity],
+			atk: (a, b) => b.card.atk - a.card.atk,
+			def: (a, b) => b.card.def - a.card.def,
+			name: (a, b) => a.card.title.localeCompare(b.card.title, "fr")
+		};
 		let shown = user_derived(() => {
 			if (!get(items)) return [];
-			get(valuesTick);
+			get(tick);
 			const q = normSearch(get(search));
-			let list = get(items).filter((it) => {
-				if (get(filter) !== "ALL" && it.card.rarity !== get(filter)) return false;
-				if (get(favOnly) && !it.starred) return false;
-				if (get(shinyOnly) && !it.is_shiny) return false;
-				if (q && !(it._s || "").includes(q)) return false;
-				return true;
-			});
-			const val = (it) => sortVals.get(it.card.id) ?? -1;
-			const cmp = {
-				rarity: (a, b) => RANK[b.card.rarity] - RANK[a.card.rarity] || b.count - a.count,
-				value: (a, b) => val(b) - val(a) || RANK[b.card.rarity] - RANK[a.card.rarity],
-				atk: (a, b) => b.card.atk - a.card.atk,
-				def: (a, b) => b.card.def - a.card.def,
-				name: (a, b) => a.card.title.localeCompare(b.card.title, "fr")
-			}[get(sort)];
-			return cmp ? [...list].sort(cmp) : list;
+			return get(items).filter((it) => (get(filter) === "ALL" || it.card.rarity === get(filter)) && (!get(favOnly) || it.starred) && (!get(shinyOnly) || it.is_shiny) && (!q || it._s.includes(q))).sort(SORTS[get(sort)]);
 		});
-		let starredCount = user_derived(() => get(items) ? get(items).filter((it) => it.starred).length : 0);
-		let hasStarred = user_derived(() => get(starredCount) > 0);
-		let shinyCount = user_derived(() => get(items) ? get(items).filter((it) => it.is_shiny).length : 0);
-		let allShownPicked = user_derived(() => get(shown).length > 0 && get(shown).every((it) => get(picked).has(it.id)));
-		var fragment = root_24();
-		var node_1 = first_child(fragment);
+		let starredCount = user_derived(() => get(items)?.filter((it) => it.starred).length ?? 0);
+		let shinyCount = user_derived(() => get(items)?.filter((it) => it.is_shiny).length ?? 0);
+		let allPicked = user_derived(() => get(shown).length > 0 && get(shown).every((it) => get(picked).has(it.id)));
+		const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
+		var fragment = root_22$1();
+		var node = first_child(fragment);
 		var consequent = ($$anchor) => {
-			var div = root$4();
+			var div = root$5();
 			var b_1 = child(div);
 			var text = only_child(b_1, true);
 			var button = sibling(b_1, 2);
 			reset(div);
 			template_effect(() => set_text(text, get(error)));
-			delegated("click", button, load);
+			delegated("click", button, reload);
 			append($$anchor, div);
 		};
 		var consequent_1 = ($$anchor) => {
@@ -6166,35 +6107,34 @@
 			append($$anchor, div_1);
 		};
 		var alternate_2 = ($$anchor) => {
-			var fragment_1 = root_20();
+			var fragment_1 = root_18$1();
 			var div_3 = first_child(fragment_1);
 			var div_4 = child(div_3);
 			var text_1 = only_child(sibling(child(div_4), 2));
 			reset(div_4);
 			var div_6 = sibling(div_4, 2);
-			var div_7 = child(div_6);
-			var input = sibling(child(div_7), 2);
-			remove_input_defaults(input);
-			var node_2 = sibling(input, 2);
-			var consequent_2 = ($$anchor) => {
-				var button_1 = root_3$4();
-				delegated("click", button_1, () => set(search, ""));
-				append($$anchor, button_1);
-			};
-			if_block(node_2, ($$render) => {
-				if (get(search)) $$render(consequent_2);
+			var node_1 = child(div_6);
+			SearchBox(node_1, {
+				placeholder: "Rechercher une carte...",
+				get value() {
+					return get(search);
+				},
+				set value($$value) {
+					set(search, $$value, true);
+				}
 			});
-			reset(div_7);
-			var div_8 = sibling(div_7, 2);
-			var div_9 = child(div_8);
-			var select = sibling(child(div_9), 2);
+			var div_7 = sibling(node_1, 2);
+			var div_8 = child(div_7);
+			var node_2 = child(div_8);
+			Icon(node_2, { name: "sort" });
+			var select = sibling(node_2, 2);
 			var option = child(select);
 			option.value = option.__value = "rarity";
 			var option_1 = sibling(option);
 			option_1.value = option_1.__value = "value";
 			var node_3 = sibling(option_1);
-			var consequent_3 = ($$anchor) => {
-				var fragment_2 = root_4$4();
+			var consequent_2 = ($$anchor) => {
+				var fragment_2 = root_3$4();
 				var option_2 = first_child(fragment_2);
 				option_2.value = option_2.__value = "atk";
 				var option_3 = sibling(option_2, 2);
@@ -6202,209 +6142,225 @@
 				append($$anchor, fragment_2);
 			};
 			if_block(node_3, ($$render) => {
-				if (!settings.hideStats) $$render(consequent_3);
+				if (!settings.hideStats) $$render(consequent_2);
 			});
 			var option_4 = sibling(node_3);
 			option_4.value = option_4.__value = "name";
 			reset(select);
 			init_select(select);
-			reset(div_9);
-			var button_2 = sibling(div_9, 2);
+			reset(div_8);
+			var button_1 = sibling(div_8, 2);
 			let classes;
-			var node_4 = child(button_2);
-			var consequent_4 = ($$anchor) => {
-				append($$anchor, root_5$4());
-			};
-			var alternate = ($$anchor) => {
-				append($$anchor, root_6$4());
-			};
-			if_block(node_4, ($$render) => {
-				if (settings.hideStats) $$render(consequent_4);
-				else $$render(alternate, -1);
-			});
-			next(2);
-			reset(button_2);
-			var node_5 = sibling(button_2, 2);
-			var consequent_6 = ($$anchor) => {
-				var fragment_3 = root_8$4();
-				var node_6 = first_child(fragment_3);
-				var consequent_5 = ($$anchor) => {
-					var button_3 = root_7$4();
-					var text_2 = only_child(button_3, true);
-					template_effect(() => set_text(text_2, get(allShownPicked) ? "Tout désélectionner" : "Tout sélectionner"));
-					delegated("click", button_3, toggleSelectAll);
-					append($$anchor, button_3);
-				};
-				if_block(node_6, ($$render) => {
-					if (get(selecting)) $$render(consequent_5);
-				});
-				var button_4 = sibling(node_6, 2);
-				let classes_1;
-				var text_3 = only_child(sibling(child(button_4), 2), true);
-				reset(button_4);
-				template_effect(() => {
-					classes_1 = set_class(button_4, 1, "iconbtn", null, classes_1, { on: get(selecting) });
-					set_text(text_3, get(selecting) ? "Annuler" : "Sélectionner");
-				});
-				delegated("click", button_4, toggleSelecting);
-				append($$anchor, fragment_3);
+			var node_4 = child(button_1);
+			{
+				let $0 = user_derived(() => settings.hideStats ? "eyeOff" : "eye");
+				Icon(node_4, { get name() {
+					return get($0);
+				} });
+			}
+			next();
+			reset(button_1);
+			var node_5 = sibling(button_1, 2);
+			var consequent_3 = ($$anchor) => {
+				var button_2 = root_4$4();
+				var text_2 = only_child(button_2, true);
+				template_effect(() => set_text(text_2, get(allPicked) ? "Tout désélectionner" : "Tout sélectionner"));
+				delegated("click", button_2, () => set(picked, get(allPicked) ? new Set() : new Set(get(shown).map((it) => it.id)), true));
+				append($$anchor, button_2);
 			};
 			if_block(node_5, ($$render) => {
-				if (data.canAct) $$render(consequent_6);
+				if (get(selecting)) $$render(consequent_3);
 			});
-			reset(div_8);
+			var button_3 = sibling(node_5, 2);
+			let classes_1;
+			var node_6 = child(button_3);
+			Icon(node_6, { name: "select" });
+			var text_3 = only_child(sibling(node_6), true);
+			reset(button_3);
+			reset(div_7);
 			reset(div_6);
 			reset(div_3);
 			var node_7 = sibling(div_3, 2);
-			var consequent_7 = ($$anchor) => {
-				var div_10 = root_9$4();
-				var text_4 = only_child(div_10);
-				template_effect(() => set_text(text_4, `Estimation des valeurs... ${get(valuesLoaded) ?? ""} / ${get(items).length ?? ""}. Le tri s'affine au fur et à mesure.`));
-				append($$anchor, div_10);
+			var consequent_4 = ($$anchor) => {
+				var div_9 = root_5$4();
+				var text_4 = only_child(div_9);
+				template_effect(() => set_text(text_4, `Estimation des valeurs... ${get(loaded) ?? ""} / ${get(items).length ?? ""}. Le tri s'affine au fur et à mesure.`));
+				append($$anchor, div_9);
 			};
 			if_block(node_7, ($$render) => {
-				if (get(sort) === "value" && get(items) && get(valuesLoaded) < get(items).length) $$render(consequent_7);
+				if (get(sort) === "value" && get(loaded) < get(items).length) $$render(consequent_4);
 			});
 			var node_8 = sibling(node_7, 2);
-			var consequent_13 = ($$anchor) => {
-				var div_11 = root_15();
+			var consequent_5 = ($$anchor) => {
+				var div_10 = root_5$4();
+				var text_5 = only_child(div_10, true);
+				template_effect(() => set_text(text_5, get(bulkMsg)));
+				append($$anchor, div_10);
+			};
+			if_block(node_8, ($$render) => {
+				if (get(bulkMsg)) $$render(consequent_5);
+			});
+			var node_9 = sibling(node_8, 2);
+			var consequent_11 = ($$anchor) => {
+				var div_11 = root_11$3();
 				var div_12 = child(div_11);
-				each(div_12, 21, () => RARITIES, index, ($$anchor, r) => {
-					var fragment_4 = comment();
-					var node_9 = first_child(fragment_4);
-					var consequent_8 = ($$anchor) => {
-						var button_5 = root_10$3();
+				each(div_12, 21, () => RARITIES_DESC, index, ($$anchor, r) => {
+					var fragment_3 = comment();
+					var node_10 = first_child(fragment_3);
+					var consequent_6 = ($$anchor) => {
+						var button_4 = root_6$4();
 						let classes_2;
 						template_effect(($0) => {
-							classes_2 = set_class(button_5, 1, "rm-seg", null, classes_2, {
+							classes_2 = set_class(button_4, 1, "rm-seg", null, classes_2, {
 								sel: get(filter) === get(r),
 								dim: get(filter) !== "ALL" && get(filter) !== get(r)
 							});
-							set_style(button_5, `--rc:var(--r-${$0 ?? ""}); flex-grow:${get(stats).counts[get(r)] ?? ""}`);
-							set_attribute(button_5, "title", `${RNAME[get(r)] ?? ""} : ${get(stats).counts[get(r)] ?? ""}`);
-							set_attribute(button_5, "aria-label", `${RNAME[get(r)] ?? ""} : ${get(stats).counts[get(r)] ?? ""}`);
+							set_style(button_4, `--rc:var(--r-${$0 ?? ""}); flex-grow:${get(stats).counts[get(r)] ?? ""}`);
+							set_attribute(button_4, "title", `${RNAME[get(r)] ?? ""} : ${get(stats).counts[get(r)] ?? ""}`);
+							set_attribute(button_4, "aria-label", `${RNAME[get(r)] ?? ""} : ${get(stats).counts[get(r)] ?? ""}`);
 						}, [() => get(r).toLowerCase()]);
-						delegated("click", button_5, () => set(filter, get(filter) === get(r) ? "ALL" : get(r), true));
-						append($$anchor, button_5);
+						delegated("click", button_4, () => set(filter, get(filter) === get(r) ? "ALL" : get(r), true));
+						append($$anchor, button_4);
 					};
-					if_block(node_9, ($$render) => {
-						if ((get(stats).counts[get(r)] || 0) > 0) $$render(consequent_8);
+					if_block(node_10, ($$render) => {
+						if (get(stats).counts[get(r)]) $$render(consequent_6);
 					});
-					append($$anchor, fragment_4);
+					append($$anchor, fragment_3);
 				});
 				reset(div_12);
 				var div_13 = sibling(div_12, 2);
-				var button_6 = child(div_13);
+				var button_5 = child(div_13);
 				let classes_3;
-				var text_5 = only_child(sibling(child(button_6)), true);
-				reset(button_6);
-				var node_10 = sibling(button_6, 2);
-				each(node_10, 17, () => RARITIES, index, ($$anchor, r) => {
-					var fragment_5 = comment();
-					var node_11 = first_child(fragment_5);
-					var consequent_9 = ($$anchor) => {
-						var button_7 = root_11$3();
+				var text_6 = only_child(sibling(child(button_5)), true);
+				reset(button_5);
+				var node_11 = sibling(button_5, 2);
+				each(node_11, 17, () => RARITIES_DESC, index, ($$anchor, r) => {
+					var fragment_4 = comment();
+					var node_12 = first_child(fragment_4);
+					var consequent_7 = ($$anchor) => {
+						var button_6 = root_7$4();
 						let classes_4;
-						var span_2 = child(button_7);
+						var span_2 = child(button_6);
 						var span_3 = sibling(span_2, 2);
-						var text_6 = only_child(span_3, true);
-						var text_7 = only_child(sibling(span_3, 2), true);
-						reset(button_7);
+						var text_7 = only_child(span_3, true);
+						var text_8 = only_child(sibling(span_3), true);
+						reset(button_6);
 						template_effect(($0) => {
-							classes_4 = set_class(button_7, 1, "rl", null, classes_4, { on: get(filter) === get(r) });
+							classes_4 = set_class(button_6, 1, "rl", null, classes_4, { on: get(filter) === get(r) });
 							set_style(span_2, `background:var(--r-${$0 ?? ""})`);
-							set_text(text_6, RNAME[get(r)]);
-							set_text(text_7, get(stats).counts[get(r)]);
+							set_text(text_7, RNAME[get(r)]);
+							set_text(text_8, get(stats).counts[get(r)]);
 						}, [() => get(r).toLowerCase()]);
-						delegated("click", button_7, () => set(filter, get(filter) === get(r) ? "ALL" : get(r), true));
-						append($$anchor, button_7);
+						delegated("click", button_6, () => set(filter, get(filter) === get(r) ? "ALL" : get(r), true));
+						append($$anchor, button_6);
 					};
-					if_block(node_11, ($$render) => {
-						if ((get(stats).counts[get(r)] || 0) > 0) $$render(consequent_9);
+					if_block(node_12, ($$render) => {
+						if (get(stats).counts[get(r)]) $$render(consequent_7);
 					});
-					append($$anchor, fragment_5);
+					append($$anchor, fragment_4);
 				});
-				var node_12 = sibling(node_10, 2);
-				var consequent_10 = ($$anchor) => {
-					append($$anchor, root_12$2());
-				};
-				if_block(node_12, ($$render) => {
-					if (get(hasStarred) || get(favOnly) || get(shinyCount) > 0 || get(shinyOnly)) $$render(consequent_10);
-				});
-				var node_13 = sibling(node_12, 2);
-				var consequent_11 = ($$anchor) => {
-					var button_8 = root_13$1();
-					let classes_5;
-					var text_8 = only_child(sibling(child(button_8), 3), true);
-					reset(button_8);
-					template_effect(() => {
-						classes_5 = set_class(button_8, 1, "rl special fav", null, classes_5, { on: get(favOnly) });
-						set_text(text_8, get(starredCount));
-					});
-					delegated("click", button_8, () => set(favOnly, !get(favOnly)));
-					append($$anchor, button_8);
+				var node_13 = sibling(node_11, 2);
+				var consequent_8 = ($$anchor) => {
+					append($$anchor, root_8$4());
 				};
 				if_block(node_13, ($$render) => {
-					if (get(hasStarred) || get(favOnly)) $$render(consequent_11);
+					if (get(starredCount) || get(shinyCount)) $$render(consequent_8);
 				});
 				var node_14 = sibling(node_13, 2);
-				var consequent_12 = ($$anchor) => {
-					var button_9 = root_14();
-					let classes_6;
-					var text_9 = only_child(sibling(child(button_9), 3), true);
-					reset(button_9);
-					template_effect(() => {
-						classes_6 = set_class(button_9, 1, "rl special shiny", null, classes_6, { on: get(shinyOnly) });
-						set_text(text_9, get(shinyCount));
+				var consequent_9 = ($$anchor) => {
+					var button_7 = root_9$4();
+					let classes_5;
+					var node_15 = child(button_7);
+					Icon(node_15, {
+						name: "star",
+						width: 1.7,
+						class: "rl-ico"
 					});
-					delegated("click", button_9, () => set(shinyOnly, !get(shinyOnly)));
-					append($$anchor, button_9);
+					var text_9 = only_child(sibling(node_15, 2), true);
+					reset(button_7);
+					template_effect(() => {
+						classes_5 = set_class(button_7, 1, "rl special fav", null, classes_5, { on: get(favOnly) });
+						set_text(text_9, get(starredCount));
+					});
+					delegated("click", button_7, () => set(favOnly, !get(favOnly)));
+					append($$anchor, button_7);
 				};
 				if_block(node_14, ($$render) => {
-					if (get(shinyCount) > 0 || get(shinyOnly)) $$render(consequent_12);
+					if (get(starredCount)) $$render(consequent_9);
+				});
+				var node_16 = sibling(node_14, 2);
+				var consequent_10 = ($$anchor) => {
+					var button_8 = root_10$4();
+					let classes_6;
+					var node_17 = child(button_8);
+					Icon(node_17, {
+						name: "sparkle",
+						filled: true,
+						width: 0,
+						class: "rl-ico"
+					});
+					var text_10 = only_child(sibling(node_17, 2), true);
+					reset(button_8);
+					template_effect(() => {
+						classes_6 = set_class(button_8, 1, "rl special shiny", null, classes_6, { on: get(shinyOnly) });
+						set_text(text_10, get(shinyCount));
+					});
+					delegated("click", button_8, () => set(shinyOnly, !get(shinyOnly)));
+					append($$anchor, button_8);
+				};
+				if_block(node_16, ($$render) => {
+					if (get(shinyCount)) $$render(consequent_10);
 				});
 				reset(div_13);
 				reset(div_11);
 				template_effect(() => {
-					classes_3 = set_class(button_6, 1, "rl", null, classes_3, { on: get(filter) === "ALL" });
-					set_text(text_5, get(stats).unique);
+					classes_3 = set_class(button_5, 1, "rl", null, classes_3, { on: get(filter) === "ALL" });
+					set_text(text_6, get(stats).unique);
 				});
-				delegated("click", button_6, () => set(filter, "ALL"));
+				delegated("click", button_5, () => set(filter, "ALL"));
 				append($$anchor, div_11);
 			};
-			if_block(node_8, ($$render) => {
-				if (get(stats).unique > 0) $$render(consequent_13);
+			if_block(node_9, ($$render) => {
+				if (get(stats).unique > 0) $$render(consequent_11);
 			});
-			var node_15 = sibling(node_8, 2);
-			var consequent_14 = ($$anchor) => {
-				var div_14 = root_16();
-				var text_10 = only_child(div_14);
-				template_effect(() => set_text(text_10, `Chargement des cartes... ${get(items)?.length ?? 0 ?? ""} / ${get(stats).unique ?? ""}`));
+			var node_18 = sibling(node_9, 2);
+			var consequent_12 = ($$anchor) => {
+				var div_14 = root_12$2();
+				var text_11 = only_child(div_14);
+				template_effect(() => set_text(text_11, `Mise à jour de la collection... ${get(items).length ?? ""} / ${get(stats).unique ?? ""}`));
 				append($$anchor, div_14);
 			};
-			if_block(node_15, ($$render) => {
-				if (get(stats)?.loading) $$render(consequent_14);
+			if_block(node_18, ($$render) => {
+				if (get(stats).loading) $$render(consequent_12);
 			});
-			var node_16 = sibling(node_15, 2);
-			var consequent_15 = ($$anchor) => {
-				var div_15 = root_17();
-				var b_2 = child(div_15);
-				var text_11 = only_child(b_2, true);
-				var text_12 = only_child(sibling(b_2, 2), true);
-				reset(div_15);
-				template_effect(() => {
-					set_text(text_11, get(search) || get(filter) !== "ALL" ? "Aucune carte ne correspond" : "Rien ici pour l'instant");
-					set_text(text_12, get(search) || get(filter) !== "ALL" ? "Essayez un autre filtre ou une autre recherche." : "Ouvrez un paquet pour commencer votre collection.");
+			var node_19 = sibling(node_18, 2);
+			var consequent_14 = ($$anchor) => {
+				var div_15 = root_15$2();
+				var node_20 = child(div_15);
+				var consequent_13 = ($$anchor) => {
+					var fragment_5 = root_13$2();
+					next();
+					append($$anchor, fragment_5);
+				};
+				var alternate = ($$anchor) => {
+					var fragment_6 = root_14$2();
+					next();
+					append($$anchor, fragment_6);
+				};
+				if_block(node_20, ($$render) => {
+					if (get(search) || get(filter) !== "ALL") $$render(consequent_13);
+					else $$render(alternate, -1);
 				});
+				reset(div_15);
 				append($$anchor, div_15);
 			};
 			var alternate_1 = ($$anchor) => {
-				var div_17 = root_2$4();
-				each(div_17, 21, () => get(shown), (it) => it.card.id, ($$anchor, it) => {
-					var button_10 = root_19();
+				var div_16 = root_2$4();
+				each(div_16, 21, () => get(shown), (it) => it.id, ($$anchor, it) => {
+					var button_9 = root_17$2();
 					let classes_7;
-					var node_17 = child(button_10);
-					Card(node_17, {
+					var node_21 = child(button_9);
+					Card(node_21, {
 						get card() {
 							return get(it).card;
 						},
@@ -6421,103 +6377,114 @@
 							return values[get(it).card.id];
 						}
 					});
-					var node_18 = sibling(node_17, 2);
+					var node_22 = sibling(node_21, 2);
 					var consequent_16 = ($$anchor) => {
-						var span_8 = root_18();
+						var span_8 = root_16$2();
 						let classes_8;
-						var text_13 = only_child(child(span_8), true);
+						var span_9 = child(span_8);
+						var node_23 = child(span_9);
+						var consequent_15 = ($$anchor) => {
+							Icon($$anchor, {
+								name: "check",
+								width: 2.4
+							});
+						};
+						var d_1 = user_derived(() => get(picked).has(get(it).id));
+						if_block(node_23, ($$render) => {
+							if (get(d_1)) $$render(consequent_15);
+						});
+						reset(span_9);
 						reset(span_8);
-						template_effect(($0, $1) => {
-							classes_8 = set_class(span_8, 1, "pick-overlay", null, classes_8, { on: $0 });
-							set_text(text_13, $1);
-						}, [() => get(picked).has(get(it).id), () => get(picked).has(get(it).id) ? "✓" : ""]);
+						template_effect(($0) => classes_8 = set_class(span_8, 1, "pick-overlay", null, classes_8, { on: $0 }), [() => get(picked).has(get(it).id)]);
 						append($$anchor, span_8);
 					};
-					if_block(node_18, ($$render) => {
+					if_block(node_22, ($$render) => {
 						if (get(selecting)) $$render(consequent_16);
 					});
-					reset(button_10);
-					action(button_10, ($$node, $$action_arg) => watchValue?.($$node, $$action_arg), () => get(it));
+					reset(button_9);
+					action(button_9, ($$node, $$action_arg) => lazy.watch?.($$node, $$action_arg), () => get(it).card);
 					template_effect(($0) => {
-						classes_7 = set_class(button_10, 1, "card-btn", null, classes_7, {
+						classes_7 = set_class(button_9, 1, "card-btn", null, classes_7, {
 							picking: get(selecting),
 							picked: $0
 						});
-						set_attribute(button_10, "aria-label", get(it).card.title);
+						set_attribute(button_9, "aria-label", get(it).card.title);
 					}, [() => get(selecting) && get(picked).has(get(it).id)]);
-					delegated("click", button_10, () => onCardClick(get(it)));
-					append($$anchor, button_10);
+					delegated("click", button_9, () => onCardClick(get(it)));
+					append($$anchor, button_9);
 				});
-				reset(div_17);
-				append($$anchor, div_17);
+				reset(div_16);
+				append($$anchor, div_16);
 			};
-			if_block(node_16, ($$render) => {
-				if (get(shown).length === 0) $$render(consequent_15);
+			if_block(node_19, ($$render) => {
+				if (get(shown).length === 0) $$render(consequent_14);
 				else $$render(alternate_1, -1);
 			});
-			template_effect(() => {
-				set_text(text_1, `${get(stats).unique ?? ""} carte${get(stats).unique > 1 ? "s" : ""} unique${get(stats).unique > 1 ? "s" : ""}${get(stats).catalog ? ` sur ${get(stats).catalog}` : ""} · ${get(stats).total ?? ""} au total`);
-				classes = set_class(button_2, 1, "iconbtn", null, classes, { on: settings.hideStats });
-			});
-			bind_value(input, () => get(search), ($$value) => set(search, $$value));
+			template_effect(($0) => {
+				set_text(text_1, `${$0 ?? ""} · ${get(stats).total ?? ""} exemplaires`);
+				classes = set_class(button_1, 1, "iconbtn", null, classes, { on: settings.hideStats });
+				classes_1 = set_class(button_3, 1, "iconbtn", null, classes_1, { on: get(selecting) });
+				set_text(text_3, get(selecting) ? "Annuler" : "Sélectionner");
+			}, [() => plural(get(stats).unique, "carte")]);
 			bind_select_value(select, () => get(sort), ($$value) => set(sort, $$value));
-			delegated("click", button_2, onToggleStats);
+			delegated("click", button_1, onToggleStats);
+			delegated("click", button_3, toggleSelecting);
 			append($$anchor, fragment_1);
 		};
-		if_block(node_1, ($$render) => {
+		if_block(node, ($$render) => {
 			if (get(error)) $$render(consequent);
 			else if (!get(items)) $$render(consequent_1, 1);
 			else $$render(alternate_2, -1);
 		});
-		var node_19 = sibling(node_1, 2);
+		var node_24 = sibling(node, 2);
 		var consequent_18 = ($$anchor) => {
-			var div_18 = root_23();
-			var node_20 = child(div_18);
+			var div_17 = root_21$1();
+			var node_25 = child(div_17);
 			var consequent_17 = ($$anchor) => {
-				var fragment_6 = root_21();
-				var span_10 = first_child(fragment_6);
-				var text_14 = child(span_10);
-				var text_15 = only_child(sibling(text_14));
+				var fragment_8 = root_19$1();
+				var span_10 = first_child(fragment_8);
+				var text_12 = child(span_10);
+				var text_13 = only_child(sibling(text_12), true);
 				next();
 				reset(span_10);
-				var button_11 = sibling(span_10, 2);
-				var button_12 = sibling(button_11, 2);
-				var text_16 = only_child(button_12, true);
-				template_effect(() => {
-					set_text(text_14, `Défausser ${get(picked).size ?? ""} carte${get(picked).size > 1 ? "s" : ""} contre `);
-					set_text(text_15, `${get(picked).size ?? ""} point${get(picked).size > 1 ? "s" : ""}`);
+				var button_10 = sibling(span_10, 2);
+				var button_11 = sibling(button_10, 2);
+				var text_14 = only_child(button_11, true);
+				template_effect(($0, $1) => {
+					set_text(text_12, `Défausser ${$0 ?? ""} contre `);
+					set_text(text_13, $1);
+					button_10.disabled = get(bulkBusy);
 					button_11.disabled = get(bulkBusy);
-					button_12.disabled = get(bulkBusy);
-					set_text(text_16, get(bulkBusy) ? "Défausse..." : "Confirmer");
-				});
-				delegated("click", button_11, () => set(bulkConfirm, false));
-				delegated("click", button_12, bulkDiscard);
-				append($$anchor, fragment_6);
+					set_text(text_14, get(bulkBusy) ? "Défausse..." : "Confirmer");
+				}, [() => plural(get(picked).size, "carte"), () => plural(get(picked).size, "point")]);
+				delegated("click", button_10, () => set(bulkConfirm, false));
+				delegated("click", button_11, bulkDiscard);
+				append($$anchor, fragment_8);
 			};
 			var alternate_3 = ($$anchor) => {
-				var fragment_7 = root_22();
-				var span_11 = first_child(fragment_7);
-				var text_17 = only_child(span_11);
-				var button_13 = sibling(span_11, 2);
-				var text_18 = only_child(button_13);
+				var fragment_9 = root_20$1();
+				var span_11 = first_child(fragment_9);
+				var text_15 = only_child(span_11);
+				var button_12 = sibling(span_11, 2);
+				var text_16 = only_child(button_12);
 				template_effect(() => {
-					set_text(text_17, `${get(picked).size ?? ""} sélectionnée${get(picked).size > 1 ? "s" : ""}`);
-					set_text(text_18, `Défausser · +${get(picked).size ?? ""} pts`);
+					set_text(text_15, `${get(picked).size ?? ""} sélectionnée${get(picked).size > 1 ? "s" : ""}`);
+					set_text(text_16, `Défausser · +${get(picked).size ?? ""} pts`);
 				});
-				delegated("click", button_13, () => set(bulkConfirm, true));
-				append($$anchor, fragment_7);
+				delegated("click", button_12, () => set(bulkConfirm, true));
+				append($$anchor, fragment_9);
 			};
-			if_block(node_20, ($$render) => {
+			if_block(node_25, ($$render) => {
 				if (get(bulkConfirm)) $$render(consequent_17);
 				else $$render(alternate_3, -1);
 			});
-			reset(div_18);
-			append($$anchor, div_18);
+			reset(div_17);
+			append($$anchor, div_17);
 		};
-		if_block(node_19, ($$render) => {
+		if_block(node_24, ($$render) => {
 			if (get(selecting) && get(picked).size > 0) $$render(consequent_18);
 		});
-		var node_21 = sibling(node_19, 2);
+		var node_26 = sibling(node_24, 2);
 		var consequent_19 = ($$anchor) => {
 			CardModal($$anchor, {
 				get item() {
@@ -6525,221 +6492,211 @@
 				},
 				onclose: () => set(selected, null),
 				onaction: () => {
-					load();
+					reload();
 					$$props.onwallet?.();
 				}
 			});
 		};
-		if_block(node_21, ($$render) => {
+		if_block(node_26, ($$render) => {
 			if (get(selected)) $$render(consequent_19);
 		});
 		append($$anchor, fragment);
 		pop();
 	}
 	delegate(["click"]);
-	var root$3 = from_html(`<button class="search-clear" aria-label="Effacer la recherche"><svg class="x-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>`);
-	var root_1$3 = from_html(`<option> </option>`);
-	var root_2$3 = from_svg(`<path d="M3 3l18 18"></path><path d="M10.6 10.7a3 3 0 0 0 3.9 3.9"></path><path d="M9.8 4.7A10.4 10.4 0 0 1 12 4.5c6 0 9.5 7 9.5 7a17.6 17.6 0 0 1-2.9 3.8M6 6.2A17.3 17.3 0 0 0 2.5 11.5s3.5 7 9.5 7c1 0 1.9-.1 2.8-.4"></path>`, 1);
-	var root_3$3 = from_svg(`<path d="M2.5 11.5S6 4.5 12 4.5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"></path><circle cx="12" cy="11.5" r="3"></circle>`, 1);
-	var root_4$3 = from_html(`<button></button>`);
-	var root_5$3 = from_html(`<button><span class="rl-dot"></span> <span class="rl-name"> </span><span class="rl-n"> </span></button>`);
-	var root_6$3 = from_html(`<div class="rarity-panel"><div class="rarity-meter" role="group" aria-label="Filtrer par rareté"></div> <div class="rarity-legend"><button><span class="rl-name">Toutes</span></button> <!></div></div>`);
-	var root_7$3 = from_html(`<div class="empty"><b> </b><button class="btn">Réessayer</button></div>`);
-	var root_8$3 = from_html(`<div class="wc skeleton"></div>`);
-	var root_9$3 = from_html(`<div class="grid"></div>`);
-	var root_10$2 = from_html(`<div class="empty"><b>Aucune carte ne correspond</b><div>Essayez un autre terme de recherche.</div></div>`);
-	var root_11$2 = from_html(`<button class="card-btn"><!></button>`);
-	var root_12$1 = from_html(`<div></div> <div class="pager"><button class="btn pager-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg> Précédent</button> <span class="pager-info"> </span> <button class="btn pager-btn">Suivant <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></button></div>`, 1);
-	var root_13 = from_html(`<div class="coll-head"><div><h1>Toutes les cartes</h1> <div class="meta"><!> <!></div></div> <div class="coll-tools"><div class="search-wrap"><svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.4-3.4"></path></svg> <input class="search" type="search" placeholder="Rechercher dans 2,7 M de cartes..."/> <!></div> <div class="tool-actions"><div class="isel" title="Trier"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5v14M7 19l-3-3M7 5l3 3M17 19V5M17 5l3 3M17 19l-3-3"></path></svg> <select aria-label="Trier"></select></div> <button title="N'afficher que ma liste de souhaits"><svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 20.5S3.5 14.7 3.5 9.2A4.2 4.2 0 0 1 12 6.5a4.2 4.2 0 0 1 8.5 2.7c0 5.5-8.5 11.3-8.5 11.3z"></path></svg> <span>Souhaits</span></button> <button title="Afficher ou masquer l'ATK et la DEF"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 11.5S6 4.5 12 4.5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"></path><circle cx="12" cy="11.5" r="3"></circle></svg> <span>ATK/DEF</span></button> <button title="Afficher ou flouter les images sensibles"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><!></svg> <span>Sensible</span></button></div></div></div> <!> <!> <!>`, 1);
+	var root$4 = from_html(`<div class="pager"><button class="btn pager-btn"><!>Précédent</button> <span class="pager-info"> </span> <button class="btn pager-btn">Suivant<!></button></div>`);
+	function Pager($$anchor, $$props) {
+		push($$props, true);
+		let loading = prop($$props, "loading", 3, false);
+		var div = root$4();
+		var button = child(div);
+		Icon(child(button), {
+			name: "prev",
+			width: 1.9
+		});
+		next();
+		reset(button);
+		var span = sibling(button, 2);
+		var text = only_child(span);
+		var button_1 = sibling(span, 2);
+		Icon(sibling(child(button_1)), {
+			name: "next",
+			width: 1.9
+		});
+		reset(button_1);
+		reset(div);
+		template_effect(() => {
+			button.disabled = $$props.page === 0 || loading();
+			set_text(text, `Page ${$$props.page + 1}`);
+			button_1.disabled = !$$props.hasNext || loading();
+		});
+		delegated("click", button, () => $$props.ongo($$props.page - 1));
+		delegated("click", button_1, () => $$props.ongo($$props.page + 1));
+		append($$anchor, div);
+		pop();
+	}
+	delegate(["click"]);
+	var PagedList = class {
+		#page = state(0);
+		get page() {
+			return get(this.#page);
+		}
+		set page(value) {
+			set(this.#page, value, true);
+		}
+		#data = state(null);
+		get data() {
+			return get(this.#data);
+		}
+		set data(value) {
+			set(this.#data, value, true);
+		}
+		#loading = state(false);
+		get loading() {
+			return get(this.#loading);
+		}
+		set loading(value) {
+			set(this.#loading, value, true);
+		}
+		#error = state(false);
+		get error() {
+			return get(this.#error);
+		}
+		set error(value) {
+			set(this.#error, value, true);
+		}
+		#token = 0;
+		constructor(fetchPage) {
+			this.fetchPage = fetchPage;
+		}
+		async go(page = this.page) {
+			const token = ++this.#token;
+			this.page = page;
+			this.loading = true;
+			this.error = false;
+			try {
+				const d = await this.fetchPage(page);
+				if (token === this.#token) this.data = d;
+			} catch {
+				if (token === this.#token) this.error = true;
+			} finally {
+				if (token === this.#token) this.loading = false;
+			}
+		}
+	};
+	var root$3 = from_html(`<option> </option>`);
+	var root_1$3 = from_html(`<button></button>`);
+	var root_2$3 = from_html(`<button><span class="rl-dot"></span> <span class="rl-name"> </span><span class="rl-n"> </span></button>`);
+	var root_3$3 = from_html(`<div class="rarity-panel"><div class="rarity-meter" role="group" aria-label="Filtrer par rareté"></div> <div class="rarity-legend"><button><span class="rl-name">Toutes</span></button> <!></div></div>`);
+	var root_4$3 = from_html(`<div class="empty"><b>Impossible de charger les cartes.</b><button class="btn">Réessayer</button></div>`);
+	var root_5$3 = from_html(`<div class="wc skeleton"></div>`);
+	var root_6$3 = from_html(`<div class="grid"></div>`);
+	var root_7$3 = from_html(`<div class="empty"><b>Aucune carte ne correspond</b><div>Essayez un autre terme de recherche.</div></div>`);
+	var root_8$3 = from_html(`<button class="card-btn"><!></button>`);
+	var root_9$3 = from_html(`<div></div> <!>`, 1);
+	var root_10$3 = from_html(`<div class="coll-head"><div><h1>Toutes les cartes</h1> <div class="meta"><!> <!></div></div> <div class="coll-tools"><!> <div class="tool-actions"><div class="isel" title="Trier"><!> <select aria-label="Trier"></select></div> <button title="N'afficher que ma liste de souhaits"><!><span>Souhaits</span></button> <button title="Afficher ou masquer l'ATK et la DEF"><!><span>ATK/DEF</span></button> <button title="Afficher ou flouter les images sensibles"><!><span>Sensible</span></button></div></div></div> <!> <!> <!>`, 1);
 	function Catalog($$anchor, $$props) {
 		push($$props, true);
-		const RARITIES = [
-			"L",
-			"UR",
-			"SR",
-			"R",
-			"PC",
-			"C"
-		];
-		const nf = (n) => Number(n).toLocaleString("fr");
 		const SORTS = [
 			["rarity", "Rareté"],
 			["name", "Nom"],
 			["atk", "Attaque"],
 			["def", "Défense"]
 		];
-		let cards = state(null);
-		let rarityCounts = state(null);
-		let total = state(null);
-		let hasMore = state(false);
-		let page = state(0);
 		let search = state("");
-		let qActive = state("");
-		let sort = state("rarity");
-		let rarity = state("");
-		let wishOnly = state(false);
-		let loading = state(false);
-		let error = state("");
+		let query = state("");
+		const prefs = settings.catalog;
+		let sort = state(proxy(prefs.sort));
+		let rarity = state(proxy(prefs.rarity));
+		let wishOnly = state(proxy(prefs.wishOnly));
+		user_effect(() => Object.assign(prefs, {
+			sort: get(sort),
+			rarity: get(rarity),
+			wishOnly: get(wishOnly)
+		}));
 		let selected = state(null);
-		let values = proxy({});
-		const vq = createQueue({ concurrency: 4 });
-		const cardById = new Map();
-		let io = null;
-		function enqueueValue(id) {
-			if (values[id] !== void 0 || !cardById.has(id)) return;
-			vq.push(id, async () => {
-				const v = await marketValueFor(cardById.get(id)).catch(() => null);
-				values[id] = v ?? null;
+		let rarityCounts = state(null);
+		const list = new PagedList(async (page) => {
+			const d = await data.catalog({
+				page,
+				sort: get(sort),
+				q: get(query),
+				rarity: get(rarity),
+				wishlist: get(wishOnly)
 			});
-		}
-		function watchValue(node, card) {
-			if (typeof IntersectionObserver !== "undefined" && !io) io = new IntersectionObserver((es) => {
-				for (const e of es) if (e.isIntersecting) {
-					const id = e.target.__id;
-					if (id) {
-						enqueueValue(id);
-						io.unobserve(e.target);
-					}
-				}
-			}, { rootMargin: "300px" });
-			node.__id = card.id;
-			io?.observe(node);
-			return {
-				update(c) {
-					node.__id = c.id;
-				},
-				destroy() {
-					io?.unobserve(node);
-				}
-			};
-		}
-		let reqToken = 0;
-		async function load() {
-			const my = ++reqToken;
-			set(loading, true);
-			set(error, "");
-			try {
-				const d = await data.catalog({
-					page: get(page),
-					sort: get(sort),
-					q: get(qActive),
-					rarity: get(rarity),
-					wishlist: get(wishOnly)
-				});
-				if (my !== reqToken) return;
-				set(cards, d.cards, true);
-				set(total, d.total, true);
-				set(hasMore, d.hasMore, true);
-				if (d.rarityCounts) set(rarityCounts, d.rarityCounts, true);
-				cardById.clear();
-				for (const c of d.cards) cardById.set(c.id, c);
-			} catch (e) {
-				if (my !== reqToken) return;
-				set(error, "Impossible de charger les cartes.");
-				set(cards, [], true);
-			} finally {
-				if (my === reqToken) set(loading, false);
-			}
-		}
-		load();
-		let deb;
+			if (d.rarityCounts) set(rarityCounts, d.rarityCounts, true);
+			return d;
+		});
+		list.go(0);
 		user_effect(() => {
-			const s = get(search).trim();
-			clearTimeout(deb);
-			deb = setTimeout(() => {
-				if (s !== get(qActive)) {
-					set(qActive, s, true);
-					set(page, 0);
-					load();
+			const q = get(search).trim();
+			const t = setTimeout(() => {
+				if (q !== get(query)) {
+					set(query, q, true);
+					list.go(0);
 				}
 			}, 350);
-			return () => clearTimeout(deb);
+			return () => clearTimeout(t);
 		});
-		user_effect(() => () => {
-			io?.disconnect();
-			io = null;
-			clearTimeout(deb);
-		});
-		let hasNext = user_derived(() => get(qActive) ? get(hasMore) : get(total) != null ? (get(page) + 1) * 50 < get(total) : get(hasMore));
-		let catalogTotal = user_derived(() => get(rarityCounts) ? RARITIES.reduce((n, r) => n + (get(rarityCounts)[r] || 0), 0) : get(total));
-		function go(delta) {
-			set(page, Math.max(0, get(page) + delta), true);
-			load();
-		}
-		function setRarity(r) {
-			set(rarity, get(rarity) === r ? "" : r, true);
-			set(page, 0);
-			load();
-		}
-		function setSort(s) {
-			set(sort, s, true);
-			set(page, 0);
-			load();
-		}
-		function toggleWishOnly() {
-			set(wishOnly, !get(wishOnly));
-			set(page, 0);
-			load();
-		}
-		async function toggleWishlist(card) {
-			const next = !card.wishlisted;
-			card.wishlisted = next;
-			try {
-				next ? await data.wishlistAdd(card.id) : await data.wishlistRemove(card.id);
-			} catch {
-				card.wishlisted = !next;
-			}
-		}
-		var fragment = root_13();
+		let values = proxy({});
+		const lazy = lazyValues((id, v) => values[id] = v, { concurrency: 4 });
+		user_effect(() => () => lazy.destroy());
+		const refilter = (change) => {
+			change();
+			list.go(0);
+		};
+		const cards = user_derived(() => list.data?.cards);
+		const hasNext = user_derived(() => get(query) || list.data?.total == null ? !!list.data?.hasMore : (list.page + 1) * 50 < list.data.total);
+		const catalogTotal = user_derived(() => get(rarityCounts) ? Object.values(get(rarityCounts)).reduce((a, b) => a + b, 0) : null);
+		var fragment = root_10$3();
 		var div = first_child(fragment);
 		var div_1 = child(div);
 		var div_2 = sibling(child(div_1), 2);
-		var node_1 = child(div_2);
+		var node = child(div_2);
 		var consequent = ($$anchor) => {
 			var text$1 = text();
 			template_effect(($0) => set_text(text$1, `${$0 ?? ""} cartes dans le jeu`), [() => nf(get(catalogTotal))]);
 			append($$anchor, text$1);
 		};
-		if_block(node_1, ($$render) => {
-			if (get(catalogTotal) != null) $$render(consequent);
+		if_block(node, ($$render) => {
+			if (get(catalogTotal)) $$render(consequent);
 		});
-		var node_2 = sibling(node_1, 2);
+		var node_1 = sibling(node, 2);
 		var consequent_1 = ($$anchor) => {
 			var text_1 = text();
-			template_effect(() => set_text(text_1, `· résultats pour « ${get(qActive) ?? ""} »`));
+			template_effect(() => set_text(text_1, `· résultats pour « ${get(query) ?? ""} »`));
 			append($$anchor, text_1);
 		};
-		if_block(node_2, ($$render) => {
-			if (get(qActive)) $$render(consequent_1);
+		if_block(node_1, ($$render) => {
+			if (get(query)) $$render(consequent_1);
 		});
 		reset(div_2);
 		reset(div_1);
 		var div_3 = sibling(div_1, 2);
-		var div_4 = child(div_3);
-		var input = sibling(child(div_4), 2);
-		remove_input_defaults(input);
-		var node_3 = sibling(input, 2);
-		var consequent_2 = ($$anchor) => {
-			var button = root$3();
-			delegated("click", button, () => set(search, ""));
-			append($$anchor, button);
-		};
-		if_block(node_3, ($$render) => {
-			if (get(search)) $$render(consequent_2);
+		var node_2 = child(div_3);
+		SearchBox(node_2, {
+			placeholder: "Rechercher dans 2,7 M de cartes...",
+			get value() {
+				return get(search);
+			},
+			set value($$value) {
+				set(search, $$value, true);
+			}
 		});
-		reset(div_4);
-		var div_5 = sibling(div_4, 2);
-		var div_6 = child(div_5);
-		var select = sibling(child(div_6), 2);
+		var div_4 = sibling(node_2, 2);
+		var div_5 = child(div_4);
+		var node_3 = child(div_5);
+		Icon(node_3, { name: "sort" });
+		var select = sibling(node_3, 2);
 		each(select, 21, () => SORTS, index, ($$anchor, $$item) => {
 			var $$array = user_derived(() => to_array(get($$item), 2));
 			let v = () => get($$array)[0];
-			let lbl = () => get($$array)[1];
-			var option = root_1$3();
+			let label = () => get($$array)[1];
+			var option = root$3();
 			var text_2 = only_child(option, true);
 			var option_value = {};
 			template_effect(() => {
-				set_text(text_2, lbl());
+				set_text(text_2, label());
 				if (option_value !== (option_value = v())) option.value = (option.__value = option_value) ?? "";
 			});
 			append($$anchor, option);
@@ -6747,136 +6704,138 @@
 		reset(select);
 		var select_value;
 		init_select(select);
-		reset(div_6);
-		var button_1 = sibling(div_6, 2);
+		reset(div_5);
+		var button = sibling(div_5, 2);
 		let classes;
-		var svg = child(button_1);
-		next(2);
+		Icon(child(button), {
+			name: "heart",
+			get filled() {
+				return get(wishOnly);
+			},
+			width: 1.7
+		});
+		next();
+		reset(button);
+		var button_1 = sibling(button, 2);
+		let classes_1;
+		var node_5 = child(button_1);
+		{
+			let $0 = user_derived(() => settings.hideStats ? "eyeOff" : "eye");
+			Icon(node_5, { get name() {
+				return get($0);
+			} });
+		}
+		next();
 		reset(button_1);
 		var button_2 = sibling(button_1, 2);
-		let classes_1;
-		var button_3 = sibling(button_2, 2);
 		let classes_2;
-		var svg_1 = child(button_3);
-		var node_4 = child(svg_1);
-		var consequent_3 = ($$anchor) => {
-			var fragment_3 = root_2$3();
-			next(2);
-			append($$anchor, fragment_3);
-		};
-		var alternate = ($$anchor) => {
-			var fragment_4 = root_3$3();
-			next();
-			append($$anchor, fragment_4);
-		};
-		if_block(node_4, ($$render) => {
-			if (settings.hideSensitive) $$render(consequent_3);
-			else $$render(alternate, -1);
-		});
-		reset(svg_1);
-		next(2);
-		reset(button_3);
-		reset(div_5);
+		var node_6 = child(button_2);
+		{
+			let $0 = user_derived(() => settings.hideSensitive ? "eyeOff" : "eye");
+			Icon(node_6, { get name() {
+				return get($0);
+			} });
+		}
+		next();
+		reset(button_2);
+		reset(div_4);
 		reset(div_3);
 		reset(div);
-		var node_5 = sibling(div, 2);
-		var consequent_6 = ($$anchor) => {
-			var div_7 = root_6$3();
-			var div_8 = child(div_7);
-			each(div_8, 21, () => RARITIES, index, ($$anchor, r) => {
-				var fragment_5 = comment();
-				var node_6 = first_child(fragment_5);
-				var consequent_4 = ($$anchor) => {
-					var button_4 = root_4$3();
+		var node_7 = sibling(div, 2);
+		var consequent_4 = ($$anchor) => {
+			var div_6 = root_3$3();
+			var div_7 = child(div_6);
+			each(div_7, 21, () => RARITIES_DESC, index, ($$anchor, r) => {
+				var fragment_3 = comment();
+				var node_8 = first_child(fragment_3);
+				var consequent_2 = ($$anchor) => {
+					var button_3 = root_1$3();
 					let classes_3;
 					template_effect(($0, $1, $2) => {
-						classes_3 = set_class(button_4, 1, "rm-seg", null, classes_3, {
+						classes_3 = set_class(button_3, 1, "rm-seg", null, classes_3, {
 							sel: get(rarity) === get(r),
-							dim: get(rarity) !== "" && get(rarity) !== get(r)
+							dim: get(rarity) && get(rarity) !== get(r)
 						});
-						set_style(button_4, `--rc:var(--r-${$0 ?? ""}); flex-grow:${get(rarityCounts)[get(r)] ?? ""}`);
-						set_attribute(button_4, "title", `${RNAME[get(r)] ?? ""} : ${$1 ?? ""}`);
-						set_attribute(button_4, "aria-label", `${RNAME[get(r)] ?? ""} : ${$2 ?? ""}`);
+						set_style(button_3, `--rc:var(--r-${$0 ?? ""}); flex-grow:${get(rarityCounts)[get(r)] ?? ""}`);
+						set_attribute(button_3, "title", `${RNAME[get(r)] ?? ""} : ${$1 ?? ""}`);
+						set_attribute(button_3, "aria-label", `${RNAME[get(r)] ?? ""} : ${$2 ?? ""}`);
 					}, [
 						() => get(r).toLowerCase(),
 						() => nf(get(rarityCounts)[get(r)]),
 						() => nf(get(rarityCounts)[get(r)])
 					]);
-					delegated("click", button_4, () => setRarity(get(r)));
-					append($$anchor, button_4);
+					delegated("click", button_3, () => refilter(() => set(rarity, get(rarity) === get(r) ? "" : get(r), true)));
+					append($$anchor, button_3);
 				};
-				if_block(node_6, ($$render) => {
-					if ((get(rarityCounts)[get(r)] || 0) > 0) $$render(consequent_4);
+				if_block(node_8, ($$render) => {
+					if (get(rarityCounts)[get(r)]) $$render(consequent_2);
 				});
-				append($$anchor, fragment_5);
+				append($$anchor, fragment_3);
 			});
-			reset(div_8);
-			var div_9 = sibling(div_8, 2);
-			var button_5 = child(div_9);
+			reset(div_7);
+			var div_8 = sibling(div_7, 2);
+			var button_4 = child(div_8);
 			let classes_4;
-			each(sibling(button_5, 2), 17, () => RARITIES, index, ($$anchor, r) => {
-				var fragment_6 = comment();
-				var node_8 = first_child(fragment_6);
-				var consequent_5 = ($$anchor) => {
-					var button_6 = root_5$3();
+			each(sibling(button_4, 2), 17, () => RARITIES_DESC, index, ($$anchor, r) => {
+				var fragment_4 = comment();
+				var node_10 = first_child(fragment_4);
+				var consequent_3 = ($$anchor) => {
+					var button_5 = root_2$3();
 					let classes_5;
-					var span = child(button_6);
+					var span = child(button_5);
 					var span_1 = sibling(span, 2);
 					var text_3 = only_child(span_1, true);
 					var text_4 = only_child(sibling(span_1), true);
-					reset(button_6);
+					reset(button_5);
 					template_effect(($0, $1) => {
-						classes_5 = set_class(button_6, 1, "rl", null, classes_5, { on: get(rarity) === get(r) });
+						classes_5 = set_class(button_5, 1, "rl", null, classes_5, { on: get(rarity) === get(r) });
 						set_style(span, `background:var(--r-${$0 ?? ""})`);
 						set_text(text_3, RNAME[get(r)]);
 						set_text(text_4, $1);
 					}, [() => get(r).toLowerCase(), () => nf(get(rarityCounts)[get(r)])]);
-					delegated("click", button_6, () => setRarity(get(r)));
-					append($$anchor, button_6);
+					delegated("click", button_5, () => refilter(() => set(rarity, get(rarity) === get(r) ? "" : get(r), true)));
+					append($$anchor, button_5);
 				};
-				if_block(node_8, ($$render) => {
-					if ((get(rarityCounts)[get(r)] || 0) > 0) $$render(consequent_5);
+				if_block(node_10, ($$render) => {
+					if (get(rarityCounts)[get(r)]) $$render(consequent_3);
 				});
-				append($$anchor, fragment_6);
+				append($$anchor, fragment_4);
 			});
-			reset(div_9);
-			reset(div_7);
-			template_effect(() => classes_4 = set_class(button_5, 1, "rl", null, classes_4, { on: get(rarity) === "" }));
-			delegated("click", button_5, () => setRarity(""));
-			append($$anchor, div_7);
+			reset(div_8);
+			reset(div_6);
+			template_effect(() => classes_4 = set_class(button_4, 1, "rl", null, classes_4, { on: !get(rarity) }));
+			delegated("click", button_4, () => refilter(() => set(rarity, "")));
+			append($$anchor, div_6);
 		};
-		if_block(node_5, ($$render) => {
-			if (get(rarityCounts)) $$render(consequent_6);
+		if_block(node_7, ($$render) => {
+			if (get(rarityCounts)) $$render(consequent_4);
 		});
-		var node_9 = sibling(node_5, 2);
-		var consequent_7 = ($$anchor) => {
-			var div_10 = root_7$3();
-			var b = child(div_10);
-			var text_5 = only_child(b, true);
-			var button_7 = sibling(b);
+		var node_11 = sibling(node_7, 2);
+		var consequent_5 = ($$anchor) => {
+			var div_9 = root_4$3();
+			var button_6 = sibling(child(div_9));
+			reset(div_9);
+			delegated("click", button_6, () => list.go());
+			append($$anchor, div_9);
+		};
+		var consequent_6 = ($$anchor) => {
+			var div_10 = root_6$3();
+			each(div_10, 20, () => Array(12), index, ($$anchor, _) => {
+				append($$anchor, root_5$3());
+			});
 			reset(div_10);
-			template_effect(() => set_text(text_5, get(error)));
-			delegated("click", button_7, load);
 			append($$anchor, div_10);
 		};
-		var consequent_8 = ($$anchor) => {
-			var div_11 = root_9$3();
-			each(div_11, 20, () => Array(12), index, ($$anchor, _) => {
-				append($$anchor, root_8$3());
-			});
-			reset(div_11);
-			append($$anchor, div_11);
+		var consequent_7 = ($$anchor) => {
+			append($$anchor, root_7$3());
 		};
-		var consequent_9 = ($$anchor) => {
-			append($$anchor, root_10$2());
-		};
-		var alternate_1 = ($$anchor) => {
-			var fragment_7 = root_12$1();
-			var div_14 = first_child(fragment_7);
+		var alternate = ($$anchor) => {
+			var fragment_5 = root_9$3();
+			var div_13 = first_child(fragment_5);
 			let classes_6;
-			each(div_14, 21, () => get(cards), (c) => c.id, ($$anchor, c) => {
-				var button_8 = root_11$2();
-				Card(child(button_8), {
+			each(div_13, 21, () => get(cards), (c) => c.id, ($$anchor, c) => {
+				var button_7 = root_8$3();
+				Card(child(button_7), {
 					get card() {
 						return get(c);
 					},
@@ -6890,37 +6849,36 @@
 						return values[get(c).id];
 					}
 				});
-				reset(button_8);
-				action(button_8, ($$node, $$action_arg) => watchValue?.($$node, $$action_arg), () => get(c));
-				template_effect(() => set_attribute(button_8, "aria-label", get(c).title));
-				delegated("click", button_8, () => set(selected, get(c), true));
-				append($$anchor, button_8);
+				reset(button_7);
+				action(button_7, ($$node, $$action_arg) => lazy.watch?.($$node, $$action_arg), () => get(c));
+				template_effect(() => set_attribute(button_7, "aria-label", get(c).title));
+				delegated("click", button_7, () => set(selected, get(c), true));
+				append($$anchor, button_7);
 			});
-			reset(div_14);
-			var div_15 = sibling(div_14, 2);
-			var button_9 = child(div_15);
-			var span_3 = sibling(button_9, 2);
-			var text_6 = only_child(span_3);
-			var button_10 = sibling(span_3, 2);
-			reset(div_15);
-			template_effect(() => {
-				classes_6 = set_class(div_14, 1, "grid", null, classes_6, { dim: get(loading) });
-				button_9.disabled = get(page) === 0 || get(loading);
-				set_text(text_6, `Page ${get(page) + 1}`);
-				button_10.disabled = !get(hasNext) || get(loading);
+			reset(div_13);
+			Pager(sibling(div_13, 2), {
+				get page() {
+					return list.page;
+				},
+				get hasNext() {
+					return get(hasNext);
+				},
+				get loading() {
+					return list.loading;
+				},
+				ongo: (p) => list.go(p)
 			});
-			delegated("click", button_9, () => go(-1));
-			delegated("click", button_10, () => go(1));
-			append($$anchor, fragment_7);
+			template_effect(() => classes_6 = set_class(div_13, 1, "grid", null, classes_6, { dim: list.loading }));
+			append($$anchor, fragment_5);
 		};
-		if_block(node_9, ($$render) => {
-			if (get(error)) $$render(consequent_7);
-			else if (!get(cards)) $$render(consequent_8, 1);
-			else if (get(cards).length === 0) $$render(consequent_9, 2);
-			else $$render(alternate_1, -1);
+		if_block(node_11, ($$render) => {
+			if (list.error) $$render(consequent_5);
+			else if (!get(cards)) $$render(consequent_6, 1);
+			else if (get(cards).length === 0) $$render(consequent_7, 2);
+			else $$render(alternate, -1);
 		});
-		var node_11 = sibling(node_9, 2);
-		var consequent_10 = ($$anchor) => {
+		var node_14 = sibling(node_11, 2);
+		var consequent_8 = ($$anchor) => {
 			{
 				let $0 = user_derived(() => ({ card: get(selected) }));
 				CardModal($$anchor, {
@@ -6928,67 +6886,78 @@
 						return get($0);
 					},
 					readonly: true,
-					get wishlisted() {
-						return get(selected).wishlisted;
-					},
-					onwishlist: () => toggleWishlist(get(selected)),
 					onclose: () => set(selected, null)
 				});
 			}
 		};
-		if_block(node_11, ($$render) => {
-			if (get(selected)) $$render(consequent_10);
+		if_block(node_14, ($$render) => {
+			if (get(selected)) $$render(consequent_8);
 		});
 		template_effect(() => {
 			if (select_value !== (select_value = get(sort))) select.value = (select.__value = select_value) ?? "", select_option(select, select_value);
-			classes = set_class(button_1, 1, "iconbtn", null, classes, { on: get(wishOnly) });
-			set_attribute(svg, "fill", get(wishOnly) ? "currentColor" : "none");
-			classes_1 = set_class(button_2, 1, "iconbtn", null, classes_1, { on: settings.hideStats });
-			classes_2 = set_class(button_3, 1, "iconbtn", null, classes_2, { on: !settings.hideSensitive });
+			classes = set_class(button, 1, "iconbtn", null, classes, { on: get(wishOnly) });
+			classes_1 = set_class(button_1, 1, "iconbtn", null, classes_1, { on: settings.hideStats });
+			classes_2 = set_class(button_2, 1, "iconbtn", null, classes_2, { on: !settings.hideSensitive });
 		});
-		bind_value(input, () => get(search), ($$value) => set(search, $$value));
-		delegated("change", select, (e) => setSort(e.currentTarget.value));
-		delegated("click", button_1, toggleWishOnly);
-		delegated("click", button_2, function(...$$args) {
+		delegated("change", select, (e) => refilter(() => set(sort, e.currentTarget.value, true)));
+		delegated("click", button, () => refilter(() => set(wishOnly, !get(wishOnly))));
+		delegated("click", button_1, function(...$$args) {
 			toggleHideStats?.apply(this, $$args);
 		});
-		delegated("click", button_3, function(...$$args) {
+		delegated("click", button_2, function(...$$args) {
 			toggleHideSensitive?.apply(this, $$args);
 		});
 		append($$anchor, fragment);
 		pop();
 	}
-	delegate(["click", "change"]);
-	var root$2 = from_html(`<div class="auc2-cat"> </div>`);
-	var root_1$2 = from_html(`<div class="auc2-seller"> </div>`);
-	var root_2$2 = from_html(`<div class="auc2-chart"><div class="mc-y"><span> </span><span> </span></div> <svg viewBox="0 0 100 44" preserveAspectRatio="none" aria-label="Historique des enchères"><path fill="var(--accent)" fill-opacity="0.12"></path><path fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path></svg></div>`);
-	var root_3$2 = from_html(`<div class="auc2-feed-empty">Aucune enchère pour l'instant. Soyez le premier.</div>`);
-	var root_4$2 = from_html(`<div><span class="auc2-feed-who"> </span> <span class="auc2-feed-amt"> </span> <span class="auc2-feed-time"> </span></div>`);
-	var root_5$2 = from_html(`<div class="auc2-status lead">Vous êtes en tête</div>`);
-	var root_6$2 = from_html(`<div class="auc2-status out">Enchère dépassée</div>`);
-	var root_7$2 = from_html(`<div class="auc2-ended">Enchère terminée.</div>`);
-	var root_8$2 = from_html(`<div class="auc2-note">C'est votre annonce.</div>`);
-	var root_9$2 = from_html(`<div> </div>`);
-	var root_10$1 = from_html(`<div class="auc2-box"><div class="auc2-box-lbl">Votre enchère <span> </span></div> <div class="af-input-row"><input class="af-input" type="number" step="1"/> <span class="af-unit">pts</span></div> <div class="auc2-quick"><button>Min</button> <button>+5</button> <button>+25</button> <button>+100</button></div> <button class="btn primary auc2-cta"> </button> <!></div>`);
-	var root_11$1 = from_html(`<div class="modal-backdrop" role="presentation"><div class="auc2" role="dialog" aria-modal="true" tabindex="-1"><button class="modal-close" aria-label="Fermer"><svg class="x-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button> <div class="auc2-grid"><div class="auc2-main"><div class="auc2-head"><div class="auc2-thumb"><!></div> <div class="auc2-id"><span class="modal-rar"> </span> <h2 class="auc2-name"> </h2> <!> <!></div></div> <div class="auc2-stats"><div class="auc2-price"><div class="auc2-price-lbl"> </div> <div class="auc2-price-val"><span class="auc2-coin"></span> </div></div> <div class="auc2-clock"><div class="auc2-clock-lbl"> </div> <div class="auc2-clock-val"> </div></div></div> <!> <div class="auc2-feed"><div class="auc2-feed-head">Activité</div> <!></div></div> <div class="auc2-side"><!> <!> <!> <div class="auc2-live"><span class="auc2-dot"></span>Mise à jour en direct</div></div></div></div></div>`);
+	delegate(["change", "click"]);
+	var root$2 = from_html(`<div class="auc-cat"> </div>`);
+	var root_1$2 = from_html(`<div class="auc-k"> </div> <div class="auc-price"><span class="auc-coin"></span> </div> <div class="auc-sub"> </div>`, 1);
+	var root_2$2 = from_html(`<div class="auc-k"> </div> <div class="auc-price muted"><span class="auc-coin"></span> </div> <div class="auc-sub"> </div>`, 1);
+	var root_3$2 = from_html(`<span class="auc-live"><span class="auc-dot"></span>en direct</span>`);
+	var root_4$2 = from_html(`<div class="auc-row"><div><div class="auc-k"> </div> <div class="auc-price"><span class="auc-coin"></span> </div></div> <div class="auc-clock"><div class="auc-k"> </div> <div class="auc-time"> </div></div></div> <div class="auc-sub"> <!></div>`, 1);
+	var root_5$2 = from_html(`<div class="auc-flag lead">Vous êtes en tête</div>`);
+	var root_6$2 = from_html(`<div class="auc-flag out">Enchère dépassée</div>`);
+	var root_7$2 = from_html(`<button class="btn primary auc-cta">Finaliser l'enchère</button>`);
+	var root_8$2 = from_html(`<div class="auc-note">En attente de finalisation.</div>`);
+	var root_9$2 = from_html(`<div class="auc-inline"><div class="af-input-row"><input class="af-input" type="number" min="1" step="1" placeholder="Nouvelle mise de départ"/> <span class="af-unit">pts</span></div> <button class="btn">Baisser</button></div>`);
+	var root_10$2 = from_html(`<div class="auc-note"> </div>`);
+	var root_11$2 = from_html(`<div class="af-actions"><button class="btn">Garder</button> <button class="btn danger">Confirmer l'annulation</button></div>`);
+	var root_12$1 = from_html(`<button class="btn danger auc-cta">Annuler la vente</button>`);
+	var root_13$1 = from_html(`<!> <!>`, 1);
+	var root_14$1 = from_html(`<button> </button>`);
+	var root_15$1 = from_html(`<div> </div>`);
+	var root_16$1 = from_html(`<div class="auc-inline"><div class="af-input-row"><input class="af-input" type="number" step="1" aria-label="Montant de l'enchère"/> <span class="af-unit">pts</span></div> <button class="btn primary"> </button></div> <div class="auc-quick"><button> </button> <!></div> <!>`, 1);
+	var root_17$1 = from_html(`<span class="auc-pt"></span>`);
+	var root_18 = from_html(`<div class="auc-chart"><div class="mc-y"><span> </span><span> </span></div> <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Évolution du prix"><path fill="var(--accent)" fill-opacity="0.1"></path><path fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke"></path></svg> <!></div> <div class="auc-axis"><span> </span><span> </span></div>`, 1);
+	var root_19 = from_html(`<div class="auc-empty"> </div>`);
+	var root_20 = from_html(`<div class="auc-empty">Aucune enchère.</div>`);
+	var root_21 = from_html(`<span class="tag"> </span>`);
+	var root_22 = from_html(`<li><span class="who"> </span> <!> <span class="amt"> </span> <span class="when"> </span></li>`);
+	var root_23 = from_html(`<ol class="auc-feed"></ol>`);
+	var root_24 = from_html(`<div class="modal-backdrop" role="presentation"><div class="auc" role="dialog" aria-modal="true" aria-labelledby="wm-auc-title" tabindex="-1"><button class="modal-close" aria-label="Fermer"><!></button> <div class="auc-top"><div class="auc-card"><!></div> <div class="auc-body"><div class="auc-id"><span class="modal-rar"> </span> <h2 class="auc-name" id="wm-auc-title"> </h2> <!> <div class="auc-by"> </div></div> <div class="auc-state"><!></div> <!> <div class="auc-act"><!> <!></div></div></div> <div class="auc-bottom"><section class="auc-panel"><h3>Évolution du prix</h3> <!></section> <section class="auc-panel"><h3>Activité</h3> <!></section></div></div></div>`);
 	function AuctionModal($$anchor, $$props) {
 		push($$props, true);
 		let balance = prop($$props, "balance", 3, null);
-		const nf = (n) => n == null ? "-" : Number(n).toLocaleString("fr");
 		let a = state(proxy($$props.auction));
 		let bids = state(proxy($$props.auction.bids || []));
 		let iBid = state(false);
+		let bal = state(proxy(balance()));
+		let busy = state(false);
+		let msg = state("");
+		let msgOk = state(false);
+		let confirmCancel = state(false);
 		async function refresh() {
 			try {
 				const fresh = await data.auction($$props.auction.id);
 				set(a, fresh, true);
-				set(bids, fresh.bids || [], true);
-				const min = (fresh.price ?? fresh.base ?? 0) + 1;
-				if (Number(get(amount)) < min) set(amount, String(min), true);
+				set(bids, fresh.bids, true);
+				if (Number(get(amount)) < get(minBid)) set(amount, String(get(minBid)), true);
 			} catch {}
 		}
 		refresh();
 		user_effect(() => {
+			if (get(phase) !== "live") return;
 			const t = setInterval(refresh, 4e3);
 			return () => clearInterval(t);
 		});
@@ -6997,96 +6966,65 @@
 			const t = setInterval(() => set(now, Date.now(), true), 1e3);
 			return () => clearInterval(t);
 		});
-		let secsLeft = user_derived(() => Math.max(0, Math.round((Date.parse(get(a).endAt || "") - get(now)) / 1e3)));
-		let ended = user_derived(() => !get(a).endAt ? false : get(secsLeft) <= 0);
-		let urgency = user_derived(() => get(ended) ? "end" : get(secsLeft) < 60 ? "crit" : get(secsLeft) < 300 ? "warn" : "ok");
-		function fmtLeft(s) {
-			if (s <= 0) return "Terminée";
-			const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
-			if (d) return `${d} j ${h} h`;
-			if (h) return `${h} h ${String(m).padStart(2, "0")} m`;
-			if (m) return `${m} m ${String(ss).padStart(2, "0")} s`;
-			return `${ss} s`;
-		}
-		const relTime = (t) => {
-			const d = Date.parse(t || "");
-			if (isNaN(d)) return "";
-			const m = Math.round((get(now) - d) / 6e4);
-			if (m < 1) return "à l'instant";
-			if (m < 60) return `${m} min`;
-			const h = Math.round(m / 60);
-			if (h < 24) return `${h} h`;
-			return `${Math.round(h / 24)} j`;
-		};
-		let price = user_derived(() => get(a).price ?? get(a).bid ?? get(a).base ?? 0);
-		let minBid = user_derived(() => get(price) + 1);
-		let leading = user_derived(() => !!(get(a).currentBidderId && data.userId && get(a).currentBidderId === data.userId));
-		let outbid = user_derived(() => get(iBid) && !get(leading));
-		let amount = state(proxy(String(($$props.auction.price ?? $$props.auction.base ?? 0) + 1)));
-		let busy = state(false);
-		let msg = state("");
-		let msgOk = state(false);
-		let bal = state(proxy(balance()));
-		user_effect(() => {
-			set(bal, balance());
-		});
-		let tooPoor = user_derived(() => get(bal) != null && Number(get(amount)) > get(bal));
-		function setAmount(v) {
-			set(amount, String(Math.max(1, Math.round(v))), true);
-		}
-		async function bid() {
-			const v = Number(get(amount));
-			if (!(v >= 1)) {
-				set(msg, "Montant invalide.");
-				set(msgOk, false);
-				return;
-			}
+		const secsLeft = user_derived(() => secondsUntil(get(a).endAt, get(now)) ?? 0);
+		const phase = user_derived(() => get(a).status === "cancelled" ? "cancelled" : get(a).status !== "active" ? get(a).finalPrice != null || get(a).winner ? "sold" : "unsold" : get(secsLeft) > 0 ? "live" : "closing");
+		const urgency = user_derived(() => get(secsLeft) < 60 ? "crit" : get(secsLeft) < 300 ? "warn" : "ok");
+		const minBid = user_derived(() => get(a).bid != null ? get(a).bid + 1 : get(a).base ?? 1);
+		const leading = user_derived(() => !!get(a).currentBidderId && get(a).currentBidderId === data.userId);
+		const mine = user_derived(() => get(a).owned);
+		const repriceAt = user_derived(() => (Date.parse(get(a).createdAt) + Date.parse(get(a).endAt)) / 2);
+		const canReprice = user_derived(() => get(mine) && get(phase) === "live" && get(a).bid == null && get(now) >= get(repriceAt));
+		const bidders = user_derived(() => new Set(get(bids).map((b) => b.bidder)).size);
+		let amount = state(proxy(String($$props.auction.bid != null ? $$props.auction.bid + 1 : $$props.auction.base ?? 1)));
+		let newBase = state("");
+		const tooPoor = user_derived(() => get(bal) != null && Number(get(amount)) > get(bal));
+		async function run(action, ok) {
 			set(busy, true);
 			set(msg, "");
 			try {
-				const d = await data.placeBid(get(a).id, v);
-				set(iBid, true);
+				const d = await action();
 				set(msgOk, true);
-				set(msg, `Enchère placée à ${nf(d.current_bid)} pts.`);
-				if (d.bidder_balance != null) set(bal, d.bidder_balance, true);
+				set(msg, ok(d), true);
 				$$props.onwallet?.();
 				await refresh();
 			} catch (e) {
 				set(msgOk, false);
-				set(msg, e?.message || "Enchère refusée.", true);
-				if (e?.min) set(amount, String(e.min), true);
-			} finally {
-				set(busy, false);
+				set(msg, e.message, true);
+				if (e.min) set(amount, String(e.min), true);
 			}
+			set(busy, false);
+			set(confirmCancel, false);
 		}
-		let chart = user_derived(() => {
-			const rows = [...get(bids)].filter((b) => b.at).sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
-			const series = [];
-			const startT = Date.parse(get(a).createdAt || rows[0]?.at || "") || (rows[0] ? Date.parse(rows[0].at) : 0);
-			if (get(a).base != null && startT) series.push({
-				t: startT,
-				v: get(a).base
-			});
-			for (const b of rows) series.push({
-				t: Date.parse(b.at),
-				v: b.amount
-			});
-			if (series.length < 2) return null;
-			const vs = series.map((p) => p.v), min = Math.min(...vs), max = Math.max(...vs), span = max - min || 1;
-			const ts = series.map((p) => p.t), t0 = ts[0], tspan = (ts[ts.length - 1] || t0 + 1) - t0 || 1, H = 44, pad = 3;
-			const P = series.map((p) => [pad + (p.t - t0) / tspan * 94, pad + (1 - (p.v - min) / span) * 38]);
-			const d = P.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+		const bid = () => run(() => data.placeBid(get(a).id, Number(get(amount))), (d) => {
+			set(iBid, true);
+			set(bal, d.bidder_balance ?? get(bal), true);
+			return `Enchère placée à ${nf(d.current_bid)} pts.`;
+		});
+		const reprice = () => run(() => data.reprice(get(a).id, Number(get(newBase))), () => `Mise de départ baissée à ${nf(Number(get(newBase)))} pts.`);
+		const cancel = () => run(() => data.cancelAuction(get(a).id), () => "Vente annulée, la carte revient dans votre collection.");
+		const settle = () => run(() => data.settle(get(a).id), () => "Enchère finalisée.");
+		const chart = user_derived(() => {
+			const steps = [...get(bids)].filter((b) => b.at).sort((x, y) => Date.parse(x.at) - Date.parse(y.at)).map((b) => b.amount);
+			const vs = get(a).base != null ? [get(a).base, ...steps] : steps;
+			if (vs.length < 2) return null;
+			const min = Math.min(...vs), max = Math.max(...vs), span = max - min || 1, H = 40, pad = 4;
+			const pts = vs.map((v, i) => [pad + i / (vs.length - 1) * 92, pad + (1 - (v - min) / span) * 32]);
+			let d = `M${pts[0][0]} ${pts[0][1]}`;
+			for (let i = 1; i < pts.length; i++) d += ` H${pts[i][0]} V${pts[i][1]}`;
 			return {
 				d,
-				area: d + ` L${P[P.length - 1][0].toFixed(1)} ${H} L${P[0][0].toFixed(1)} ${H} Z`,
+				area: `${d} V${H} H${pts[0][0]} Z`,
+				dots: pts.slice(1),
 				min,
 				max
 			};
 		});
-		let modalEl;
-		function onKey(e) {
-			if (e.key === "Escape") $$props.onclose?.();
-		}
+		const dateLabel = (iso) => iso ? new Date(iso).toLocaleString("fr", {
+			day: "numeric",
+			month: "short",
+			hour: "2-digit",
+			minute: "2-digit"
+		}) : "";
 		user_effect(() => {
 			const html = document.documentElement;
 			const prev = html.style.overflow;
@@ -7095,222 +7033,390 @@
 				html.style.overflow = prev;
 			};
 		});
-		var div = root_11$1();
-		event("keydown", $window, onKey);
+		var div = root_24();
+		event("keydown", $window, (e) => e.key === "Escape" && $$props.onclose?.());
 		var div_1 = child(div);
 		var button = child(div_1);
+		Icon(child(button), {
+			name: "close",
+			width: 2,
+			class: "x-ico"
+		});
+		reset(button);
 		var div_2 = sibling(button, 2);
 		var div_3 = child(div_2);
-		var div_4 = child(div_3);
-		var div_5 = child(div_4);
-		Card(child(div_5), {
+		Card(child(div_3), {
 			get card() {
 				return get(a).card;
 			},
 			get shiny() {
 				return get(a).is_shiny;
 			},
+			big: true,
 			caption: false
 		});
-		reset(div_5);
-		var div_6 = sibling(div_5, 2);
-		var span_1 = child(div_6);
-		var text = only_child(span_1, true);
+		reset(div_3);
+		var div_4 = sibling(div_3, 2);
+		var div_5 = child(div_4);
+		var span_1 = child(div_5);
+		var text = only_child(span_1);
 		var h2 = sibling(span_1, 2);
 		var text_1 = only_child(h2, true);
-		var node_1 = sibling(h2, 2);
+		var node_2 = sibling(h2, 2);
 		var consequent = ($$anchor) => {
-			var div_7 = root$2();
-			var text_2 = only_child(div_7, true);
+			var div_6 = root$2();
+			var text_2 = only_child(div_6, true);
 			template_effect(() => set_text(text_2, get(a).card.category));
-			append($$anchor, div_7);
-		};
-		if_block(node_1, ($$render) => {
-			if (get(a).card.category) $$render(consequent);
-		});
-		var node_2 = sibling(node_1, 2);
-		var consequent_1 = ($$anchor) => {
-			var div_8 = root_1$2();
-			var text_3 = only_child(div_8);
-			template_effect(() => set_text(text_3, `Vendu par ${get(a).seller ?? ""}`));
-			append($$anchor, div_8);
+			append($$anchor, div_6);
 		};
 		if_block(node_2, ($$render) => {
-			if (get(a).seller) $$render(consequent_1);
+			if (get(a).card.category) $$render(consequent);
 		});
-		reset(div_6);
-		reset(div_4);
-		var div_9 = sibling(div_4, 2);
-		var div_10 = child(div_9);
-		var div_11 = child(div_10);
-		var text_4 = only_child(div_11, true);
-		var div_12 = sibling(div_11, 2);
-		var text_5 = sibling(child(div_12), 1, true);
-		reset(div_12);
-		reset(div_10);
-		var div_13 = sibling(div_10, 2);
-		var div_14 = child(div_13);
-		var text_6 = only_child(div_14, true);
-		var text_7 = only_child(sibling(div_14, 2), true);
-		reset(div_13);
-		reset(div_9);
-		var node_3 = sibling(div_9, 2);
-		var consequent_2 = ($$anchor) => {
-			var div_16 = root_2$2();
-			var div_17 = child(div_16);
-			var span_2 = child(div_17);
-			var text_8 = only_child(span_2, true);
-			var text_9 = only_child(sibling(span_2), true);
-			reset(div_17);
-			var svg = sibling(div_17, 2);
-			var path = child(svg);
-			var path_1 = sibling(path);
-			reset(svg);
-			reset(div_16);
+		var text_3 = only_child(sibling(node_2, 2), true);
+		reset(div_5);
+		var div_8 = sibling(div_5, 2);
+		var node_3 = child(div_8);
+		var consequent_1 = ($$anchor) => {
+			var fragment = root_1$2();
+			var div_9 = first_child(fragment);
+			var text_4 = only_child(div_9);
+			var div_10 = sibling(div_9, 2);
+			var text_5 = sibling(child(div_10), 1, true);
+			reset(div_10);
+			var text_6 = only_child(sibling(div_10, 2));
 			template_effect(($0, $1) => {
-				set_text(text_8, $0);
-				set_text(text_9, $1);
-				set_attribute(path, "d", get(chart).area);
-				set_attribute(path_1, "d", get(chart).d);
-			}, [() => nf(get(chart).max), () => nf(get(chart).min)]);
-			append($$anchor, div_16);
-		};
-		if_block(node_3, ($$render) => {
-			if (get(chart)) $$render(consequent_2);
-		});
-		var div_18 = sibling(node_3, 2);
-		var node_4 = sibling(child(div_18), 2);
-		var consequent_3 = ($$anchor) => {
-			append($$anchor, root_3$2());
-		};
-		var alternate = ($$anchor) => {
-			var fragment = comment();
-			each(first_child(fragment), 17, () => get(bids).slice(0, 6), (b) => b.id, ($$anchor, b) => {
-				var div_20 = root_4$2();
-				let classes;
-				var span_4 = child(div_20);
-				var text_10 = only_child(span_4, true);
-				var span_5 = sibling(span_4, 2);
-				var text_11 = only_child(span_5);
-				var text_12 = only_child(sibling(span_5, 2), true);
-				reset(div_20);
-				template_effect(($0, $1) => {
-					classes = set_class(div_20, 1, "auc2-feed-row", null, classes, { me: get(b).bidder === "Toi" || get(b).bidderId && get(b).bidderId === data.userId });
-					set_text(text_10, get(b).bidder || "Anonyme");
-					set_text(text_11, `${$0 ?? ""} pts`);
-					set_text(text_12, $1);
-				}, [() => nf(get(b).amount), () => relTime(get(b).at)]);
-				append($$anchor, div_20);
-			});
+				set_text(text_4, `Vendue${get(a).winner ? ` à ${get(a).winner}` : ""}`);
+				set_text(text_5, $0);
+				set_text(text_6, `${$1 ?? ""} · ${get(bids).length ?? ""} enchère${get(bids).length > 1 ? "s" : ""}`);
+			}, [() => nf(get(a).finalPrice ?? get(a).price), () => dateLabel(get(a).settledAt || get(a).endAt)]);
 			append($$anchor, fragment);
 		};
-		if_block(node_4, ($$render) => {
-			if (get(bids).length === 0) $$render(consequent_3);
+		var consequent_2 = ($$anchor) => {
+			var fragment_1 = root_2$2();
+			var div_12 = first_child(fragment_1);
+			var text_7 = only_child(div_12, true);
+			var div_13 = sibling(div_12, 2);
+			var text_8 = sibling(child(div_13), 1, true);
+			reset(div_13);
+			var text_9 = only_child(sibling(div_13, 2));
+			template_effect(($0, $1) => {
+				set_text(text_7, get(phase) === "cancelled" ? "Vente annulée" : "Invendue");
+				set_text(text_8, $0);
+				set_text(text_9, `Mise de départ · ${$1 ?? ""}`);
+			}, [() => nf(get(a).base), () => dateLabel(get(a).settledAt || get(a).endAt)]);
+			append($$anchor, fragment_1);
+		};
+		var alternate = ($$anchor) => {
+			var fragment_2 = root_4$2();
+			var div_15 = first_child(fragment_2);
+			var div_16 = child(div_15);
+			var div_17 = child(div_16);
+			var text_10 = only_child(div_17, true);
+			var div_18 = sibling(div_17, 2);
+			var text_11 = sibling(child(div_18), 1, true);
+			reset(div_18);
+			reset(div_16);
+			var div_19 = sibling(div_16, 2);
+			var div_20 = child(div_19);
+			var text_12 = only_child(div_20, true);
+			var text_13 = only_child(sibling(div_20, 2), true);
+			reset(div_19);
+			reset(div_15);
+			var div_22 = sibling(div_15, 2);
+			var text_14 = child(div_22);
+			var node_4 = sibling(text_14);
+			var consequent_3 = ($$anchor) => {
+				append($$anchor, root_3$2());
+			};
+			if_block(node_4, ($$render) => {
+				if (get(phase) === "live") $$render(consequent_3);
+			});
+			reset(div_22);
+			template_effect(($0, $1) => {
+				set_text(text_10, get(a).bid != null ? "Enchère actuelle" : "Mise de départ");
+				set_text(text_11, $0);
+				set_attribute(div_19, "data-u", get(phase) === "closing" ? "end" : get(urgency));
+				set_text(text_12, get(phase) === "closing" ? "Temps écoulé" : "Se termine dans");
+				set_text(text_13, $1);
+				set_text(text_14, `${get(bids).length ?? ""} enchère${get(bids).length > 1 ? "s" : ""}${get(bidders) ? ` · ${get(bidders)} enchérisseur${get(bidders) > 1 ? "s" : ""}` : ""} `);
+			}, [() => nf(get(a).price), () => get(phase) === "closing" ? "Terminée" : countdown(get(secsLeft), { seconds: true })]);
+			append($$anchor, fragment_2);
+		};
+		if_block(node_3, ($$render) => {
+			if (get(phase) === "sold") $$render(consequent_1);
+			else if (get(phase) === "unsold" || get(phase) === "cancelled") $$render(consequent_2, 1);
 			else $$render(alternate, -1);
 		});
-		reset(div_18);
-		reset(div_3);
-		var div_21 = sibling(div_3, 2);
-		var node_6 = child(div_21);
+		reset(div_8);
+		var node_5 = sibling(div_8, 2);
 		var consequent_4 = ($$anchor) => {
 			append($$anchor, root_5$2());
 		};
 		var consequent_5 = ($$anchor) => {
 			append($$anchor, root_6$2());
 		};
-		if_block(node_6, ($$render) => {
-			if (get(leading)) $$render(consequent_4);
-			else if (get(outbid)) $$render(consequent_5, 1);
+		if_block(node_5, ($$render) => {
+			if (get(leading) && get(phase) !== "sold") $$render(consequent_4);
+			else if (get(iBid) && !get(leading) && get(phase) === "live") $$render(consequent_5, 1);
 		});
-		var node_7 = sibling(node_6, 2);
-		var consequent_6 = ($$anchor) => {
-			append($$anchor, root_7$2());
-		};
+		var div_25 = sibling(node_5, 2);
+		var node_6 = child(div_25);
 		var consequent_7 = ($$anchor) => {
-			append($$anchor, root_8$2());
+			var fragment_3 = comment();
+			var node_7 = first_child(fragment_3);
+			var consequent_6 = ($$anchor) => {
+				var button_1 = root_7$2();
+				template_effect(() => button_1.disabled = get(busy));
+				delegated("click", button_1, settle);
+				append($$anchor, button_1);
+			};
+			var alternate_1 = ($$anchor) => {
+				append($$anchor, root_8$2());
+			};
+			if_block(node_7, ($$render) => {
+				if (get(mine) || get(leading)) $$render(consequent_6);
+				else $$render(alternate_1, -1);
+			});
+			append($$anchor, fragment_3);
 		};
-		var alternate_1 = ($$anchor) => {
-			var div_26 = root_10$1();
-			var div_27 = child(div_26);
-			var text_13 = only_child(sibling(child(div_27)));
-			reset(div_27);
-			var div_28 = sibling(div_27, 2);
-			var input = child(div_28);
-			remove_input_defaults(input);
-			next(2);
-			reset(div_28);
-			var div_29 = sibling(div_28, 2);
-			var button_1 = child(div_29);
-			var button_2 = sibling(button_1, 2);
-			var button_3 = sibling(button_2, 2);
-			var button_4 = sibling(button_3, 2);
-			reset(div_29);
-			var button_5 = sibling(div_29, 2);
-			var text_14 = only_child(button_5, true);
-			var node_8 = sibling(button_5, 2);
+		var consequent_11 = ($$anchor) => {
+			var fragment_4 = root_13$1();
+			var node_8 = first_child(fragment_4);
 			var consequent_8 = ($$anchor) => {
-				var div_30 = root_9$2();
-				let classes_1;
-				var text_15 = only_child(div_30);
+				var div_27 = root_9$2();
+				var div_28 = child(div_27);
+				var input = child(div_28);
+				remove_input_defaults(input);
+				next(2);
+				reset(div_28);
+				var button_2 = sibling(div_28, 2);
+				reset(div_27);
 				template_effect(($0) => {
-					classes_1 = set_class(div_30, 1, "auc2-bal", null, classes_1, { low: get(tooPoor) });
-					set_text(text_15, `Solde : ${$0 ?? ""} WikiBidous`);
-				}, [() => nf(get(bal))]);
-				append($$anchor, div_30);
+					set_attribute(input, "max", get(a).base - 1);
+					button_2.disabled = $0;
+				}, [() => get(busy) || !(Number(get(newBase)) >= 1 && Number(get(newBase)) < get(a).base)]);
+				bind_value(input, () => get(newBase), ($$value) => set(newBase, $$value));
+				delegated("click", button_2, reprice);
+				append($$anchor, div_27);
+			};
+			var consequent_9 = ($$anchor) => {
+				var div_29 = root_10$2();
+				var text_15 = only_child(div_29);
+				template_effect(($0) => set_text(text_15, `Baisse du prix possible dans ${$0 ?? ""}.`), [() => countdown(Math.round((get(repriceAt) - get(now)) / 1e3))]);
+				append($$anchor, div_29);
 			};
 			if_block(node_8, ($$render) => {
-				if (get(bal) != null) $$render(consequent_8);
+				if (get(canReprice)) $$render(consequent_8);
+				else if (get(a).bid == null) $$render(consequent_9, 1);
 			});
-			reset(div_26);
+			var node_9 = sibling(node_8, 2);
+			var consequent_10 = ($$anchor) => {
+				var div_30 = root_11$2();
+				var button_3 = child(div_30);
+				var button_4 = sibling(button_3, 2);
+				reset(div_30);
+				template_effect(() => {
+					button_3.disabled = get(busy);
+					button_4.disabled = get(busy);
+				});
+				delegated("click", button_3, () => set(confirmCancel, false));
+				delegated("click", button_4, cancel);
+				append($$anchor, div_30);
+			};
+			var alternate_2 = ($$anchor) => {
+				var button_5 = root_12$1();
+				template_effect(() => button_5.disabled = get(busy));
+				delegated("click", button_5, () => set(confirmCancel, true));
+				append($$anchor, button_5);
+			};
+			if_block(node_9, ($$render) => {
+				if (get(confirmCancel)) $$render(consequent_10);
+				else $$render(alternate_2, -1);
+			});
+			append($$anchor, fragment_4);
+		};
+		var consequent_13 = ($$anchor) => {
+			var fragment_5 = root_16$1();
+			var div_31 = first_child(fragment_5);
+			var div_32 = child(div_31);
+			var input_1 = child(div_32);
+			remove_input_defaults(input_1);
+			next(2);
+			reset(div_32);
+			var button_6 = sibling(div_32, 2);
+			var text_16 = only_child(button_6, true);
+			reset(div_31);
+			var div_33 = sibling(div_31, 2);
+			var button_7 = child(div_33);
+			var text_17 = only_child(button_7);
+			each(sibling(button_7, 2), 16, () => [
+				5,
+				25,
+				100
+			], index, ($$anchor, step) => {
+				var button_8 = root_14$1();
+				var text_18 = only_child(button_8);
+				template_effect(() => set_text(text_18, `+${step ?? ""}`));
+				delegated("click", button_8, () => set(amount, String(Math.max(get(minBid), Number(get(amount)) + step)), true));
+				append($$anchor, button_8);
+			});
+			reset(div_33);
+			var node_11 = sibling(div_33, 2);
+			var consequent_12 = ($$anchor) => {
+				var div_34 = root_15$1();
+				let classes;
+				var text_19 = only_child(div_34);
+				template_effect(($0) => {
+					classes = set_class(div_34, 1, "auc-bal", null, classes, { low: get(tooPoor) });
+					set_text(text_19, `Solde : ${$0 ?? ""} WikiBidous. La mise est retenue tant que vous êtes en tête.`);
+				}, [() => nf(get(bal))]);
+				append($$anchor, div_34);
+			};
+			if_block(node_11, ($$render) => {
+				if (get(bal) != null) $$render(consequent_12);
+			});
 			template_effect(($0, $1) => {
-				set_text(text_13, `min ${$0 ?? ""} pts`);
-				set_attribute(input, "min", get(minBid));
-				button_5.disabled = get(busy) || get(tooPoor);
-				set_text(text_14, $1);
-			}, [() => nf(get(minBid)), () => get(busy) ? "Enchère..." : `Miser ${nf(Number(get(amount)) || 0)} pts`]);
-			bind_value(input, () => get(amount), ($$value) => set(amount, $$value));
-			delegated("click", button_1, () => setAmount(get(minBid)));
-			delegated("click", button_2, () => setAmount(Number(get(amount)) + 5));
-			delegated("click", button_3, () => setAmount(Number(get(amount)) + 25));
-			delegated("click", button_4, () => setAmount(Number(get(amount)) + 100));
-			delegated("click", button_5, bid);
-			append($$anchor, div_26);
+				set_attribute(input_1, "min", get(minBid));
+				button_6.disabled = $0;
+				set_text(text_16, get(busy) ? "..." : "Miser");
+				set_text(text_17, `Min ${$1 ?? ""}`);
+			}, [() => get(busy) || get(tooPoor) || !(Number(get(amount)) >= get(minBid)), () => nf(get(minBid))]);
+			bind_value(input_1, () => get(amount), ($$value) => set(amount, $$value));
+			delegated("click", button_6, bid);
+			delegated("click", button_7, () => set(amount, String(get(minBid)), true));
+			append($$anchor, fragment_5);
 		};
-		if_block(node_7, ($$render) => {
-			if (get(ended)) $$render(consequent_6);
-			else if (get(a).owned) $$render(consequent_7, 1);
-			else $$render(alternate_1, -1);
+		if_block(node_6, ($$render) => {
+			if (get(phase) === "closing") $$render(consequent_7);
+			else if (get(phase) === "live" && get(mine)) $$render(consequent_11, 1);
+			else if (get(phase) === "live") $$render(consequent_13, 2);
 		});
-		var node_9 = sibling(node_7, 2);
-		var consequent_9 = ($$anchor) => {
-			var div_31 = root_9$2();
-			let classes_2;
-			var text_16 = only_child(div_31, true);
+		var node_12 = sibling(node_6, 2);
+		var consequent_14 = ($$anchor) => {
+			var div_35 = root_15$1();
+			let classes_1;
+			var text_20 = only_child(div_35, true);
 			template_effect(() => {
-				classes_2 = set_class(div_31, 1, "modal-msg", null, classes_2, { ok: get(msgOk) });
-				set_text(text_16, get(msg));
+				classes_1 = set_class(div_35, 1, "modal-msg", null, classes_1, { ok: get(msgOk) });
+				set_text(text_20, get(msg));
 			});
-			append($$anchor, div_31);
+			append($$anchor, div_35);
 		};
-		if_block(node_9, ($$render) => {
-			if (get(msg)) $$render(consequent_9);
+		if_block(node_12, ($$render) => {
+			if (get(msg)) $$render(consequent_14);
 		});
-		next(2);
-		reset(div_21);
+		reset(div_25);
+		reset(div_4);
 		reset(div_2);
+		var div_36 = sibling(div_2, 2);
+		var section = child(div_36);
+		var node_13 = sibling(child(section), 2);
+		var consequent_15 = ($$anchor) => {
+			var fragment_6 = root_18();
+			var div_37 = first_child(fragment_6);
+			var div_38 = child(div_37);
+			var span_3 = child(div_38);
+			var text_21 = only_child(span_3, true);
+			var text_22 = only_child(sibling(span_3), true);
+			reset(div_38);
+			var svg = sibling(div_38, 2);
+			var path = child(svg);
+			var path_1 = sibling(path);
+			reset(svg);
+			each(sibling(svg, 2), 17, () => get(chart).dots, index, ($$anchor, $$item) => {
+				var $$array = user_derived(() => to_array(get($$item), 2));
+				let x = () => get($$array)[0];
+				let y = () => get($$array)[1];
+				var span_5 = root_17$1();
+				template_effect(() => set_style(span_5, `left:${x() ?? ""}%;top:${y() / 40 * 100}%`));
+				append($$anchor, span_5);
+			});
+			reset(div_37);
+			var div_39 = sibling(div_37, 2);
+			var span_6 = child(div_39);
+			var text_23 = only_child(span_6);
+			var text_24 = only_child(sibling(span_6));
+			reset(div_39);
+			template_effect(($0, $1, $2) => {
+				set_text(text_21, $0);
+				set_text(text_22, $1);
+				set_attribute(path, "d", get(chart).area);
+				set_attribute(path_1, "d", get(chart).d);
+				set_text(text_23, `Départ ${$2 ?? ""}`);
+				set_text(text_24, `${get(bids).length ?? ""} enchère${get(bids).length > 1 ? "s" : ""}`);
+			}, [
+				() => nf(get(chart).max),
+				() => nf(get(chart).min),
+				() => nf(get(a).base)
+			]);
+			append($$anchor, fragment_6);
+		};
+		var alternate_3 = ($$anchor) => {
+			var div_40 = root_19();
+			var text_25 = only_child(div_40);
+			template_effect(() => set_text(text_25, `Pas encore d'enchère. ${get(phase) === "live" && !get(mine) ? "Soyez le premier." : ""}`));
+			append($$anchor, div_40);
+		};
+		if_block(node_13, ($$render) => {
+			if (get(chart)) $$render(consequent_15);
+			else $$render(alternate_3, -1);
+		});
+		reset(section);
+		var section_1 = sibling(section, 2);
+		var node_15 = sibling(child(section_1), 2);
+		var consequent_16 = ($$anchor) => {
+			append($$anchor, root_20());
+		};
+		var alternate_4 = ($$anchor) => {
+			var ol = root_23();
+			each(ol, 23, () => get(bids), (b) => b.id, ($$anchor, b, i) => {
+				var li = root_22();
+				let classes_2;
+				var span_8 = child(li);
+				var text_26 = only_child(span_8, true);
+				var node_16 = sibling(span_8, 2);
+				var consequent_17 = ($$anchor) => {
+					var span_9 = root_21();
+					var text_27 = only_child(span_9, true);
+					template_effect(() => set_text(text_27, get(phase) === "sold" ? "Gagnant" : "En tête"));
+					append($$anchor, span_9);
+				};
+				if_block(node_16, ($$render) => {
+					if (get(i) === 0) $$render(consequent_17);
+				});
+				var span_10 = sibling(node_16, 2);
+				var text_28 = only_child(span_10, true);
+				var text_29 = only_child(sibling(span_10, 2), true);
+				reset(li);
+				template_effect(($0, $1) => {
+					classes_2 = set_class(li, 1, "", null, classes_2, {
+						top: get(i) === 0,
+						me: get(b).bidderId && get(b).bidderId === data.userId
+					});
+					set_text(text_26, get(b).bidder || "Anonyme");
+					set_text(text_28, $0);
+					set_text(text_29, $1);
+				}, [() => nf(get(b).amount), () => ago(get(b).at, get(now))]);
+				append($$anchor, li);
+			});
+			reset(ol);
+			append($$anchor, ol);
+		};
+		if_block(node_15, ($$render) => {
+			if (get(bids).length === 0) $$render(consequent_16);
+			else $$render(alternate_4, -1);
+		});
+		reset(section_1);
+		reset(div_36);
 		reset(div_1);
-		bind_this(div_1, ($$value) => modalEl = $$value, () => modalEl);
 		reset(div);
-		template_effect(($0, $1) => {
+		template_effect(() => {
 			set_attribute(span_1, "data-r", get(a).card.rarity);
-			set_text(text, RNAME[get(a).card.rarity] || get(a).card.rarity);
+			set_text(text, `${(RNAME[get(a).card.rarity] || get(a).card.rarity) ?? ""}${get(a).is_shiny ? " · brillante" : ""}`);
 			set_text(text_1, get(a).card.title);
-			set_text(text_4, get(a).bid != null ? "Enchère actuelle" : "Mise de départ");
-			set_text(text_5, $0);
-			set_attribute(div_13, "data-u", get(urgency));
-			set_text(text_6, get(ended) ? "Vente" : "Temps restant");
-			set_text(text_7, $1);
-		}, [() => nf(get(price)), () => fmtLeft(get(secsLeft))]);
+			set_text(text_3, get(mine) ? "Votre vente" : get(a).seller ? `Vendu par ${get(a).seller}` : "");
+			set_attribute(div_8, "data-phase", get(phase));
+		});
 		delegated("click", div, () => $$props.onclose?.());
 		delegated("click", div_1, (e) => e.stopPropagation());
 		delegated("click", button, () => $$props.onclose?.());
@@ -7318,184 +7424,216 @@
 		pop();
 	}
 	delegate(["click"]);
-	var root$1 = from_html(`<button class="search-clear" aria-label="Effacer la recherche"><svg class="x-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>`);
-	var root_1$1 = from_html(`<button><span class="rl-dot"></span> <span class="rl-name"> </span></button>`);
-	var root_2$1 = from_html(`<div class="empty"><b> </b><button class="btn">Réessayer</button></div>`);
-	var root_3$1 = from_html(`<div class="wc skeleton"></div>`);
-	var root_4$1 = from_html(`<div class="grid"></div>`);
-	var root_5$1 = from_html(`<div class="empty"><b>Aucune enchère en cours</b><div> </div></div>`);
-	var root_6$1 = from_html(`<div class="auc-seller"> </div>`);
-	var root_7$1 = from_html(`<div class="auc-item"><button class="card-btn"><!></button> <div class="auc-meta"><span class="auc-bid"><span class="auc-coin"></span> </span> <span class="auc-end"> </span></div> <!></div>`);
-	var root_8$1 = from_html(`<div></div> <div class="pager"><button class="btn pager-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg> Précédent</button> <span class="pager-info"> </span> <button class="btn pager-btn">Suivant <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></button></div>`, 1);
-	var root_9$1 = from_html(`<div class="coll-head"><div><h1>Marché</h1> <div class="meta">Enchérissez sur des cartes ou vendez les vôtres contre des WikiBidous</div></div> <div class="coll-tools"><div class="search-wrap"><svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.4-3.4"></path></svg> <input class="search" type="search" placeholder="Rechercher une carte au marché..."/> <!></div> <div class="tool-actions"><span class="chip" title="Vos ventes en cours"><svg class="cico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 9 6 5h12l1.5 4M5.5 9v10h13V9"></path></svg> Ventes <b> </b> </span> <span class="chip hint" title="Ouvrez une de vos cartes dans Ma collection pour la vendre">Vendre depuis Ma collection</span></div></div></div> <div class="rarity-legend mkt-filter"><button><span class="rl-name">Toutes</span></button> <!></div> <!> <!>`, 1);
+	var root$1 = from_html(`<option> </option>`);
+	var root_1$1 = from_html(`<div class="coll-tools"><!> <div class="tool-actions"><div class="isel" title="Trier"><!> <select aria-label="Trier"></select></div></div></div>`);
+	var root_2$1 = from_html(`<button role="tab"> </button>`);
+	var root_3$1 = from_html(`<button><span class="rl-dot"></span><span class="rl-name"> </span></button>`);
+	var root_4$1 = from_html(`<div class="rarity-legend mkt-filter"><button><span class="rl-name">Toutes</span></button> <!></div>`);
+	var root_5$1 = from_html(`<div class="empty"><b>Marché indisponible pour le moment.</b><button class="btn">Réessayer</button></div>`);
+	var root_6$1 = from_html(`<div class="wc skeleton"></div>`);
+	var root_7$1 = from_html(`<div class="grid"></div>`);
+	var root_8$1 = from_html(`<div class="empty"><b> </b></div>`);
+	var root_9$1 = from_html(`<div class="auc-item"><button class="card-btn"><!></button> <div class="auc-meta"><span class="auc-bid"><span class="auc-coin"></span> </span> <span> </span></div> <div> </div></div>`);
+	var root_10$1 = from_html(`<div></div> <!>`, 1);
+	var root_11$1 = from_html(`<div class="coll-head"><div><h1>Marché</h1> <div class="meta">Enchérissez sur des cartes ou vendez les vôtres contre des WikiBidous</div></div> <!></div> <div class="mkt-tabs" role="tablist"></div> <!> <!> <!>`, 1);
 	function Marketplace($$anchor, $$props) {
 		push($$props, true);
-		const nf = (n) => n == null ? "-" : Number(n).toLocaleString("fr");
-		const RARITIES = [
-			"L",
-			"UR",
-			"SR",
-			"R",
-			"PC",
-			"C"
+		const SORTS = [
+			["recent", "Plus récentes"],
+			["ending_soon", "Fin proche"],
+			["price_asc", "Prix croissant"],
+			["price_desc", "Prix décroissant"]
 		];
-		let auctions = state(null);
-		let page = state(0);
-		let hasMore = state(false);
+		const prefs = settings.market;
+		let tab = state(proxy(prefs.tab));
 		let search = state("");
-		let qActive = state("");
-		let rarity = state("");
-		let loading = state(false);
-		let error = state("");
-		let selected = state(null);
-		let mine = state(proxy({
-			sellingCount: 0,
-			maxConcurrentAuctions: 5
+		let query = state("");
+		let sort = state(proxy(prefs.sort));
+		let rarity = state(proxy(prefs.rarity));
+		user_effect(() => Object.assign(prefs, {
+			tab: get(tab),
+			sort: get(sort),
+			rarity: get(rarity)
 		}));
-		data.marketplaceMine?.().then((m) => set(mine, m, true)).catch(() => {});
-		function openBid(a) {
-			set(selected, a, true);
-		}
-		let reqToken = 0;
-		async function load() {
-			const my = ++reqToken;
-			set(loading, true);
-			set(error, "");
-			try {
-				const d = await data.marketplace({
-					page: get(page),
-					q: get(qActive),
-					rarity: get(rarity)
-				});
-				if (my !== reqToken) return;
-				set(auctions, d.auctions, true);
-				set(hasMore, d.hasMore, true);
-			} catch (e) {
-				if (my !== reqToken) return;
-				set(error, "Marché indisponible pour le moment.");
-				set(auctions, [], true);
-			} finally {
-				if (my === reqToken) set(loading, false);
-			}
-		}
-		load();
-		let deb;
+		let selected = state(null);
+		const list = new PagedList((page) => data.marketplace({
+			page,
+			sort: get(sort),
+			q: get(query),
+			rarity: get(rarity)
+		}));
+		list.go(0);
 		user_effect(() => {
-			const s = get(search).trim();
-			clearTimeout(deb);
-			deb = setTimeout(() => {
-				if (s !== get(qActive)) {
-					set(qActive, s, true);
-					set(page, 0);
-					load();
+			const q = get(search).trim();
+			const t = setTimeout(() => {
+				if (q !== get(query)) {
+					set(query, q, true);
+					list.go(0);
 				}
 			}, 350);
-			return () => clearTimeout(deb);
+			return () => clearTimeout(t);
 		});
+		let mine = state(null);
+		const loadMine = () => data.myMarket().then((m) => set(mine, m, true), () => {});
+		loadMine();
 		let now = state(proxy(Date.now()));
 		user_effect(() => {
 			const t = setInterval(() => set(now, Date.now(), true), 3e4);
 			return () => clearInterval(t);
 		});
-		function timeLeft(endAt) {
-			const end = Date.parse(endAt || "");
-			if (isNaN(end)) return "";
-			let s = Math.max(0, Math.round((end - get(now)) / 1e3));
-			if (s <= 0) return "Terminée";
-			const d = Math.floor(s / 86400);
-			s %= 86400;
-			const h = Math.floor(s / 3600);
-			s %= 3600;
-			const m = Math.floor(s / 60);
-			if (d) return `${d} j ${h} h`;
-			if (h) return `${h} h ${String(m).padStart(2, "0")}`;
-			return `${m} min`;
+		const refilter = (change) => {
+			change();
+			list.go(0);
+		};
+		function closeModal() {
+			set(selected, null);
+			loadMine();
+			list.go();
+			$$props.onwallet?.();
 		}
-		function go(delta) {
-			set(page, Math.max(0, get(page) + delta), true);
-			load();
+		function statusLabel(a) {
+			if (a.status === "active") return countdown(secondsUntil(a.endAt, get(now)));
+			if (a.status === "cancelled") return "Annulée";
+			if (a.finalPrice != null) return `Vendue ${nf(a.finalPrice)}`;
+			return "Invendue";
 		}
-		function setRarity(r) {
-			set(rarity, get(rarity) === r ? "" : r, true);
-			set(page, 0);
-			load();
-		}
-		var fragment = root_9$1();
+		const tabs = user_derived(() => [
+			["browse", "Toutes les ventes"],
+			["selling", `Mes ventes ${get(mine) ? `${get(mine).selling.length}/${get(mine).max}` : ""}`],
+			["bidding", `Mes enchères ${get(mine)?.bidding.length || ""}`],
+			["won", `Remportées ${get(mine)?.won.length || ""}`],
+			["history", "Historique"]
+		]);
+		const shown = user_derived(() => get(tab) === "browse" ? list.data?.auctions : get(mine)?.[get(tab)]);
+		const EMPTY = {
+			browse: "Aucune enchère ne correspond.",
+			selling: "Aucune vente en cours. Ouvrez une carte dans Ma collection pour la vendre.",
+			bidding: "Aucune enchère en cours.",
+			won: "Aucune enchère remportée.",
+			history: "Aucune vente terminée."
+		};
+		var fragment = root_11$1();
 		var div = first_child(fragment);
-		var div_1 = sibling(child(div), 2);
-		var div_2 = child(div_1);
-		var input = sibling(child(div_2), 2);
-		remove_input_defaults(input);
-		var node = sibling(input, 2);
+		var node = sibling(child(div), 2);
 		var consequent = ($$anchor) => {
-			var button = root$1();
-			delegated("click", button, () => set(search, ""));
-			append($$anchor, button);
+			var div_1 = root_1$1();
+			var node_1 = child(div_1);
+			SearchBox(node_1, {
+				placeholder: "Rechercher une carte au marché...",
+				get value() {
+					return get(search);
+				},
+				set value($$value) {
+					set(search, $$value, true);
+				}
+			});
+			var div_2 = sibling(node_1, 2);
+			var div_3 = child(div_2);
+			var node_2 = child(div_3);
+			Icon(node_2, { name: "sort" });
+			var select = sibling(node_2, 2);
+			each(select, 21, () => SORTS, index, ($$anchor, $$item) => {
+				var $$array = user_derived(() => to_array(get($$item), 2));
+				let v = () => get($$array)[0];
+				let label = () => get($$array)[1];
+				var option = root$1();
+				var text = only_child(option, true);
+				var option_value = {};
+				template_effect(() => {
+					set_text(text, label());
+					if (option_value !== (option_value = v())) option.value = (option.__value = option_value) ?? "";
+				});
+				append($$anchor, option);
+			});
+			reset(select);
+			var select_value;
+			init_select(select);
+			reset(div_3);
+			reset(div_2);
+			reset(div_1);
+			template_effect(() => {
+				if (select_value !== (select_value = get(sort))) select.value = (select.__value = select_value) ?? "", select_option(select, select_value);
+			});
+			delegated("change", select, (e) => refilter(() => set(sort, e.currentTarget.value, true)));
+			append($$anchor, div_1);
 		};
 		if_block(node, ($$render) => {
-			if (get(search)) $$render(consequent);
+			if (get(tab) === "browse") $$render(consequent);
 		});
-		reset(div_2);
-		var div_3 = sibling(div_2, 2);
-		var span = child(div_3);
-		var b = sibling(child(span), 2);
-		var text = only_child(b, true);
-		var text_1 = sibling(b);
-		reset(span);
-		next(2);
-		reset(div_3);
-		reset(div_1);
 		reset(div);
 		var div_4 = sibling(div, 2);
-		var button_1 = child(div_4);
-		let classes;
-		each(sibling(button_1, 2), 17, () => RARITIES, index, ($$anchor, r) => {
-			var button_2 = root_1$1();
-			let classes_1;
-			var span_1 = child(button_2);
-			var text_2 = only_child(sibling(span_1, 2), true);
-			reset(button_2);
-			template_effect(($0) => {
-				classes_1 = set_class(button_2, 1, "rl", null, classes_1, { on: get(rarity) === get(r) });
-				set_style(span_1, `background:var(--r-${$0 ?? ""})`);
-				set_text(text_2, RNAME[get(r)]);
-			}, [() => get(r).toLowerCase()]);
-			delegated("click", button_2, () => setRarity(get(r)));
-			append($$anchor, button_2);
+		each(div_4, 21, () => get(tabs), index, ($$anchor, $$item) => {
+			var $$array_1 = user_derived(() => to_array(get($$item), 2));
+			let id = () => get($$array_1)[0];
+			let label = () => get($$array_1)[1];
+			var button = root_2$1();
+			let classes;
+			var text_1 = only_child(button, true);
+			template_effect(() => {
+				set_attribute(button, "aria-selected", get(tab) === id());
+				classes = set_class(button, 1, "", null, classes, { on: get(tab) === id() });
+				set_text(text_1, label());
+			});
+			delegated("click", button, () => set(tab, id(), true));
+			append($$anchor, button);
 		});
 		reset(div_4);
-		var node_2 = sibling(div_4, 2);
+		var node_3 = sibling(div_4, 2);
 		var consequent_1 = ($$anchor) => {
-			var div_5 = root_2$1();
-			var b_1 = child(div_5);
-			var text_3 = only_child(b_1, true);
-			var button_3 = sibling(b_1);
+			var div_5 = root_4$1();
+			var button_1 = child(div_5);
+			let classes_1;
+			each(sibling(button_1, 2), 17, () => RARITIES_DESC, index, ($$anchor, r) => {
+				var button_2 = root_3$1();
+				let classes_2;
+				var span = child(button_2);
+				var text_2 = only_child(sibling(span), true);
+				reset(button_2);
+				template_effect(($0) => {
+					classes_2 = set_class(button_2, 1, "rl", null, classes_2, { on: get(rarity) === get(r) });
+					set_style(span, `background:var(--r-${$0 ?? ""})`);
+					set_text(text_2, RNAME[get(r)]);
+				}, [() => get(r).toLowerCase()]);
+				delegated("click", button_2, () => refilter(() => set(rarity, get(rarity) === get(r) ? "" : get(r), true)));
+				append($$anchor, button_2);
+			});
 			reset(div_5);
-			template_effect(() => set_text(text_3, get(error)));
-			delegated("click", button_3, load);
+			template_effect(() => classes_1 = set_class(button_1, 1, "rl", null, classes_1, { on: !get(rarity) }));
+			delegated("click", button_1, () => refilter(() => set(rarity, "")));
 			append($$anchor, div_5);
 		};
+		if_block(node_3, ($$render) => {
+			if (get(tab) === "browse") $$render(consequent_1);
+		});
+		var node_5 = sibling(node_3, 2);
 		var consequent_2 = ($$anchor) => {
-			var div_6 = root_4$1();
-			each(div_6, 20, () => Array(10), index, ($$anchor, _) => {
-				append($$anchor, root_3$1());
-			});
+			var div_6 = root_5$1();
+			var button_3 = sibling(child(div_6));
 			reset(div_6);
+			delegated("click", button_3, () => list.go());
 			append($$anchor, div_6);
 		};
 		var consequent_3 = ($$anchor) => {
-			var div_8 = root_5$1();
-			var text_4 = only_child(sibling(child(div_8)), true);
-			reset(div_8);
-			template_effect(() => set_text(text_4, get(qActive) ? "Essayez un autre terme." : "Revenez plus tard."));
-			append($$anchor, div_8);
+			var div_7 = root_7$1();
+			each(div_7, 20, () => Array(10), index, ($$anchor, _) => {
+				append($$anchor, root_6$1());
+			});
+			reset(div_7);
+			append($$anchor, div_7);
+		};
+		var consequent_4 = ($$anchor) => {
+			var div_9 = root_8$1();
+			var text_3 = only_child(child(div_9), true);
+			reset(div_9);
+			template_effect(() => set_text(text_3, EMPTY[get(tab)]));
+			append($$anchor, div_9);
 		};
 		var alternate = ($$anchor) => {
-			var fragment_1 = root_8$1();
+			var fragment_1 = root_10$1();
 			var div_10 = first_child(fragment_1);
-			let classes_2;
-			each(div_10, 21, () => get(auctions), (a) => a.id, ($$anchor, a) => {
-				var div_11 = root_7$1();
+			let classes_3;
+			each(div_10, 21, () => get(shown), (a) => a.id, ($$anchor, a) => {
+				var div_11 = root_9$1();
 				var button_4 = child(div_11);
 				Card(child(button_4), {
 					get card() {
@@ -7507,56 +7645,63 @@
 				});
 				reset(button_4);
 				var div_12 = sibling(button_4, 2);
-				var span_3 = child(div_12);
-				var text_5 = sibling(child(span_3), 1, true);
-				reset(span_3);
-				var text_6 = only_child(sibling(span_3, 2), true);
+				var span_2 = child(div_12);
+				var text_4 = sibling(child(span_2), 1, true);
+				reset(span_2);
+				var span_3 = sibling(span_2, 2);
+				let classes_4;
+				var text_5 = only_child(span_3, true);
 				reset(div_12);
-				var node_4 = sibling(div_12, 2);
-				var consequent_4 = ($$anchor) => {
-					var div_13 = root_6$1();
-					var text_7 = only_child(div_13);
-					template_effect(() => set_text(text_7, `Vendu par ${get(a).seller ?? ""}`));
-					append($$anchor, div_13);
-				};
-				if_block(node_4, ($$render) => {
-					if (get(a).seller) $$render(consequent_4);
-				});
+				var div_13 = sibling(div_12, 2);
+				let classes_5;
+				var text_6 = only_child(div_13, true);
 				reset(div_11);
-				template_effect(($0, $1) => {
+				template_effect(($0, $1, $2) => {
 					set_attribute(button_4, "aria-label", get(a).card.title);
-					set_attribute(span_3, "title", get(a).bid != null ? "Enchère actuelle" : "Mise de départ");
-					set_text(text_5, $0);
-					set_text(text_6, $1);
-				}, [() => nf(get(a).price), () => timeLeft(get(a).endAt)]);
-				delegated("click", button_4, () => openBid(get(a)));
+					set_attribute(span_2, "title", get(a).bid != null ? "Enchère actuelle" : "Mise de départ");
+					set_text(text_4, $0);
+					classes_4 = set_class(span_3, 1, "auc-end", null, classes_4, { soon: $1 });
+					set_text(text_5, $2);
+					classes_5 = set_class(div_13, 1, "auc-seller", null, classes_5, { lead: get(a).currentBidderId === data.userId && get(a).status === "active" });
+					set_text(text_6, get(a).owned ? "Votre vente" : get(a).currentBidderId === data.userId && get(a).status === "active" ? "Vous êtes en tête" : get(a).seller ? `Vendu par ${get(a).seller}` : "");
+				}, [
+					() => nf(get(a).price),
+					() => get(a).status === "active" && secondsUntil(get(a).endAt, get(now)) < 3600,
+					() => statusLabel(get(a))
+				]);
+				delegated("click", button_4, () => set(selected, get(a), true));
 				append($$anchor, div_11);
 			});
 			reset(div_10);
-			var div_14 = sibling(div_10, 2);
-			var button_5 = child(div_14);
-			var span_5 = sibling(button_5, 2);
-			var text_8 = only_child(span_5);
-			var button_6 = sibling(span_5, 2);
-			reset(div_14);
-			template_effect(() => {
-				classes_2 = set_class(div_10, 1, "grid", null, classes_2, { dim: get(loading) });
-				button_5.disabled = get(page) === 0 || get(loading);
-				set_text(text_8, `Page ${get(page) + 1}`);
-				button_6.disabled = !get(hasMore) || get(loading);
+			var node_7 = sibling(div_10, 2);
+			var consequent_5 = ($$anchor) => {
+				Pager($$anchor, {
+					get page() {
+						return list.page;
+					},
+					get hasNext() {
+						return list.data.hasMore;
+					},
+					get loading() {
+						return list.loading;
+					},
+					ongo: (p) => list.go(p)
+				});
+			};
+			if_block(node_7, ($$render) => {
+				if (get(tab) === "browse") $$render(consequent_5);
 			});
-			delegated("click", button_5, () => go(-1));
-			delegated("click", button_6, () => go(1));
+			template_effect(() => classes_3 = set_class(div_10, 1, "grid", null, classes_3, { dim: get(tab) === "browse" && list.loading }));
 			append($$anchor, fragment_1);
 		};
-		if_block(node_2, ($$render) => {
-			if (get(error)) $$render(consequent_1);
-			else if (!get(auctions)) $$render(consequent_2, 1);
-			else if (get(auctions).length === 0) $$render(consequent_3, 2);
+		if_block(node_5, ($$render) => {
+			if (get(tab) === "browse" && list.error) $$render(consequent_2);
+			else if (!get(shown)) $$render(consequent_3, 1);
+			else if (get(shown).length === 0) $$render(consequent_4, 2);
 			else $$render(alternate, -1);
 		});
-		var node_5 = sibling(node_2, 2);
-		var consequent_5 = ($$anchor) => {
+		var node_8 = sibling(node_5, 2);
+		var consequent_6 = ($$anchor) => {
 			{
 				let $0 = user_derived(() => $$props.profile?.currency ?? null);
 				AuctionModal($$anchor, {
@@ -7569,133 +7714,64 @@
 					get onwallet() {
 						return $$props.onwallet;
 					},
-					onclose: () => set(selected, null)
+					onclose: closeModal
 				});
 			}
 		};
-		if_block(node_5, ($$render) => {
-			if (get(selected)) $$render(consequent_5);
+		if_block(node_8, ($$render) => {
+			if (get(selected)) $$render(consequent_6);
 		});
-		template_effect(() => {
-			set_text(text, get(mine).sellingCount);
-			set_text(text_1, `/${get(mine).maxConcurrentAuctions ?? ""}`);
-			classes = set_class(button_1, 1, "rl", null, classes, { on: get(rarity) === "" });
-		});
-		bind_value(input, () => get(search), ($$value) => set(search, $$value));
-		delegated("click", button_1, () => setRarity(""));
 		append($$anchor, fragment);
 		pop();
 	}
-	delegate(["click"]);
-	var root = from_html(`<a class="nav-ext"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></svg> </a>`);
-	var root_1 = from_html(`<div class="nav-sep">Le reste du site</div> <!>`, 1);
+	delegate(["change", "click"]);
+	var root = from_html(`<button type="button"><!> </button>`);
+	var root_1 = from_html(`<a><!> </a>`);
 	var root_2 = from_html(`<button class="ghost">Réinitialiser</button>`);
-	var root_3 = from_html(`<button class="ghost" title="Revenir au site d'origine (aucune fonctionnalité perdue)">Version originale du site</button>`);
+	var root_3 = from_html(`<button class="foot-link" title="Revenir au site d'origine (aucune fonctionnalité perdue)"><!>Version originale du site</button>`);
 	var root_4 = from_html(`<span class="bell-badge"> </span>`);
-	var root_5 = from_html(`<span class="notif-count"> </span>`);
-	var root_6 = from_html(`<div class="notif-empty">Aucune notification</div>`);
-	var root_7 = from_html(`<span class="notif-dot"></span>`);
-	var root_8 = from_html(`<div class="notif-msg"> </div>`);
-	var root_9 = from_html(`<!> <div class="notif-body"><div class="notif-title"> </div> <!> <div class="notif-time"> </div></div>`, 1);
+	var root_5 = from_html(`<span class="notif-count"> </span> <button class="link-btn">Tout marquer comme lu</button>`, 1);
+	var root_6 = from_html(`<span class="notif-dot"></span>`);
+	var root_7 = from_html(`<div class="notif-msg"> </div>`);
+	var root_8 = from_html(`<!> <div class="notif-body"><div class="notif-title"> </div> <!> <div class="notif-time"> </div></div>`, 1);
+	var root_9 = from_html(`<div class="notif-empty">Aucune notification</div>`);
 	var root_10 = from_html(`<div class="notif-scrim"></div> <div class="notif-panel" role="dialog" aria-label="Notifications"><div class="notif-head">Notifications<!></div> <!></div>`, 1);
 	var root_11 = from_html(`<span class="badge pro">Pro</span>`);
-	var root_12 = from_html(`<div class="app"><aside class="side"><div class="brand"><span class="mk"></span><b>WikiMasters</b></div> <nav class="nav"><button type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></svg> Ouvrir des paquets</button> <button type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></svg> Ma collection</button> <button type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></svg> Toutes les cartes</button> <button type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></svg> Marché</button> <!></nav> <div class="side-foot"><!> <!> <div class="hintline"> </div></div></aside> <main class="main"><header class="topbar"><div class="crumb"> </div> <div class="wallet"><div class="notif"><button aria-label="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.5 21a2 2 0 0 1-3 0"></path></svg> <!></button> <!></div> <!> <span class="chip" title="Paquets"><svg class="cico pk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 10h18"></path></svg> <b> </b> </span> <span class="chip" title="WikiBidous"><svg class="cico coin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3.4"></circle></svg> <b> </b></span></div></header> <section class="view"><!></section></main></div>`);
+	var root_12 = from_html(`<span> </span>`);
+	var root_13 = from_html(`<!> <div><b> </b><!></div>`, 1);
+	var root_14 = from_html(`<div class="toasts" role="status" aria-live="polite"></div>`);
+	var root_15 = from_html(`<div class="kbd-row"><span class="kbd"> </span> </div>`);
+	var root_16 = from_html(`<div class="kbd-help-scrim"><div class="kbd-help" role="dialog" aria-label="Raccourcis clavier"><h3>Raccourcis clavier</h3> <!></div></div>`);
+	var root_17 = from_html(`<div class="app"><aside class="side"><div class="brand"><span class="mk"></span><b>WikiMasters</b></div> <nav class="nav"><!> <div class="nav-sep">Le reste du site</div> <div class="nav-grid"></div></nav> <div class="side-foot"><!> <!> <button class="foot-link"><span class="kbd">?</span>Raccourcis clavier</button> <div class="hintline"> </div></div></aside> <main class="main"><header class="topbar"><div class="crumb"> </div> <div class="wallet"><div class="notif"><button aria-label="Notifications"><!> <!></button> <!></div> <!> <span class="chip" title="Paquets"><!><b> </b> </span> <span class="chip" title="WikiBidous"><!><b> </b></span></div></header> <section class="view"><!></section></main> <!> <!></div>`);
 	function App($$anchor, $$props) {
 		push($$props, true);
-		const viewFromPath = () => {
-			const p = location.pathname;
-			if (p.includes("global-collection")) return "catalog";
-			if (p.includes("marketplace")) return "market";
-			if (p.includes("collection")) return "collection";
-			return "pulls";
-		};
-		let view = state(proxy(viewFromPath()));
-		let profile = state(null);
-		let collKey = state(0);
-		async function loadProfile() {
-			try {
-				set(profile, await data.profile(), true);
-			} catch {
-				set(profile, null);
+		const VIEWS = [
+			{
+				id: "pulls",
+				path: "/pulls",
+				label: "Ouvrir des paquets",
+				icon: "pulls"
+			},
+			{
+				id: "collection",
+				path: "/collection",
+				label: "Ma collection",
+				icon: "collection"
+			},
+			{
+				id: "catalog",
+				path: "/global-collection",
+				label: "Toutes les cartes",
+				icon: "catalog"
+			},
+			{
+				id: "market",
+				path: "/marketplace",
+				label: "Marché",
+				icon: "market"
 			}
-		}
-		loadProfile();
-		let notifs = state(proxy([]));
-		let notifOpen = state(false);
-		let unread = user_derived(() => get(notifs).filter((n) => !n.read).length);
-		async function loadNotifs() {
-			try {
-				set(notifs, await data.notifications(), true);
-			} catch {
-				set(notifs, [], true);
-			}
-		}
-		loadNotifs();
-		const relTime = (s) => {
-			const d = Date.parse(s || "");
-			if (isNaN(d)) return "";
-			const m = Math.round(Math.max(0, Date.now() - d) / 6e4);
-			if (m < 1) return "à l'instant";
-			if (m < 60) return `il y a ${m} min`;
-			const h = Math.round(m / 60);
-			if (h < 24) return `il y a ${h} h`;
-			return `il y a ${Math.round(h / 24)} j`;
-		};
-		user_effect(() => {
-			const onRoute = () => set(view, viewFromPath(), true);
-			window.addEventListener("wm:route", onRoute);
-			return () => window.removeEventListener("wm:route", onRoute);
-		});
-		user_effect(() => {
-			if (!data.isReal) return;
-			window.addEventListener("wm:profile", loadProfile);
-			const t = setTimeout(async () => {
-				if (!get(profile) || get(profile).packs_remaining == null) await refreshProfile();
-				loadProfile();
-			}, 1500);
-			return () => {
-				window.removeEventListener("wm:profile", loadProfile);
-				clearTimeout(t);
-			};
-		});
-		const VIEW_PATH = {
-			pulls: "/pulls",
-			collection: "/collection",
-			catalog: "/global-collection",
-			market: "/marketplace"
-		};
-		function goCore(v) {
-			set(view, v, true);
-			const p = VIEW_PATH[v] || "/pulls";
-			if (location.pathname !== p) history.pushState({}, "", p);
-		}
-		async function onchanged() {
-			if (data.isReal) await refreshProfile();
-			loadProfile();
-			set(collKey, get(collKey) + 1);
-		}
-		async function reset$1() {
-			if (!data.canReset) return;
-			await data.reset();
-			onchanged();
-			goCore("pulls");
-		}
-		const ICONS = {
-			pulls: "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M3 9h18\"/>",
-			collection: "<rect x=\"4\" y=\"3\" width=\"16\" height=\"18\" rx=\"2\"/><path d=\"M8 7h8M8 11h8M8 15h5\"/>",
-			trades: "<path d=\"M4 9h13l-3-3M20 15H7l3 3\"/>",
-			marketplace: "<path d=\"M4.5 9 6 5h12l1.5 4M5.5 9v10h13V9M9.5 19v-6h5v6\"/>",
-			battle: "<path d=\"M4.5 19.5l1-3 9-9 2 2-9 9zM19.5 19.5l-1-3-9-9-2 2 9 9z\"/>",
-			catalog: "<rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/>",
-			guild: "<path d=\"M12 3l7 2.5v5.5c0 4.2-2.9 7.4-7 9-4.1-1.6-7-4.8-7-9V5.5z\"/>",
-			friends: "<circle cx=\"9\" cy=\"8\" r=\"3.2\"/><path d=\"M3.5 20a5.5 5.5 0 0 1 11 0\"/><path d=\"M16 5.2a3.2 3.2 0 0 1 0 5.6M20.5 20a5.5 5.5 0 0 0-3.5-5.1\"/>",
-			dms: "<path d=\"M20 11.5a7.5 7.5 0 0 1-10.9 6.7L4 19.5l1.3-4A7.5 7.5 0 1 1 20 11.5z\"/>",
-			leaderboard: "<path d=\"M4 20h16M6 20v-6M12 20V5M18 20v-9\"/>",
-			achievements: "<path d=\"M7 4h10v5a5 5 0 0 1-10 0zM7 6H4.5v1.5A3 3 0 0 0 7.5 10.5M17 6h2.5v1.5a3 3 0 0 1-3 3M12 14v3M8.5 20h7l-.6-3H9.1z\"/>",
-			profile: "<circle cx=\"12\" cy=\"8\" r=\"4\"/><path d=\"M4.5 20a7.5 7.5 0 0 1 15 0\"/>",
-			settings: "<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M12 2.5v2.5M12 19v2.5M21.5 12H19M5 12H2.5M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8M18.4 18.4l-1.8-1.8M7.4 7.4 5.6 5.6\"/>"
-		};
-		const others = [
+		];
+		const NATIVE = [
 			[
 				"/trades",
 				"Échanges",
@@ -7742,210 +7818,308 @@
 				"settings"
 			]
 		];
-		var div = root_12();
+		const viewFromPath = () => ([
+			"catalog",
+			"market",
+			"collection"
+		].map((id) => VIEWS.find((v) => v.id === id)).find((v) => location.pathname.startsWith(v.path)) || VIEWS[0]).id;
+		let view = state(proxy(viewFromPath()));
+		const current = user_derived(() => VIEWS.find((v) => v.id === get(view)));
+		function go(v) {
+			set(view, v.id, true);
+			if (location.pathname !== v.path) history.pushState({}, "", v.path);
+		}
+		user_effect(() => {
+			const onRoute = () => set(view, viewFromPath(), true);
+			window.addEventListener("wm:route", onRoute);
+			return () => window.removeEventListener("wm:route", onRoute);
+		});
+		let profile = state(null);
+		const loadProfile = () => data.profile().then((p) => set(profile, p, true), () => {});
+		loadProfile();
+		user_effect(() => {
+			window.addEventListener("wm:profile", loadProfile);
+			return () => window.removeEventListener("wm:profile", loadProfile);
+		});
+		let collKey = state(0);
+		function onchanged() {
+			loadProfile();
+			update(collKey);
+		}
+		async function reset$1() {
+			await data.reset();
+			onchanged();
+			go(VIEWS[0]);
+		}
+		let notifs = state(proxy([]));
+		let notifOpen = state(false);
+		let toasts = state(proxy([]));
+		const unread = user_derived(() => get(notifs).filter((n) => !n.read));
+		let seen = null;
+		async function loadNotifs() {
+			const list = await data.notifications().catch(() => null);
+			if (!list) return;
+			if (seen) {
+				for (const n of list) if (!n.read && !seen.has(n.id)) toast(n);
+			}
+			seen = new Set(list.map((n) => n.id));
+			set(notifs, list, true);
+		}
+		loadNotifs();
+		user_effect(() => {
+			const t = setInterval(() => document.visibilityState === "visible" && loadNotifs(), 3e4);
+			return () => clearInterval(t);
+		});
+		function toast(n) {
+			set(toasts, [...get(toasts), n].slice(-3), true);
+			setTimeout(() => set(toasts, get(toasts).filter((t) => t !== n), true), 8e3);
+		}
+		const baseTitle = document.title;
+		user_effect(() => {
+			document.title = get(unread).length ? `(${get(unread).length}) ${baseTitle}` : baseTitle;
+			return () => document.title = baseTitle;
+		});
+		function markRead(ids) {
+			for (const n of get(notifs)) if (!ids || ids.includes(n.id)) n.read = true;
+			data.markRead(ids).catch(() => {});
+		}
+		function openNotif(n) {
+			if (!n.read) markRead([n.id]);
+			set(notifOpen, false);
+			set(toasts, get(toasts).filter((t) => t.id !== n.id), true);
+		}
+		let appEl;
+		let help = state(false);
+		const SHORTCUTS = [
+			["/", "Rechercher"],
+			["1 à 4", "Changer d'écran"],
+			["Espace", "Ouvrir un paquet"],
+			["Flèches", "Parcourir les cartes révélées"],
+			["Échap", "Fermer"],
+			["?", "Afficher cette aide"]
+		];
+		function onKey(e) {
+			if (e.ctrlKey || e.metaKey || e.altKey) return;
+			const el = e.composedPath()[0];
+			if (el?.matches?.("input, select, textarea")) {
+				if (e.key === "Escape") el.blur();
+				return;
+			}
+			if (e.key === "Escape") {
+				set(help, false);
+				set(notifOpen, false);
+				return;
+			}
+			if (appEl?.querySelector(".modal-backdrop")) return;
+			if (e.key === "?") set(help, !get(help));
+			else if (e.key === "/") {
+				e.preventDefault();
+				appEl?.querySelector("input.search")?.focus();
+			} else if (/^[1-4]$/.test(e.key)) go(VIEWS[e.key - 1]);
+		}
+		var div = root_17();
+		event("keydown", $window, onKey);
 		var aside = child(div);
 		var nav = sibling(child(aside), 2);
-		var button = child(nav);
-		let classes;
-		var svg = child(button);
-		html(svg, () => ICONS.pulls, true);
-		reset(svg);
-		next();
-		reset(button);
-		var button_1 = sibling(button, 2);
-		let classes_1;
-		var svg_1 = child(button_1);
-		html(svg_1, () => ICONS.collection, true);
-		reset(svg_1);
-		next();
-		reset(button_1);
-		var button_2 = sibling(button_1, 2);
-		let classes_2;
-		var svg_2 = child(button_2);
-		html(svg_2, () => ICONS.catalog, true);
-		reset(svg_2);
-		next();
-		reset(button_2);
-		var button_3 = sibling(button_2, 2);
-		let classes_3;
-		var svg_3 = child(button_3);
-		html(svg_3, () => ICONS.marketplace, true);
-		reset(svg_3);
-		next();
-		reset(button_3);
-		var node = sibling(button_3, 2);
-		var consequent = ($$anchor) => {
-			var fragment = root_1();
-			each(sibling(first_child(fragment), 2), 17, () => others, index, ($$anchor, $$item) => {
-				var $$array = user_derived(() => to_array(get($$item), 3));
-				let href = () => get($$array)[0];
-				let label = () => get($$array)[1];
-				let icon = () => get($$array)[2];
-				var a = root();
-				var svg_4 = child(a);
-				html(svg_4, () => ICONS[icon()], true);
-				reset(svg_4);
-				var text = sibling(svg_4);
-				reset(a);
-				template_effect(() => {
-					set_attribute(a, "href", href());
-					set_text(text, ` ${label() ?? ""}`);
-				});
-				append($$anchor, a);
+		var node = child(nav);
+		each(node, 17, () => VIEWS, index, ($$anchor, v) => {
+			var button = root();
+			let classes;
+			var node_1 = child(button);
+			Icon(node_1, {
+				get name() {
+					return get(v).icon;
+				},
+				width: 1.7
 			});
-			append($$anchor, fragment);
-		};
-		if_block(node, ($$render) => {
-			if (data.isReal) $$render(consequent);
+			var text = sibling(node_1, 1, true);
+			reset(button);
+			template_effect(() => {
+				classes = set_class(button, 1, "", null, classes, { on: get(view) === get(v).id });
+				set_text(text, get(v).label);
+			});
+			delegated("click", button, () => go(get(v)));
+			append($$anchor, button);
 		});
+		var div_1 = sibling(node, 4);
+		each(div_1, 21, () => NATIVE, index, ($$anchor, $$item) => {
+			var $$array = user_derived(() => to_array(get($$item), 3));
+			let path = () => get($$array)[0];
+			let label = () => get($$array)[1];
+			let icon = () => get($$array)[2];
+			var a = root_1();
+			var node_2 = child(a);
+			Icon(node_2, {
+				get name() {
+					return icon();
+				},
+				width: 1.7
+			});
+			var text_1 = sibling(node_2, 1, true);
+			reset(a);
+			template_effect(() => {
+				set_attribute(a, "href", data.isReal ? path() : "https://www.wiki-masters.com" + path());
+				set_attribute(a, "title", label());
+				set_text(text_1, label());
+			});
+			append($$anchor, a);
+		});
+		reset(div_1);
 		reset(nav);
-		var div_1 = sibling(nav, 2);
-		var node_2 = child(div_1);
-		var consequent_1 = ($$anchor) => {
-			var button_4 = root_2();
-			delegated("click", button_4, reset$1);
-			append($$anchor, button_4);
-		};
-		if_block(node_2, ($$render) => {
-			if (data.canReset) $$render(consequent_1);
-		});
-		var node_3 = sibling(node_2, 2);
-		var consequent_2 = ($$anchor) => {
-			var button_5 = root_3();
-			delegated("click", button_5, () => {
-				try {
-					localStorage.setItem("wm-off", "1");
-				} catch {}
-				location.reload();
-			});
-			append($$anchor, button_5);
+		var div_2 = sibling(nav, 2);
+		var node_3 = child(div_2);
+		var consequent = ($$anchor) => {
+			var button_1 = root_2();
+			delegated("click", button_1, reset$1);
+			append($$anchor, button_1);
 		};
 		if_block(node_3, ($$render) => {
-			if (data.isReal) $$render(consequent_2);
+			if (data.canReset) $$render(consequent);
 		});
-		var text_1 = only_child(sibling(node_3, 2), true);
-		reset(div_1);
+		var node_4 = sibling(node_3, 2);
+		var consequent_1 = ($$anchor) => {
+			var button_2 = root_3();
+			Icon(child(button_2), {
+				name: "prev",
+				width: 2
+			});
+			next();
+			reset(button_2);
+			delegated("click", button_2, () => useOriginalSite());
+			append($$anchor, button_2);
+		};
+		if_block(node_4, ($$render) => {
+			if (data.isReal) $$render(consequent_1);
+		});
+		var button_3 = sibling(node_4, 2);
+		var text_2 = only_child(sibling(button_3, 2), true);
+		reset(div_2);
 		reset(aside);
 		var main = sibling(aside, 2);
 		var header = child(main);
-		var div_3 = child(header);
-		var text_2 = only_child(div_3, true);
-		var div_4 = sibling(div_3, 2);
-		var div_5 = child(div_4);
-		var button_6 = child(div_5);
-		let classes_4;
-		var node_4 = sibling(child(button_6), 2);
-		var consequent_3 = ($$anchor) => {
+		var div_4 = child(header);
+		var text_3 = only_child(div_4, true);
+		var div_5 = sibling(div_4, 2);
+		var div_6 = child(div_5);
+		var button_4 = child(div_6);
+		let classes_1;
+		var node_6 = child(button_4);
+		Icon(node_6, {
+			name: "bell",
+			width: 1.7
+		});
+		var node_7 = sibling(node_6, 2);
+		var consequent_2 = ($$anchor) => {
 			var span = root_4();
-			var text_3 = only_child(span, true);
-			template_effect(() => set_text(text_3, get(unread)));
+			var text_4 = only_child(span, true);
+			template_effect(() => set_text(text_4, get(unread).length));
 			append($$anchor, span);
 		};
-		if_block(node_4, ($$render) => {
-			if (get(unread)) $$render(consequent_3);
+		if_block(node_7, ($$render) => {
+			if (get(unread).length) $$render(consequent_2);
 		});
-		reset(button_6);
-		var node_5 = sibling(button_6, 2);
-		var consequent_8 = ($$anchor) => {
-			var fragment_1 = root_10();
-			var div_6 = first_child(fragment_1);
-			var div_7 = sibling(div_6, 2);
-			var div_8 = child(div_7);
-			var node_6 = sibling(child(div_8));
-			var consequent_4 = ($$anchor) => {
-				var span_1 = root_5();
-				var text_4 = only_child(span_1, true);
-				template_effect(() => set_text(text_4, get(unread)));
-				append($$anchor, span_1);
+		reset(button_4);
+		var node_8 = sibling(button_4, 2);
+		var consequent_6 = ($$anchor) => {
+			var fragment = root_10();
+			var div_7 = first_child(fragment);
+			var div_8 = sibling(div_7, 2);
+			var div_9 = child(div_8);
+			var node_9 = sibling(child(div_9));
+			var consequent_3 = ($$anchor) => {
+				var fragment_1 = root_5();
+				var span_1 = first_child(fragment_1);
+				var text_5 = only_child(span_1, true);
+				var button_5 = sibling(span_1, 2);
+				template_effect(() => set_text(text_5, get(unread).length));
+				delegated("click", button_5, () => markRead());
+				append($$anchor, fragment_1);
 			};
-			if_block(node_6, ($$render) => {
-				if (get(unread)) $$render(consequent_4);
+			if_block(node_9, ($$render) => {
+				if (get(unread).length) $$render(consequent_3);
 			});
-			reset(div_8);
-			var node_7 = sibling(div_8, 2);
-			var consequent_5 = ($$anchor) => {
-				append($$anchor, root_6());
-			};
-			var alternate = ($$anchor) => {
+			reset(div_9);
+			each(sibling(div_9, 2), 17, () => get(notifs), (n) => n.id, ($$anchor, n) => {
 				var fragment_2 = comment();
-				each(first_child(fragment_2), 17, () => get(notifs), (n) => n.id, ($$anchor, n) => {
-					var fragment_3 = comment();
-					element(first_child(fragment_3), () => get(n).href ? "a" : "div", false, ($$element, $$anchor) => {
-						var event_handler = () => set(notifOpen, false);
-						attribute_effect($$element, () => ({
-							href: get(n).href,
-							class: "notif-item",
-							onclick: event_handler,
-							[CLASS]: {
-								unread: !get(n).read,
-								link: !!get(n).href
-							}
-						}));
-						var fragment_4 = root_9();
-						var node_10 = first_child(fragment_4);
-						var consequent_6 = ($$anchor) => {
-							append($$anchor, root_7());
-						};
-						if_block(node_10, ($$render) => {
-							if (!get(n).read) $$render(consequent_6);
-						});
-						var div_10 = sibling(node_10, 2);
-						var div_11 = child(div_10);
-						var text_5 = only_child(div_11, true);
-						var node_11 = sibling(div_11, 2);
-						var consequent_7 = ($$anchor) => {
-							var div_12 = root_8();
-							var text_6 = only_child(div_12, true);
-							template_effect(() => set_text(text_6, get(n).message));
-							append($$anchor, div_12);
-						};
-						if_block(node_11, ($$render) => {
-							if (get(n).message) $$render(consequent_7);
-						});
-						var text_7 = only_child(sibling(node_11, 2), true);
-						reset(div_10);
-						template_effect(($0) => {
-							set_text(text_5, get(n).title);
-							set_text(text_7, $0);
-						}, [() => relTime(get(n).at)]);
-						append($$anchor, fragment_4);
+				element(first_child(fragment_2), () => get(n).href ? "a" : "div", false, ($$element, $$anchor) => {
+					var event_handler = () => openNotif(get(n));
+					attribute_effect($$element, () => ({
+						href: get(n).href,
+						class: "notif-item",
+						onclick: event_handler,
+						[CLASS]: { unread: !get(n).read }
+					}));
+					var fragment_3 = root_8();
+					var node_12 = first_child(fragment_3);
+					var consequent_4 = ($$anchor) => {
+						append($$anchor, root_6());
+					};
+					if_block(node_12, ($$render) => {
+						if (!get(n).read) $$render(consequent_4);
 					});
+					var div_10 = sibling(node_12, 2);
+					var div_11 = child(div_10);
+					var text_6 = only_child(div_11, true);
+					var node_13 = sibling(div_11, 2);
+					var consequent_5 = ($$anchor) => {
+						var div_12 = root_7();
+						var text_7 = only_child(div_12, true);
+						template_effect(() => set_text(text_7, get(n).message));
+						append($$anchor, div_12);
+					};
+					if_block(node_13, ($$render) => {
+						if (get(n).message) $$render(consequent_5);
+					});
+					var text_8 = only_child(sibling(node_13, 2), true);
+					reset(div_10);
+					template_effect(($0) => {
+						set_text(text_6, get(n).title);
+						set_text(text_8, $0);
+					}, [() => ago(get(n).at)]);
 					append($$anchor, fragment_3);
 				});
 				append($$anchor, fragment_2);
-			};
-			if_block(node_7, ($$render) => {
-				if (get(notifs).length === 0) $$render(consequent_5);
-				else $$render(alternate, -1);
+			}, ($$anchor) => {
+				append($$anchor, root_9());
 			});
-			reset(div_7);
-			delegated("click", div_6, () => set(notifOpen, false));
-			append($$anchor, fragment_1);
+			reset(div_8);
+			delegated("click", div_7, () => set(notifOpen, false));
+			append($$anchor, fragment);
 		};
-		if_block(node_5, ($$render) => {
-			if (get(notifOpen)) $$render(consequent_8);
+		if_block(node_8, ($$render) => {
+			if (get(notifOpen)) $$render(consequent_6);
 		});
-		reset(div_5);
-		var node_12 = sibling(div_5, 2);
-		var consequent_9 = ($$anchor) => {
+		reset(div_6);
+		var node_14 = sibling(div_6, 2);
+		var consequent_7 = ($$anchor) => {
 			append($$anchor, root_11());
 		};
-		if_block(node_12, ($$render) => {
-			if (get(profile)?.is_pro) $$render(consequent_9);
+		if_block(node_14, ($$render) => {
+			if (get(profile)?.is_pro) $$render(consequent_7);
 		});
-		var span_4 = sibling(node_12, 2);
-		var b = sibling(child(span_4), 2);
-		var text_8 = only_child(b, true);
-		var text_9 = sibling(b);
+		var span_4 = sibling(node_14, 2);
+		var node_15 = child(span_4);
+		Icon(node_15, {
+			name: "pulls",
+			class: "cico pk"
+		});
+		var b = sibling(node_15);
+		var text_9 = only_child(b, true);
+		var text_10 = sibling(b);
 		reset(span_4);
 		var span_5 = sibling(span_4, 2);
-		var text_10 = only_child(sibling(child(span_5), 2), true);
+		var node_16 = child(span_5);
+		Icon(node_16, {
+			name: "coin",
+			class: "cico coin"
+		});
+		var text_11 = only_child(sibling(node_16), true);
 		reset(span_5);
-		reset(div_4);
+		reset(div_5);
 		reset(header);
 		var section = sibling(header, 2);
-		var node_13 = child(section);
-		var consequent_10 = ($$anchor) => {
+		var node_17 = child(section);
+		var consequent_8 = ($$anchor) => {
 			Pulls($$anchor, {
 				get profile() {
 					return get(profile);
@@ -7953,17 +8127,17 @@
 				onchanged
 			});
 		};
-		var consequent_11 = ($$anchor) => {
-			var fragment_6 = comment();
-			key(first_child(fragment_6), () => get(collKey), ($$anchor) => {
+		var consequent_9 = ($$anchor) => {
+			var fragment_5 = comment();
+			key(first_child(fragment_5), () => get(collKey), ($$anchor) => {
 				Collection($$anchor, { onwallet: loadProfile });
 			});
-			append($$anchor, fragment_6);
+			append($$anchor, fragment_5);
 		};
-		var consequent_12 = ($$anchor) => {
+		var consequent_10 = ($$anchor) => {
 			Catalog($$anchor, {});
 		};
-		var alternate_1 = ($$anchor) => {
+		var alternate = ($$anchor) => {
 			Marketplace($$anchor, {
 				get profile() {
 					return get(profile);
@@ -7971,37 +8145,96 @@
 				onwallet: loadProfile
 			});
 		};
-		if_block(node_13, ($$render) => {
-			if (get(view) === "pulls") $$render(consequent_10);
-			else if (get(view) === "collection") $$render(consequent_11, 1);
-			else if (get(view) === "catalog") $$render(consequent_12, 2);
-			else $$render(alternate_1, -1);
+		if_block(node_17, ($$render) => {
+			if (get(view) === "pulls") $$render(consequent_8);
+			else if (get(view) === "collection") $$render(consequent_9, 1);
+			else if (get(view) === "catalog") $$render(consequent_10, 2);
+			else $$render(alternate, -1);
 		});
 		reset(section);
 		reset(main);
-		reset(div);
-		template_effect(() => {
-			classes = set_class(button, 1, "", null, classes, { on: get(view) === "pulls" });
-			classes_1 = set_class(button_1, 1, "", null, classes_1, { on: get(view) === "collection" });
-			classes_2 = set_class(button_2, 1, "", null, classes_2, { on: get(view) === "catalog" });
-			classes_3 = set_class(button_3, 1, "", null, classes_3, { on: get(view) === "market" });
-			set_text(text_1, data.isReal ? "Connecté à WikiMasters" : "Serveur de test local");
-			set_text(text_2, {
-				pulls: "Ouvrir des paquets",
-				collection: "Ma collection",
-				catalog: "Toutes les cartes",
-				market: "Marché"
-			}[get(view)]);
-			classes_4 = set_class(button_6, 1, "bell", null, classes_4, { has: get(unread) > 0 });
-			set_text(text_8, get(profile)?.packs_remaining ?? "-");
-			set_text(text_9, `/${get(profile)?.pack_cap ?? 10 ?? ""}`);
-			set_text(text_10, get(profile)?.currency ?? "-");
+		var node_19 = sibling(main, 2);
+		var consequent_12 = ($$anchor) => {
+			var div_15 = root_14();
+			each(div_15, 21, () => get(toasts), (n) => n.id, ($$anchor, n) => {
+				var fragment_9 = comment();
+				element(first_child(fragment_9), () => get(n).href ? "a" : "div", false, ($$element_1, $$anchor) => {
+					var event_handler_1 = () => openNotif(get(n));
+					attribute_effect($$element_1, () => ({
+						href: get(n).href,
+						class: "toast",
+						onclick: event_handler_1
+					}));
+					var fragment_10 = root_13();
+					var node_21 = first_child(fragment_10);
+					Icon(node_21, {
+						name: "bell",
+						width: 1.8
+					});
+					var div_16 = sibling(node_21, 2);
+					var b_2 = child(div_16);
+					var text_12 = only_child(b_2, true);
+					var node_22 = sibling(b_2);
+					var consequent_11 = ($$anchor) => {
+						var span_6 = root_12();
+						var text_13 = only_child(span_6, true);
+						template_effect(() => set_text(text_13, get(n).message));
+						append($$anchor, span_6);
+					};
+					if_block(node_22, ($$render) => {
+						if (get(n).message) $$render(consequent_11);
+					});
+					reset(div_16);
+					template_effect(() => set_text(text_12, get(n).title));
+					append($$anchor, fragment_10);
+				});
+				append($$anchor, fragment_9);
+			});
+			reset(div_15);
+			append($$anchor, div_15);
+		};
+		if_block(node_19, ($$render) => {
+			if (get(toasts).length) $$render(consequent_12);
 		});
-		delegated("click", button, () => goCore("pulls"));
-		delegated("click", button_1, () => goCore("collection"));
-		delegated("click", button_2, () => goCore("catalog"));
-		delegated("click", button_3, () => goCore("market"));
-		delegated("click", button_6, () => {
+		var node_23 = sibling(node_19, 2);
+		var consequent_13 = ($$anchor) => {
+			var div_17 = root_16();
+			var div_18 = child(div_17);
+			each(sibling(child(div_18), 2), 17, () => SHORTCUTS, index, ($$anchor, $$item) => {
+				var $$array_1 = user_derived(() => to_array(get($$item), 2));
+				let k = () => get($$array_1)[0];
+				let what = () => get($$array_1)[1];
+				var div_19 = root_15();
+				var span_7 = child(div_19);
+				var text_14 = only_child(span_7, true);
+				var text_15 = sibling(span_7, 1, true);
+				reset(div_19);
+				template_effect(() => {
+					set_text(text_14, k());
+					set_text(text_15, what());
+				});
+				append($$anchor, div_19);
+			});
+			reset(div_18);
+			reset(div_17);
+			delegated("click", div_17, () => set(help, false));
+			append($$anchor, div_17);
+		};
+		if_block(node_23, ($$render) => {
+			if (get(help)) $$render(consequent_13);
+		});
+		reset(div);
+		bind_this(div, ($$value) => appEl = $$value, () => appEl);
+		template_effect(() => {
+			set_text(text_2, data.isReal ? "Connecté à WikiMasters" : "Serveur de test local");
+			set_text(text_3, get(current).label);
+			classes_1 = set_class(button_4, 1, "bell", null, classes_1, { has: get(unread).length > 0 });
+			set_text(text_9, get(profile)?.packs_remaining ?? "-");
+			set_text(text_10, `/${get(profile)?.pack_cap ?? 10 ?? ""}`);
+			set_text(text_11, get(profile)?.currency ?? "-");
+		});
+		delegated("click", button_3, () => set(help, true));
+		delegated("click", button_4, () => {
 			set(notifOpen, !get(notifOpen));
 			if (get(notifOpen)) loadNotifs();
 		});
@@ -8009,99 +8242,105 @@
 		pop();
 	}
 	delegate(["click"]);
-	var app_default = ":host,:root{--bg:#0c0d0c;--surface:#141613;--elev:#191c18;--elev2:#20241f;--line:#262a26;--line2:#333833;--fg:#eceee9;--fg-soft:#98a29a;--fg-faint:#7d857c;--accent:#3ccb8e;--accent-ink:#07130e;--r-c:#7fd8b4;--r-pc:#7fb0e6;--r-r:#b18fe0;--r-sr:#e46f9f;--r-ur:#f0912f;--r-l:#e8c93a;--display:\"Outfit\",system-ui,sans-serif;--body:\"Inter\",system-ui,sans-serif;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;--radius:14px;--radius-lg:18px;--sidebar:268px}:where(#wm-app-root,#wm-app-root *){box-sizing:border-box;margin:0;padding:0}#wm-app-root{font-family:var(--body);color:var(--fg);-webkit-font-smoothing:antialiased;line-height:1.5}#wm-app-root button{cursor:pointer;font-family:inherit}#wm-app-root img{display:block}#wm-app-root a{color:inherit;text-decoration:none}#wm-app-root :is(a,button,input,select,textarea,[tabindex]:not([tabindex=\"-1\"])):focus-visible{outline:2px solid var(--accent);outline-offset:2px}#wm-app-root .modal:focus,#wm-app-root .modal:focus-visible{outline:none}.card-btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--radius)}.app{grid-template-columns:var(--sidebar) 1fr;background:var(--bg);min-height:100vh;display:grid}.side{background:var(--surface);border-right:1px solid var(--line);padding:var(--s6) var(--s5);gap:var(--s6);flex-direction:column;height:100vh;display:flex;position:sticky;top:0}.brand{padding:0 var(--s3);align-items:center;gap:10px;display:flex}.brand .mk{background:var(--accent);border-radius:3px;width:9px;height:9px}.brand b{font-family:var(--display);letter-spacing:-.01em;font-size:19px;font-weight:700}.nav{gap:var(--s1);flex-direction:column;flex:1;min-height:0;display:flex;overflow-y:auto}.nav-sep{letter-spacing:.12em;text-transform:uppercase;color:var(--fg-faint);padding:16px 14px 6px;font-size:10px}.nav a.nav-ext svg{opacity:.45;width:16px;height:16px}.nav a.nav-ext{font-weight:400}.nav a,.nav button{align-items:center;gap:var(--s3);color:var(--fg-soft);cursor:pointer;text-align:left;background:0 0;border:0;border-radius:12px;width:100%;padding:12px 14px;font-family:inherit;font-size:14px;font-weight:500;transition:background .15s,color .15s;display:flex}.nav a svg,.nav button svg{opacity:.85;flex:none;width:19px;height:19px}.nav a:hover,.nav button:hover{background:var(--elev);color:var(--fg)}.nav a.on,.nav button.on{background:color-mix(in oklab,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}.nav a.on svg,.nav button.on svg{opacity:1}.side-foot{gap:var(--s3);flex-direction:column;margin-top:auto;display:flex}.ghost{border:1px solid var(--line2);color:var(--fg-soft);background:0 0;border-radius:11px;padding:11px;font-size:13px;font-weight:500;transition:all .15s}.ghost:hover{border-color:var(--fg-soft);color:var(--fg)}.hintline{color:var(--fg-faint);text-align:center;font-size:11.5px}.main{flex-direction:column;min-width:0;display:flex}.topbar{justify-content:space-between;align-items:center;gap:var(--s4);padding:var(--s5) clamp(var(--s5),4vw,var(--s7));border-bottom:1px solid var(--line);z-index:5;background:color-mix(in oklab,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);display:flex;position:sticky;top:0}.crumb{font-family:var(--display);letter-spacing:-.01em;font-size:16px;font-weight:600}.wallet{gap:var(--s2);display:flex}.chip{color:var(--fg-soft);background:var(--elev);border:1px solid var(--line);border-radius:999px;align-items:center;gap:8px;padding:9px 15px;font-size:13.5px;display:flex}.chip b{color:var(--fg);font-weight:600}.chip .cico{flex:none;width:14px;height:14px}.chip .cico.pk{color:var(--accent)}.chip .cico.coin{color:var(--r-l)}.badge{font-family:var(--display);letter-spacing:.04em;border-radius:999px;align-items:center;padding:6px 11px;font-size:11px;font-weight:700;display:inline-flex}.badge.pro{background:var(--accent);color:var(--accent-ink)}.notif{display:flex;position:relative}.bell{border:1px solid var(--line);background:var(--elev);width:38px;height:38px;color:var(--fg-soft);cursor:pointer;border-radius:999px;justify-content:center;align-items:center;transition:all .15s;display:flex;position:relative}.bell:hover{color:var(--fg);border-color:var(--line2)}.bell.has{color:var(--fg)}.bell svg{width:18px;height:18px}.bell-badge{color:#fff;min-width:18px;height:18px;font-family:var(--display);text-align:center;box-shadow:0 0 0 2px var(--bg);background:#f26d6d;border-radius:999px;padding:0 5px;font-size:10.5px;font-weight:700;line-height:18px;position:absolute;top:-3px;right:-3px}.notif-scrim{z-index:30;position:fixed;inset:0}.notif-panel{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);z-index:31;width:min(340px,86vw);max-height:66vh;padding:var(--s2);overscroll-behavior:contain;position:absolute;top:46px;right:0;overflow:auto;box-shadow:0 24px 60px -24px #000}.notif-head{font-family:var(--display);align-items:center;gap:8px;padding:8px 10px 10px;font-size:14px;font-weight:700;display:flex}.notif-count{background:color-mix(in oklab,var(--accent) 16%,transparent);color:var(--accent);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700}.notif-empty{text-align:center;color:var(--fg-faint);padding:24px;font-size:13px}.notif-item{border-radius:12px;gap:10px;padding:11px 10px;transition:background .15s;display:flex}.notif-item:hover{background:var(--elev)}.notif-item.unread{background:color-mix(in oklab,var(--accent) 7%,transparent)}.notif-dot{background:var(--accent);border-radius:50%;flex:none;width:7px;height:7px;margin-top:6px}.notif-item:not(.unread) .notif-body{margin-left:17px}.notif-body{min-width:0}.notif-title{font-size:13.5px;font-weight:600;line-height:1.3}.notif-msg{color:var(--fg-soft);margin-top:2px;font-size:12.5px;line-height:1.4}.notif-time{color:var(--fg-faint);margin-top:4px;font-size:11px}.view{padding:clamp(var(--s5),3.5vw,var(--s7));width:100%;max-width:1600px;margin:0 auto}.pull-ready{justify-content:center;align-items:center;gap:var(--s5);text-align:center;flex-direction:column;min-height:64vh;display:flex}.pull-ready h1{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(26px,3vw,36px);font-weight:700}.special-note{background:color-mix(in oklab,var(--r-l) 12%,var(--elev));border:1px solid color-mix(in oklab,var(--r-l) 32%,var(--line));color:var(--fg);border-radius:12px;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;padding:10px 16px;font-size:13px;display:flex}.link-btn{color:var(--accent);font:inherit;cursor:pointer;text-underline-offset:3px;background:0 0;border:none;font-weight:600;text-decoration:underline}.pull-ready .sub{color:var(--fg-soft);margin-top:calc(-1 * var(--s3));font-size:15px}.booster-stage{justify-content:center;align-items:center;width:100%;min-height:clamp(300px,44vh,440px);display:flex;position:relative}.booster{aspect-ratio:2550/3300;cursor:pointer;filter:drop-shadow(0 34px 54px #0009);background:0 0;border:none;width:clamp(210px,23vw,272px);padding:0;transition:transform .3s cubic-bezier(.2,.7,.3,1);position:relative}.booster:hover:not(:disabled):not(.opening){transform:translateY(-8px)}.booster:disabled{cursor:default}.booster-main{transform-origin:50% 60%;animation:5.5s ease-in-out infinite booster-float;position:absolute;inset:0}.booster-main img{object-fit:contain;-webkit-user-drag:none;-webkit-user-select:none;user-select:none;width:100%;height:100%;display:block}.booster-shine{pointer-events:none;mix-blend-mode:screen;opacity:0;background:linear-gradient(115deg,#0000 40%,#ffffffd9 47%,#96d2ffb3 50%,#ffecb4b3 53%,#0000 60%) 0 0/260% 260% no-repeat;animation:5s ease-in-out infinite booster-sheen;position:absolute;inset:0;-webkit-mask:url(/card_pack.png) 50%/contain no-repeat;mask:url(/card_pack.png) 50%/contain no-repeat}@keyframes booster-sheen{0%{opacity:0;background-position:130% 0}30%{opacity:.95}52%{opacity:.95;background-position:-30% 100%}72%,to{opacity:0;background-position:-30% 100%}}@keyframes booster-float{0%,to{transform:translateY(0)rotate(-1.2deg)}50%{transform:translateY(-12px)rotate(1.2deg)}}.booster-back{filter:brightness(.62)grayscale(.25);background-position:50%;background-repeat:no-repeat;background-size:contain;position:absolute;inset:0}.booster-back.b1{opacity:.7;transform:translate(11px,9px)rotate(4deg)scale(.985)}.booster-back.b2{opacity:.4;transform:translate(22px,18px)rotate(8deg)scale(.97)}.booster.empty .booster-main{filter:grayscale(.9)brightness(.45);animation-play-state:paused}.booster.empty .booster-shine{display:none}.booster.opening{cursor:default}.booster.opening .booster-main{animation:.9s cubic-bezier(.3,.6,.2,1) forwards booster-open}@keyframes booster-open{0%{transform:translateY(0)rotate(0)}14%{transform:rotate(-5deg)}28%{transform:rotate(5deg)}42%{transform:rotate(-4deg)}56%{transform:rotate(3deg)scale(1.03)}68%{transform:rotate(0)scale(1.06)}to{opacity:0;filter:brightness(2.2);transform:scale(1.5)}}.booster.opening:after{content:\"\";pointer-events:none;opacity:0;background:radial-gradient(circle,#fff6e0f2,#fff6e040 45%,#0000 66%);border-radius:50%;animation:.9s ease-out forwards booster-burst;position:absolute;inset:-25%}@keyframes booster-burst{0%,52%{opacity:0;transform:scale(.5)}74%{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(1.5)}}.pack-count{flex-direction:column;align-items:center;gap:2px;display:flex}.pc-num{font-family:var(--display);color:var(--accent);font-variant-numeric:tabular-nums;font-size:clamp(36px,5vw,54px);font-weight:800;line-height:1}.pack-count.empty .pc-num{color:var(--fg-faint)}.pc-lbl{color:var(--fg-soft);font-size:14px}.regen-line{color:var(--fg-soft);font-size:13.5px}.regen-line b{color:var(--fg);font-weight:600}.regen-line.err{color:#f0a3a3}.btn.big{padding:14px 34px;font-size:16px}.btn{font-family:var(--display);border:1px solid var(--line2);color:var(--fg);background:0 0;border-radius:12px;padding:13px 28px;font-size:15px;font-weight:600;transition:all .15s}.btn:hover{border-color:var(--fg-soft)}.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}.btn.primary:hover{filter:brightness(1.06)}.btn:disabled{opacity:.45;cursor:not-allowed}.session-recap{color:var(--fg-faint);margin-top:var(--s2);font-size:12.5px}.reveal{justify-content:center;align-items:center;gap:var(--s6);flex-direction:column;min-height:64vh;display:flex}.reveal .count{color:var(--fg-soft);font-size:14px}.reveal .count b{color:var(--accent);font-family:var(--display);margin:0 3px;font-size:18px}.stage{width:clamp(280px,32vw,340px);max-width:100%;position:relative}.stage-aura{z-index:0;pointer-events:none;background:radial-gradient(closest-side, color-mix(in oklab,var(--rc) 60%, transparent), transparent 72%);filter:blur(34px);opacity:.35;border-radius:50%;animation:.55s cubic-bezier(.3,.8,.3,1) aurapop;position:absolute;inset:-14% -10%}.stage-aura[data-r=C]{--rc:var(--r-c);opacity:.26}.stage-aura[data-r=PC]{--rc:var(--r-pc);opacity:.34}.stage-aura[data-r=R]{--rc:var(--r-r);opacity:.46}.stage-aura[data-r=SR]{--rc:var(--r-sr);opacity:.58}.stage-aura[data-r=UR]{--rc:var(--r-ur);opacity:.72;inset:-18% -12%}.stage-aura[data-r=L]{--rc:var(--r-l);opacity:.85;inset:-20% -14%}@keyframes aurapop{0%{transform:scale(.7)}to{transform:scale(1)}}.stage .flip-in{z-index:1;position:relative}.reveal-rarity{font-family:var(--display);letter-spacing:.06em;color:var(--rc);font-size:16px;font-weight:700;animation:.45s rarityin}.reveal-rarity[data-r=C]{--rc:var(--r-c)}.reveal-rarity[data-r=PC]{--rc:var(--r-pc)}.reveal-rarity[data-r=R]{--rc:var(--r-r)}.reveal-rarity[data-r=SR]{--rc:var(--r-sr)}.reveal-rarity[data-r=UR]{--rc:var(--r-ur)}.reveal-rarity[data-r=L]{--rc:var(--r-l)}.reveal-rarity[data-r=UR],.reveal-rarity[data-r=L]{letter-spacing:.1em;font-size:19px}@keyframes rarityin{0%{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}.dots{gap:var(--s2);align-items:center;display:flex}.dots .d{background:var(--line2);border-radius:50%;width:8px;height:8px;transition:all .2s}.dots .d.on{background:var(--accent);transform:scale(1.15)}.dots .d.seen{background:var(--fg-faint)}.navrow{align-items:center;gap:var(--s5);display:flex}.arrow{border:1px solid var(--line2);background:var(--elev);width:46px;height:46px;color:var(--fg);border-radius:50%;justify-content:center;align-items:center;transition:all .15s;display:flex}.arrow svg{width:20px;height:20px}.arrow:hover{border-color:var(--fg-soft)}.arrow:disabled{opacity:.3;cursor:not-allowed}.flip-in{animation:.5s cubic-bezier(.3,.8,.3,1) flipin}@keyframes flipin{0%{opacity:0;transform:rotateY(-14deg)translateY(14px)}to{opacity:1;transform:none}}.reveal-skip{color:var(--fg-faint);cursor:pointer;text-underline-offset:3px;background:0 0;border:none;padding:4px;font-size:13px;text-decoration:underline}.reveal-skip:hover{color:var(--fg-soft)}.reveal-all{gap:var(--s5)}.reveal-all-head{text-align:center;flex-direction:column;gap:4px;display:flex}.reveal-all-head h2{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(22px,2.4vw,28px);font-weight:700}.reveal-all-head .sub{color:var(--fg-soft);font-size:14px}.reveal-grid{gap:var(--s5);grid-template-columns:repeat(auto-fit,minmax(150px,180px));justify-content:center;width:100%;max-width:1000px;display:grid}.rg-card{animation:.5s cubic-bezier(.2,.7,.3,1) both rgin;position:relative}.rg-aura{z-index:0;pointer-events:none;background:radial-gradient(closest-side,color-mix(in oklab,var(--rc) 55%,transparent),transparent 72%);filter:blur(26px);opacity:.3;border-radius:50%;position:absolute;inset:-10% -8%}.rg-aura[data-r=C]{--rc:var(--r-c);opacity:.16}.rg-aura[data-r=PC]{--rc:var(--r-pc);opacity:.22}.rg-aura[data-r=R]{--rc:var(--r-r);opacity:.34}.rg-aura[data-r=SR]{--rc:var(--r-sr);opacity:.46}.rg-aura[data-r=UR]{--rc:var(--r-ur);opacity:.6}.rg-aura[data-r=L]{--rc:var(--r-l);opacity:.72}.rg-card .card-btn{z-index:1;position:relative}@keyframes rgin{0%{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}.wc{aspect-ratio:5/7;border-radius:var(--radius-lg);border:3.5px solid color-mix(in oklab,var(--rc) 65%,var(--line));cursor:pointer;background:#0f110e;transition:transform .2s cubic-bezier(.2,.7,.3,1),border-color .2s,box-shadow .2s;position:relative;overflow:hidden}.wc[data-r=C]{--rc:var(--r-c);box-shadow:0 6px 18px -12px color-mix(in oklab,var(--r-c) 45%,transparent)}.wc[data-r=PC]{--rc:var(--r-pc);box-shadow:0 6px 20px -12px color-mix(in oklab,var(--r-pc) 55%,transparent)}.wc[data-r=R]{--rc:var(--r-r);box-shadow:0 8px 24px -12px color-mix(in oklab,var(--r-r) 62%,transparent)}.wc[data-r=SR]{--rc:var(--r-sr);box-shadow:0 8px 26px -11px color-mix(in oklab,var(--r-sr) 70%,transparent)}.wc[data-r=UR]{--rc:var(--r-ur);box-shadow:0 10px 30px -11px color-mix(in oklab,var(--r-ur) 78%,transparent)}.wc[data-r=L]{--rc:var(--r-l);box-shadow:0 12px 36px -10px color-mix(in oklab,var(--r-l) 85%,transparent)}.wc[data-r=SR],.wc[data-r=UR],.wc[data-r=L]{border-color:color-mix(in oklab,var(--rc) 88%,var(--line))}.wc:hover{border-color:var(--rc);box-shadow:0 18px 42px -20px color-mix(in oklab,var(--rc) 42%,#000);transform:translateY(-5px)}.wc-face{background:linear-gradient(#181c16,#0d0f0c);position:absolute;inset:0}.wc:before{content:\"\";z-index:5;pointer-events:none;border-radius:inherit;position:absolute;inset:0;box-shadow:inset 0 1px #ffffff29,inset 0 0 0 1px #ffffff08,inset 0 -44px 52px -44px #0000008c}.wc:not(.is-noimg) .wc-face:after{content:\"\";pointer-events:none;background:linear-gradient(180deg, color-mix(in oklab,var(--rc) 26%, transparent), transparent 28%);position:absolute;inset:0}.wc-blur{object-fit:cover;filter:blur(22px)saturate(1.1)brightness(.5);z-index:0;width:100%;height:100%;position:absolute;inset:0;transform:scale(1.2)}.wc.is-noimg .wc-blur{display:none}.wc-photo{object-fit:contain;z-index:1;width:100%;height:100%;position:absolute;inset:0}.wc-bg{object-fit:cover;z-index:0;width:100%;height:100%;position:absolute;inset:0;transform:scale(1.8)}.wc-bg.onyx{transform:none}.wc-photo.onyx-photo{object-fit:cover;z-index:1}.wc.is-noimg .wc-face{background:radial-gradient(130% 90% at 50% 14%, color-mix(in oklab,var(--rc) 45%, transparent), transparent 64%), linear-gradient(180deg, color-mix(in oklab,var(--rc) 22%, #171b15), #0c0e0b)}.wc.is-shiny{box-shadow:inset 0 0 0 1px #e9c15a8c,0 0 16px #e9c15a4d,0 0 30px #00000080}.wc.is-shiny:hover{box-shadow:inset 0 0 0 1px #e9c15acc,0 0 22px #e9c15a80,0 18px 42px -20px #000}.wc-holo{z-index:2;pointer-events:none;mix-blend-mode:screen;opacity:.7;background:radial-gradient(circle at 50% 45%,#fff8e0 0%,#fff8e033 20%,#0000 46%) 0 0/175% 175% no-repeat;animation:6.5s ease-in-out infinite alternate shiny-drift;position:absolute;inset:0}.wc-holo.onyx{mix-blend-mode:soft-light;opacity:.9}@keyframes shiny-drift{0%{background-position:16% 12%}to{background-position:84% 82%}}@media (prefers-reduced-motion:reduce){.wc-holo{opacity:.5;background-position:50% 42%;animation:none}}.ox{z-index:1;pointer-events:none;position:absolute;inset:0}.ox-shade{mix-blend-mode:multiply;background:#2e2b36}.ox-tint{mix-blend-mode:color;background:#3b3b42}.ox-wash{background:radial-gradient(120% 80% at 50% 30%,#0000 40%,#05040866 78%,#050408cc 100%),linear-gradient(#0b0a12ec 0%,#0d0c15dd 55%,#0b0a1255 78%,#0b0a12bb 100%)}.ox-lines{opacity:.62;mix-blend-mode:screen;background:linear-gradient(160deg,#fff0b3 0%,#e9c15a 35%,#fff6d0 55%,#d7a93c 80%,#ffe9a6 100%);-webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat}.ox-shine{mix-blend-mode:screen;opacity:.95;background:radial-gradient(circle at 50% 45%,#fffbe8 0%,#f6d98aa6 16%,#e9c15a26 34%,#0000 52%) 0 0/210% 210% no-repeat;animation:5.5s ease-in-out infinite alternate onyx-shimmer;-webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat}@keyframes onyx-shimmer{0%{background-position:12% 8%}to{background-position:88% 86%}}@media (prefers-reduced-motion:reduce){.ox-shine{opacity:.7;background-position:42% 30%;animation:none}}.wc-scrim{pointer-events:none;background:linear-gradient(#0000 20%,#05060533 32%,#050605b3 50%,#050605fb 68%,#050605 100%);position:absolute;inset:0}.wc.bare .wc-cap,.wc.bare .wc-scrim{display:none}.wc-top{z-index:3;justify-content:space-between;align-items:flex-start;gap:6px;display:flex;position:absolute;top:11px;left:11px;right:11px}.wc-rtag{font-family:var(--display);color:#08130e;background:var(--rc);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;box-shadow:0 1px 5px #0006}.wc-flags{align-items:center;gap:5px;display:flex}.wc-count{color:#fff;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#0000008c;border:1px solid #ffffff2e;border-radius:6px;padding:2px 7px;font-size:10.5px;font-weight:600}.wc-new{background:var(--accent);color:var(--accent-ink);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700}.wc-shiny{color:#f3d27a;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#111014;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex;box-shadow:inset 0 0 0 1px #d7a93c,0 0 10px #e9c15a73}.wc-star{border:1px solid color-mix(in oklab,var(--r-l) 55%,#ffffff4d);color:var(--r-l);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#0000008c;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex}.wc-cap{z-index:3;gap:var(--s1);background:linear-gradient(#0000,#0506058c 28%,#050605eb);flex-direction:column;padding:14px 14px 16px;display:flex;position:absolute;bottom:0;left:0;right:0}.wc.bare .wc-cap{background:0 0}.wc-name{font-family:var(--display);color:#fff;text-shadow:0 1px 10px #000000a6;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:15px;font-weight:700;line-height:1.18;display:-webkit-box;overflow:hidden}.wc-cat{color:#ffffffd1;white-space:nowrap;text-overflow:ellipsis;text-shadow:0 1px 6px #000000b3;font-size:10.5px;line-height:1.3;overflow:hidden}.wc-meta{border-top:1px solid #ffffff38;justify-content:space-between;align-items:center;gap:8px;margin-top:9px;padding-top:9px;display:flex}.wc-stats{color:#ffffffd9;letter-spacing:.02em;text-shadow:0 1px 6px #000000b3;gap:12px;font-size:11px;display:flex}.wc-stats b{color:#fff;font-variant-numeric:tabular-nums;font-weight:700}.wc-val{color:var(--r-l);font-variant-numeric:tabular-nums;text-shadow:0 1px 6px #000000b3;white-space:nowrap;align-items:center;gap:4px;font-size:11px;font-weight:700;display:inline-flex}.wc-val:before{content:\"\";background:radial-gradient(circle at 35% 30%,#ffe680,var(--r-l));width:9px;height:9px;box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent);border-radius:50%}.wc-big .wc-name{font-size:22px}.wc-big .wc-cat{white-space:normal;font-size:13px}.wc-big .wc-stats{margin-top:12px;padding-top:12px;font-size:14px}.wc-big .wc-cap{padding:18px 20px 20px}.wc-big .wc-rtag{padding:4px 10px;font-size:12px}.wc-big .wc-top{top:14px;left:14px;right:14px}.coll-head{justify-content:space-between;align-items:flex-start;gap:var(--s4);margin-bottom:var(--s5);flex-wrap:wrap;display:flex}.coll-head h1{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(24px,2.6vw,32px);font-weight:700}.coll-head .meta{color:var(--fg-soft);margin-top:6px;font-size:14px}.coll-tools{gap:var(--s3);flex-wrap:wrap;flex:460px;justify-content:flex-end;align-items:center;display:flex}.search-wrap{flex:300px;align-items:center;min-width:220px;display:flex;position:relative}.search-ico{width:17px;height:17px;color:var(--fg-faint);pointer-events:none;position:absolute;left:14px}.search{background:var(--elev);border:1px solid var(--line);width:100%;color:var(--fg);font-family:var(--body);border-radius:11px;padding:11px 38px 11px 40px;font-size:14px}.search::placeholder{color:var(--fg-faint)}.search:focus{border-color:var(--fg-soft);background:var(--elev2)}.search::-webkit-search-cancel-button{display:none}.search-clear{width:24px;height:24px;color:var(--fg-faint);background:0 0;border:none;border-radius:7px;justify-content:center;align-items:center;font-size:18px;line-height:1;display:flex;position:absolute;right:8px}.search-clear:hover{background:var(--elev2);color:var(--fg)}.tool-actions{gap:var(--s2);flex-wrap:wrap;align-items:center;display:flex}.isel{background:var(--elev);border:1px solid var(--line);border-radius:11px;align-items:center;gap:8px;height:42px;padding:0 12px;transition:all .15s;display:inline-flex;position:relative}.isel:hover,.isel:focus-within{border-color:var(--line2)}.isel svg{width:16px;height:16px;color:var(--fg-soft);flex:none}.isel select{appearance:none;color:var(--fg);font-family:var(--body);cursor:pointer;background:0 0;border:none;outline:none;height:100%;padding:0 18px 0 0;font-size:14px;font-weight:500}.isel:after{content:\"\";border-right:2px solid var(--fg-soft);border-bottom:2px solid var(--fg-soft);pointer-events:none;width:8px;height:8px;position:absolute;right:12px;transform:rotate(45deg)translateY(-2px)}.iconbtn{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);height:42px;font-family:var(--body);white-space:nowrap;border-radius:11px;align-items:center;gap:8px;padding:0 14px;font-size:14px;font-weight:500;transition:all .15s;display:inline-flex}.iconbtn svg{flex:none;width:17px;height:17px}.iconbtn:hover{color:var(--fg);border-color:var(--line2)}.iconbtn.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}.sort-hint{margin:-8px 0 var(--s4);color:var(--fg-soft);font-size:12.5px}.rarity-panel{gap:var(--s3);margin-bottom:var(--s6);flex-direction:column;display:flex}.rarity-meter{gap:5px;height:9px;display:flex}.rm-seg{background:var(--rc);cursor:pointer;border:none;border-radius:999px;min-width:14px;height:100%;padding:0;transition:flex-grow .45s cubic-bezier(.2,.7,.3,1),opacity .2s,filter .2s,transform .15s}.rm-seg:hover{filter:brightness(1.18)}.rm-seg.sel{filter:brightness(1.2);transform:scaleY(1.5)}.rm-seg.dim{opacity:.28}.rarity-legend{gap:var(--s2);flex-wrap:wrap;align-items:center;display:flex}.rl{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);border-radius:999px;align-items:center;gap:8px;padding:7px 13px;font-size:13px;font-weight:500;transition:all .15s;display:inline-flex}.rl:hover{color:var(--fg);border-color:var(--line2)}.rl.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}.rl-dot{border-radius:3px;flex:none;width:9px;height:9px}.rl-n{color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}.rl-sep{background:var(--line2);width:1px;height:22px;margin:0 4px}.rl-ico{flex:none;width:14px;height:14px}.rl.fav.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}.rl.fav.on .rl-ico{fill:var(--r-l);stroke:var(--r-l)}.rl.shiny.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}.card-btn{text-align:left;cursor:pointer;content-visibility:auto;contain-intrinsic-size:auto 300px;background:0 0;border:none;width:100%;margin:0;padding:0;display:block;position:relative}.card-btn.picking .wc{opacity:.55;transition:opacity .15s}.card-btn.picked .wc{opacity:1}.pick-overlay{z-index:10;border-radius:var(--radius-lg);pointer-events:none;border:3px solid #0000;justify-content:flex-end;align-items:flex-start;padding:9px;transition:all .15s;display:flex;position:absolute;inset:0}.pick-overlay .pick-check{color:#fff;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#0000008c;border:2px solid #ffffffe6;border-radius:50%;justify-content:center;align-items:center;width:28px;height:28px;font-size:15px;font-weight:800;display:flex}.pick-overlay.on{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 22%,transparent);box-shadow:0 0 0 2px var(--accent) inset}.pick-overlay.on .pick-check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}.loading-more{color:var(--fg-faint);padding:var(--s3) 0;text-align:center;font-size:13px}.bulk-bar{z-index:40;background:var(--elev2);border:1px solid var(--line2);border-radius:999px;align-items:center;gap:12px;padding:8px 10px 8px 18px;display:flex;position:fixed;bottom:20px;left:50%;transform:translate(-50%);box-shadow:0 18px 44px -18px #000}.bulk-text{color:var(--fg);white-space:nowrap;font-size:13.5px}.bulk-text b{color:var(--r-l)}.bulk-bar .btn{padding:9px 18px}.grid{gap:var(--s5);grid-template-columns:repeat(auto-fill,minmax(200px,1fr));display:grid}.empty{justify-content:center;align-items:center;gap:var(--s3);min-height:44vh;color:var(--fg-soft);text-align:center;flex-direction:column;display:flex}.empty b{font-family:var(--display);color:var(--fg);font-size:19px}.loading{color:var(--fg-faint);padding:var(--s7);text-align:center}.wc.skeleton{border:1px solid var(--line);background:linear-gradient(100deg,#141613 30%,#1c201c 50%,#141613 70%) 0 0/200% 100%;animation:1.2s ease-in-out infinite sk}@keyframes sk{to{background-position:-200% 0}}.modal-backdrop{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);z-index:2147483600;padding:var(--s5);background:#060806b8;justify-content:center;align-items:center;animation:.18s fade;display:flex;position:fixed;inset:0}@keyframes fade{0%{opacity:0}to{opacity:1}}.modal{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);gap:var(--s6);width:100%;max-width:740px;max-height:90vh;padding:var(--s6);grid-template-columns:240px 1fr;display:grid;position:relative;overflow:auto}.modal-card{width:240px}.modal-close{color:var(--fg-soft);cursor:pointer;z-index:2;background:0 0;border:none;font-size:28px;line-height:1;position:absolute;top:12px;right:16px}.modal-close:hover{color:var(--fg)}.modal-info{gap:var(--s4);flex-direction:column;justify-content:flex-start;min-width:0;display:flex}.modal-rar{font-family:var(--display);letter-spacing:.04em;font-size:12px;font-weight:700}.modal-rar[data-r=C]{color:var(--r-c)}.modal-rar[data-r=PC]{color:var(--r-pc)}.modal-rar[data-r=R]{color:var(--r-r)}.modal-rar[data-r=SR]{color:var(--r-sr)}.modal-rar[data-r=UR]{color:var(--r-ur)}.modal-rar[data-r=L]{color:var(--r-l)}.modal-name{font-family:var(--display);letter-spacing:-.01em;font-size:26px;font-weight:700;line-height:1.15}.modal-cat{color:var(--fg-soft);font-size:14px;line-height:1.45}.modal-sum{color:var(--fg-soft);-webkit-line-clamp:4;-webkit-box-orient:vertical;font-size:13.5px;line-height:1.55;display:-webkit-box;overflow:hidden}.modal-sum.muted{color:var(--fg-faint)}.modal .btn{text-align:center;text-decoration:none}.modal-panel{gap:var(--s4);flex-direction:column;display:flex}.modal-wiki{color:var(--accent);align-self:flex-start;font-size:13.5px;font-weight:600;text-decoration:none}.modal-wiki:hover{text-decoration:underline}.actions{border-top:1px solid var(--line);padding-top:var(--s4)}.modal-credit{color:var(--fg-faint);font-size:11px}@media (prefers-reduced-motion:reduce){.flip-in,.stage-aura,.reveal-rarity,.rg-card,.booster-main,.booster-shine{animation:none}.booster,.wc{transition:none}}@media (width<=900px){:host,:root{--sidebar:100%}.app{grid-template-columns:1fr}.side{align-items:center;gap:var(--s4);height:auto;padding:var(--s3) var(--s4);flex-flow:wrap;position:static}.side .brand{margin-right:auto}.side-foot{flex-direction:row;align-items:center;margin-top:0}.nav{-webkit-overflow-scrolling:touch;gap:var(--s2);flex-flow:row;overflow:auto visible}.nav a,.nav button{white-space:nowrap;flex:none;width:auto;padding:9px 12px}.nav-sep{display:none}}@media (width<=560px){.modal{text-align:center;justify-items:center;gap:var(--s4);padding:var(--s5);grid-template-columns:1fr}.modal-card{width:190px}.facts{grid-template-columns:repeat(2,1fr)}.grid{gap:var(--s4);grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}.actions{gap:var(--s2);margin-top:var(--s2);display:flex}.actions .btn{flex:1}.btn.danger{color:#f0a0a0;border-color:#5a2b2b}.btn.danger:hover{color:#f8caca;border-color:#f26d6d}.af-input-row{align-items:center;display:flex;position:relative}.af-input{background:var(--surface);border:1px solid var(--line2);color:var(--fg);font-family:var(--body);border-radius:9px;flex:1;width:100%;padding:9px 40px 9px 12px;font-size:14px}.af-unit{color:var(--fg-faint);pointer-events:none;font-size:13px;position:absolute;right:12px}.af-input:focus{border-color:var(--accent)}.af-actions{gap:8px;margin-top:4px;display:flex}.af-actions .btn{flex:1}.modal-msg{color:#f0a0a0;font-size:12.5px}.modal-msg.ok{color:var(--accent)}.confirm{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:12px;flex-direction:column;gap:10px;padding:14px;display:flex}.confirm-text{color:var(--fg);font-size:14px;line-height:1.4}.confirm-text b{color:var(--r-l);font-weight:700}.sell2{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:14px;flex-direction:column;gap:14px;padding:16px;display:flex}.sell2-head{font-family:var(--display);color:var(--fg);font-size:15px;font-weight:700}.sell2-block{flex-direction:column;gap:8px;display:flex}.sell2-lab{letter-spacing:.02em;color:var(--fg-soft);text-transform:uppercase;justify-content:space-between;align-items:center;font-size:12px;font-weight:600;display:flex}.sell2-suggest{background:color-mix(in oklab,var(--r-l) 15%,transparent);border:1px solid color-mix(in oklab,var(--r-l) 30%,transparent);color:var(--r-l);cursor:pointer;text-transform:none;letter-spacing:0;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;transition:all .12s}.sell2-suggest:hover{background:color-mix(in oklab,var(--r-l) 24%,transparent)}.sell2 .af-input{font-variant-numeric:tabular-nums;font-size:16px;font-weight:600}.sell2-durs{grid-template-columns:repeat(7,1fr);gap:6px;display:grid}.sell2-dur{background:var(--elev2);border:1px solid var(--line);color:var(--fg-soft);cursor:pointer;font-variant-numeric:tabular-nums;border-radius:9px;padding:9px 2px;font-size:12px;font-weight:600;transition:all .12s}.sell2-dur:hover{color:var(--fg);border-color:var(--line2)}.sell2-dur.on{background:color-mix(in oklab,var(--accent) 16%,transparent);border-color:var(--accent);color:var(--accent)}.sell-fallback{color:var(--fg-soft);font:inherit;text-align:left;cursor:pointer;background:0 0;border:none;padding:0;font-size:12.5px;text-decoration:underline}.sell-fallback:hover{color:var(--fg)}.market-avg{background:var(--elev);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;padding:12px 14px}.market-avg .ma-label{letter-spacing:.03em;text-transform:uppercase;color:var(--fg-soft);font-size:11.5px;font-weight:600}.market-avg .ma-value{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;margin-top:2px;font-size:24px;font-weight:700}.market-avg .ma-value span{color:var(--fg-faint);font-size:13px;font-weight:600}.chip.hint{color:var(--fg-soft);border-style:dashed}.modal-tabs{background:var(--elev);border:1px solid var(--line);border-radius:10px;align-self:flex-start;gap:4px;margin-top:2px;padding:3px;display:inline-flex}.modal-tabs button{color:var(--fg-soft);font-family:var(--display);cursor:pointer;background:0 0;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;transition:all .15s}.modal-tabs button.on{background:var(--accent);color:var(--accent-ink)}.market-chart{margin-top:var(--s1)}.mc-head{color:var(--fg-soft);margin-bottom:6px;font-size:11.5px}.mc-plot{align-items:stretch;gap:8px;display:flex}.mc-y{text-align:right;min-width:30px;color:var(--fg-faint);font-variant-numeric:tabular-nums;flex-direction:column;justify-content:space-between;padding:2px 0;font-size:10px;display:flex}.mc-plot svg{background:var(--elev);border:1px solid var(--line);border-radius:10px;flex:1;height:56px;display:block}.mc-x{color:var(--fg-faint);justify-content:space-between;margin-top:4px;margin-left:38px;font-size:10px;display:flex}.market-grid{gap:var(--s3);margin-top:var(--s3);grid-template-columns:repeat(4,1fr);display:grid}.mstat{background:var(--elev);border:1px solid var(--line);text-align:center;border-radius:12px;padding:12px 10px}.mstat .l{color:var(--fg-faint);font-size:10.5px}.mstat .v{font-family:var(--display);font-variant-numeric:tabular-nums;margin-top:2px;font-size:20px;font-weight:700}.market-active{color:var(--fg-soft);margin-top:var(--s2);padding-top:var(--s3);border-top:1px solid var(--line);font-size:13px}.market-active b{color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}@media (width<=560px){.market-grid{grid-template-columns:repeat(2,1fr)}}.facts{gap:var(--s2);grid-template-columns:repeat(auto-fit,minmax(112px,1fr));display:grid}.fact{background:var(--elev);border:1px solid var(--line);border-radius:11px;padding:10px 13px}.fk{color:var(--fg-faint);font-size:11px}.fv{font-family:var(--display);font-variant-numeric:tabular-nums;margin-top:3px;font-size:18px;font-weight:700;line-height:1.15}.fv.atk{color:#f26d6d}.fv.def{color:#5aa2ff}.fv.val{color:var(--r-l)}.modal-obtained{color:var(--fg-faint);margin-top:calc(-1 * var(--s2));font-size:12px}.modal-backdrop,.modal{overscroll-behavior:contain}.wc.is-unowned{filter:saturate(.72)brightness(.9)}.card-btn:hover .wc.is-unowned{filter:saturate()brightness()}.wc-wish{border:1px solid color-mix(in oklab,var(--r-sr) 60%,#ffffff4d);color:var(--r-sr);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#0000008c;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex}.wc.is-nsfw .wc-photo,.wc.is-nsfw .wc-blur{filter:blur(18px)saturate(.7);transform:scale(1.2)}.wc-nsfw{z-index:3;font:600 11px/1 var(--display);color:var(--fg);border:1px solid var(--line2);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);white-space:nowrap;background:#0009;border-radius:999px;padding:6px 12px;position:absolute;top:44%;left:50%;transform:translate(-50%,-50%)}.rl.static{cursor:default}.rl.static:hover{color:var(--fg-soft);border-color:var(--line)}.grid.dim{opacity:.5;pointer-events:none;transition:opacity .2s}.pager{justify-content:center;align-items:center;gap:var(--s4);margin:var(--s6) 0 var(--s5);display:flex}.pager-info{color:var(--fg-soft);font-variant-numeric:tabular-nums;font-size:13.5px}.wish-btn{width:100%;margin-top:var(--s3)}.wish-btn.on{border-color:color-mix(in oklab,var(--r-sr) 55%,var(--line2));color:var(--r-sr)}.auc-item{flex-direction:column;gap:6px;display:flex}.auc-item .card-btn{width:100%}.auc-meta{justify-content:space-between;align-items:center;gap:8px;padding:0 2px;display:flex}.auc-bid{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:5px;font-size:14px;font-weight:700;display:inline-flex}.auc-coin{background:radial-gradient(circle at 35% 30%,#ffe680,var(--r-l));width:11px;height:11px;box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent);border-radius:50%;flex:none}.auc-end{color:var(--fg-soft);font-variant-numeric:tabular-nums;font-size:12.5px}.auc-seller{color:var(--fg-faint);white-space:nowrap;text-overflow:ellipsis;padding:0 2px;font-size:11.5px;overflow:hidden}.auc-detail{margin-top:var(--s3);padding-top:var(--s3);border-top:1px solid var(--line);flex-direction:column;gap:8px;display:flex}.auc-row{color:var(--fg-soft);justify-content:space-between;font-size:13.5px;display:flex}.auc-row b{color:var(--fg)}.mkt-filter{margin-bottom:var(--s5)}.auc-note{color:var(--fg-soft);padding:8px 0;font-size:13px}.auc2{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);width:min(920px,94vw);max-height:92vh;padding:var(--s6);position:relative;overflow:auto;box-shadow:0 40px 90px -30px #000}.auc2-grid{gap:var(--s6);grid-template-columns:1fr 300px;display:grid}.auc2-main{gap:var(--s5);flex-direction:column;min-width:0;display:flex}.auc2-head{gap:var(--s4);align-items:flex-start;display:flex}.auc2-thumb{flex:none;width:120px}.auc2-thumb .wc{border-radius:12px}.auc2-id{min-width:0}.auc2-name{font-family:var(--display);letter-spacing:-.02em;margin-top:8px;font-size:clamp(20px,2.4vw,28px);font-weight:700;line-height:1.1}.auc2-cat{color:var(--fg-soft);margin-top:4px;font-size:14px}.auc2-seller{color:var(--fg-faint);margin-top:6px;font-size:12.5px}.auc2-stats{gap:var(--s4);display:flex}.auc2-price,.auc2-clock{background:var(--elev);border:1px solid var(--line);border-radius:14px;flex:1;padding:14px 16px}.auc2-price-lbl,.auc2-clock-lbl{color:var(--fg-soft);letter-spacing:.02em;font-size:12px}.auc2-price-val{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:8px;margin-top:4px;font-size:30px;font-weight:800;display:inline-flex}.auc2-coin{background:radial-gradient(circle at 35% 30%,#ffe680,var(--r-l));width:16px;height:16px;box-shadow:0 0 8px color-mix(in oklab,var(--r-l) 55%,transparent);border-radius:50%;flex:none}.auc2-clock-val{font-family:var(--display);font-variant-numeric:tabular-nums;margin-top:4px;font-size:26px;font-weight:800}.auc2-clock[data-u=warn]{border-color:color-mix(in oklab,var(--r-ur) 45%,var(--line))}.auc2-clock[data-u=warn] .auc2-clock-val{color:var(--r-ur)}.auc2-clock[data-u=crit]{border-color:color-mix(in oklab,#f0715f 55%,var(--line));background:color-mix(in oklab,#f0715f 8%,var(--elev))}.auc2-clock[data-u=crit] .auc2-clock-val{color:#f6867a;animation:1s ease-in-out infinite auc2-pulse}@keyframes auc2-pulse{50%{opacity:.55}}.auc2-clock[data-u=end] .auc2-clock-val{color:var(--fg-faint)}.auc2-chart{background:var(--elev);border:1px solid var(--line);border-radius:14px;height:120px;padding:12px 12px 12px 44px;position:relative}.auc2-chart svg{width:100%;height:100%;display:block}.auc2-chart .mc-y{color:var(--fg-faint);font-variant-numeric:tabular-nums;flex-direction:column;justify-content:space-between;font-size:10.5px;display:flex;position:absolute;top:12px;bottom:12px;left:10px}.auc2-feed{background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:12px 14px}.auc2-feed-head{font-family:var(--display);color:var(--fg-soft);margin-bottom:8px;font-size:13px;font-weight:700}.auc2-feed-empty{color:var(--fg-faint);padding:6px 0;font-size:13px}.auc2-feed-row{border-top:1px solid var(--line);align-items:center;gap:10px;padding:7px 0;font-size:13px;display:flex}.auc2-feed-row:first-of-type{border-top:none}.auc2-feed-who{color:var(--fg);white-space:nowrap;text-overflow:ellipsis;flex:1;font-weight:500;overflow:hidden}.auc2-feed-row.me .auc2-feed-who{color:var(--accent)}.auc2-feed-amt{color:var(--r-l);font-variant-numeric:tabular-nums;font-weight:700}.auc2-feed-time{color:var(--fg-faint);text-align:right;min-width:56px;font-size:11.5px}.auc2-side{gap:var(--s3);flex-direction:column;align-self:start;display:flex;position:sticky;top:0}.auc2-status{text-align:center;border-radius:10px;padding:9px 12px;font-size:13px;font-weight:600}.auc2-status.lead{background:color-mix(in oklab,var(--accent) 16%,transparent);color:var(--accent)}.auc2-status.out{color:#f6867a;background:oklab(69.6076% .138906 .0799126/.16)}.auc2-box{background:var(--elev);border:1px solid var(--line);border-radius:14px;flex-direction:column;gap:10px;padding:14px;display:flex}.auc2-box-lbl{color:var(--fg);justify-content:space-between;align-items:baseline;font-size:13px;display:flex}.auc2-box-lbl span{color:var(--fg-faint);font-size:11.5px}.auc2-quick{grid-template-columns:repeat(4,1fr);gap:6px;display:grid}.auc2-quick button{background:var(--elev2);border:1px solid var(--line);color:var(--fg-soft);cursor:pointer;border-radius:9px;padding:8px 0;font-size:12.5px;font-weight:600;transition:all .12s}.auc2-quick button:hover{color:var(--fg);border-color:var(--line2)}.auc2-cta{width:100%;padding:13px;font-size:15px}.auc2-bal{color:var(--fg-soft);text-align:center;font-size:12px}.auc2-bal.low{color:#f6867a}.auc2-note,.auc2-ended{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);text-align:center;border-radius:12px;padding:14px;font-size:13.5px}.auc2-live{color:var(--fg-faint);justify-content:center;align-items:center;gap:7px;margin-top:2px;font-size:11.5px;display:flex}.auc2-dot{background:var(--accent);width:7px;height:7px;box-shadow:0 0 0 0 color-mix(in oklab,var(--accent) 60%,transparent);border-radius:50%;animation:1.8s ease-out infinite auc2-live}@keyframes auc2-live{0%{box-shadow:0 0 0 0 color-mix(in oklab,var(--accent) 55%,transparent)}70%{box-shadow:0 0 0 7px #0000}to{box-shadow:0 0 #0000}}@media (width<=760px){.auc2-grid{grid-template-columns:1fr}.auc2-side{position:static}}@media (prefers-reduced-motion:reduce){.auc2-clock[data-u=crit] .auc2-clock-val,.auc2-dot{animation:none}}.wc-wish svg,.wc-star svg,.wc-shiny svg{width:12px;height:12px;display:block}.pager-btn{align-items:center;gap:7px;display:inline-flex}.pager-btn svg{width:15px;height:15px}.wish-btn{justify-content:center;align-items:center;gap:8px;display:inline-flex}.wish-btn svg,.modal-close .x-ico{width:16px;height:16px}.search-clear .x-ico{width:13px;height:13px}";
-	initCapture();
-	var CORE = /^\/(pulls|collection|global-collection|marketplace)?\/?$/;
-	var isCore = () => CORE.test(location.pathname);
-	var instance = null;
-	var host = null;
-	var hideStyle = null;
-	function showOverlay() {
-		if (host) return;
-		host = document.createElement("div");
-		host.id = "wm-host";
-		document.body.appendChild(host);
-		const shadow = host.attachShadow({ mode: "open" });
-		const style = document.createElement("style");
-		style.textContent = app_default;
-		shadow.appendChild(style);
-		const root = document.createElement("div");
-		root.id = "wm-app-root";
-		shadow.appendChild(root);
-		hideStyle = document.createElement("style");
-		hideStyle.id = "wm-hide-real";
-		hideStyle.textContent = "html,body{margin:0;background:#0C0D0C}body>*:not(#wm-host){display:none !important}";
-		(document.head || document.documentElement).appendChild(hideStyle);
-		instance = mount(App, { target: root });
-	}
-	function hideOverlay() {
-		if (instance) {
-			unmount(instance);
-			instance = null;
-		}
-		if (host) {
-			host.remove();
-			host = null;
-		}
-		if (hideStyle) {
-			hideStyle.remove();
-			hideStyle = null;
-		}
-	}
-	var OFF_KEY = "wm-off";
-	var overlayOff = () => {
+	var app_default = ":host,:root{--bg:#0c0d0c;--surface:#141613;--elev:#191c18;--elev2:#20241f;--line:#262a26;--line2:#333833;--fg:#eceee9;--fg-soft:#98a29a;--fg-faint:#7d857c;--accent:#3ccb8e;--accent-ink:#07130e;--r-c:#7fd8b4;--r-pc:#7fb0e6;--r-r:#b18fe0;--r-sr:#e46f9f;--r-ur:#f0912f;--r-l:#e8c93a;--display:\"Outfit\",system-ui,sans-serif;--body:\"Inter\",system-ui,sans-serif;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;--radius:14px;--radius-lg:18px;--sidebar:268px}:where(#wm-app-root,#wm-app-root *){box-sizing:border-box;margin:0;padding:0}#wm-app-root{font-family:var(--body);color:var(--fg);-webkit-font-smoothing:antialiased;line-height:1.5}#wm-app-root button{cursor:pointer;font-family:inherit}#wm-app-root img{display:block}#wm-app-root a{color:inherit;text-decoration:none}#wm-app-root :is(a,button,input,select,textarea,[tabindex]:not([tabindex=\"-1\"])):focus-visible{outline:2px solid var(--accent);outline-offset:2px}#wm-app-root .modal:focus,#wm-app-root .modal:focus-visible{outline:none}.card-btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--radius)}.app{grid-template-columns:var(--sidebar) 1fr;background:var(--bg);min-height:100vh;display:grid}.side{background:var(--surface);border-right:1px solid var(--line);padding:var(--s5) var(--s4);gap:var(--s5);flex-direction:column;height:100vh;display:flex;position:sticky;top:0;overflow:hidden}.brand{padding:0 var(--s3);align-items:center;gap:10px;display:flex}.brand .mk{background:var(--accent);border-radius:3px;width:9px;height:9px}.brand b{font-family:var(--display);letter-spacing:-.01em;font-size:19px;font-weight:700}.nav{scrollbar-width:none;flex-direction:column;flex:1;gap:2px;min-height:0;display:flex;overflow-y:auto}.nav::-webkit-scrollbar{display:none}.nav button{align-items:center;gap:var(--s3);color:var(--fg-soft);cursor:pointer;text-align:left;background:0 0;border:0;border-radius:11px;width:100%;padding:10px 12px;font-family:inherit;font-size:14px;font-weight:500;transition:background .15s,color .15s;display:flex}.nav button svg{opacity:.85;flex:none;width:19px;height:19px}.nav button:hover{background:var(--elev);color:var(--fg)}.nav button.on{background:color-mix(in oklab,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}.nav button.on svg{opacity:1}.nav-sep{letter-spacing:.12em;text-transform:uppercase;color:var(--fg-faint);padding:var(--s4) 12px var(--s2);font-size:10px}.nav-grid{grid-template-columns:repeat(3,1fr);gap:2px;display:grid}.nav-grid a{color:var(--fg-soft);text-align:center;border-radius:10px;flex-direction:column;align-items:center;gap:6px;padding:10px 2px 9px;font-size:11px;line-height:1.1;transition:background .15s,color .15s;display:flex}.nav-grid a svg{opacity:.55;width:17px;height:17px}.nav-grid a:hover{background:var(--elev);color:var(--fg)}.nav-grid a:hover svg{opacity:.9}.side-foot{gap:var(--s2);padding:var(--s3) 12px 0;border-top:1px solid var(--line);flex-direction:column;display:flex}.ghost{border:1px solid var(--line2);color:var(--fg-soft);background:0 0;border-radius:10px;padding:9px;font-size:13px;font-weight:500;transition:all .15s}.ghost:hover{border-color:var(--fg-soft);color:var(--fg)}.foot-link{color:var(--fg-soft);font:inherit;cursor:pointer;text-align:left;background:0 0;border:0;align-items:center;gap:8px;padding:0;font-size:12.5px;display:flex}.foot-link svg{width:14px;height:14px}.foot-link:hover{color:var(--fg)}.hintline{color:var(--fg-faint);align-items:center;gap:8px;font-size:11.5px;display:flex}.hintline:before{content:\"\";background:var(--accent);border-radius:50%;width:6px;height:6px}@media (height<=760px) and (width>=901px){.side{padding:var(--s4) var(--s3);gap:var(--s3)}.nav button{padding:8px 12px}.nav-sep{padding:var(--s3) 12px 6px}.nav-grid a{gap:4px;padding:7px 2px 6px}}.main{flex-direction:column;min-width:0;display:flex}.topbar{justify-content:space-between;align-items:center;gap:var(--s4);padding:var(--s5) clamp(var(--s5),4vw,var(--s7));border-bottom:1px solid var(--line);z-index:5;background:color-mix(in oklab,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);display:flex;position:sticky;top:0}.crumb{font-family:var(--display);letter-spacing:-.01em;font-size:16px;font-weight:600}.wallet{gap:var(--s2);display:flex}.chip{color:var(--fg-soft);background:var(--elev);border:1px solid var(--line);border-radius:999px;align-items:center;gap:8px;padding:9px 15px;font-size:13.5px;display:flex}.chip b{color:var(--fg);font-weight:600}.chip .cico{flex:none;width:14px;height:14px}.chip .cico.pk{color:var(--accent)}.chip .cico.coin{color:var(--r-l)}.badge{font-family:var(--display);letter-spacing:.04em;border-radius:999px;align-items:center;padding:6px 11px;font-size:11px;font-weight:700;display:inline-flex}.badge.pro{background:var(--accent);color:var(--accent-ink)}.notif{display:flex;position:relative}.bell{border:1px solid var(--line);background:var(--elev);width:38px;height:38px;color:var(--fg-soft);cursor:pointer;border-radius:999px;justify-content:center;align-items:center;transition:all .15s;display:flex;position:relative}.bell:hover{color:var(--fg);border-color:var(--line2)}.bell.has{color:var(--fg)}.bell svg{width:18px;height:18px}.bell-badge{color:#fff;min-width:18px;height:18px;font-family:var(--display);text-align:center;box-shadow:0 0 0 2px var(--bg);background:#f26d6d;border-radius:999px;padding:0 5px;font-size:10.5px;font-weight:700;line-height:18px;position:absolute;top:-3px;right:-3px}.notif-scrim{z-index:30;position:fixed;inset:0}.notif-panel{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);z-index:31;width:min(340px,86vw);max-height:66vh;padding:var(--s2);overscroll-behavior:contain;position:absolute;top:46px;right:0;overflow:auto;box-shadow:0 24px 60px -24px #000}.notif-head{font-family:var(--display);align-items:center;gap:8px;padding:8px 10px 10px;font-size:14px;font-weight:700;display:flex}.notif-count{background:color-mix(in oklab,var(--accent) 16%,transparent);color:var(--accent);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700}.notif-empty{text-align:center;color:var(--fg-faint);padding:24px;font-size:13px}.notif-item{border-radius:12px;gap:10px;padding:11px 10px;transition:background .15s;display:flex}.notif-item:hover{background:var(--elev)}.notif-item.unread{background:color-mix(in oklab,var(--accent) 7%,transparent)}.notif-dot{background:var(--accent);border-radius:50%;flex:none;width:7px;height:7px;margin-top:6px}.notif-item:not(.unread) .notif-body{margin-left:17px}.notif-body{min-width:0}.notif-title{font-size:13.5px;font-weight:600;line-height:1.3}.notif-msg{color:var(--fg-soft);margin-top:2px;font-size:12.5px;line-height:1.4}.notif-time{color:var(--fg-faint);margin-top:4px;font-size:11px}.view{padding:clamp(var(--s5),3.5vw,var(--s7));width:100%;max-width:1600px;margin:0 auto}.pull-ready{justify-content:center;align-items:center;gap:var(--s5);text-align:center;flex-direction:column;min-height:64vh;display:flex}.pull-ready h1{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(26px,3vw,36px);font-weight:700}.special-note{background:color-mix(in oklab,var(--r-l) 12%,var(--elev));border:1px solid color-mix(in oklab,var(--r-l) 32%,var(--line));color:var(--fg);border-radius:12px;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;padding:10px 16px;font-size:13px;display:flex}.link-btn{color:var(--accent);font:inherit;cursor:pointer;text-underline-offset:3px;background:0 0;border:none;font-weight:600;text-decoration:underline}.pull-ready .sub{color:var(--fg-soft);margin-top:calc(-1 * var(--s3));font-size:15px}.booster-stage{justify-content:center;align-items:center;width:100%;min-height:clamp(300px,44vh,440px);display:flex;position:relative}.booster{aspect-ratio:2550/3300;cursor:pointer;filter:drop-shadow(0 34px 54px #0009);background:0 0;border:none;width:clamp(210px,23vw,272px);padding:0;transition:transform .3s cubic-bezier(.2,.7,.3,1);position:relative}.booster:hover:not(:disabled):not(.opening){transform:translateY(-8px)}.booster:disabled{cursor:default}.booster-main{transform-origin:50% 60%;animation:5.5s ease-in-out infinite booster-float;position:absolute;inset:0}.booster-main img{object-fit:contain;-webkit-user-drag:none;-webkit-user-select:none;user-select:none;width:100%;height:100%;display:block}.booster-shine{pointer-events:none;mix-blend-mode:screen;opacity:0;background:linear-gradient(115deg,#0000 40%,#ffffffd9 47%,#96d2ffb3 50%,#ffecb4b3 53%,#0000 60%) 0 0/260% 260% no-repeat;animation:5s ease-in-out infinite booster-sheen;position:absolute;inset:0;-webkit-mask:url(/card_pack.png) 50%/contain no-repeat;mask:url(/card_pack.png) 50%/contain no-repeat}@keyframes booster-sheen{0%{opacity:0;background-position:130% 0}30%{opacity:.95}52%{opacity:.95;background-position:-30% 100%}72%,to{opacity:0;background-position:-30% 100%}}@keyframes booster-float{0%,to{transform:translateY(0)rotate(-1.2deg)}50%{transform:translateY(-12px)rotate(1.2deg)}}.booster-back{filter:brightness(.62)grayscale(.25);background-position:50%;background-repeat:no-repeat;background-size:contain;position:absolute;inset:0}.booster-back.b1{opacity:.7;transform:translate(11px,9px)rotate(4deg)scale(.985)}.booster-back.b2{opacity:.4;transform:translate(22px,18px)rotate(8deg)scale(.97)}.booster.empty .booster-main{filter:grayscale(.9)brightness(.45);animation-play-state:paused}.booster.empty .booster-shine{display:none}.booster.opening{cursor:default}.booster.opening .booster-main{animation:.9s cubic-bezier(.3,.6,.2,1) forwards booster-open}@keyframes booster-open{0%{transform:translateY(0)rotate(0)}14%{transform:rotate(-5deg)}28%{transform:rotate(5deg)}42%{transform:rotate(-4deg)}56%{transform:rotate(3deg)scale(1.03)}68%{transform:rotate(0)scale(1.06)}to{opacity:0;filter:brightness(2.2);transform:scale(1.5)}}.booster.opening:after{content:\"\";pointer-events:none;opacity:0;background:radial-gradient(circle,#fff6e0f2,#fff6e040 45%,#0000 66%);border-radius:50%;animation:.9s ease-out forwards booster-burst;position:absolute;inset:-25%}@keyframes booster-burst{0%,52%{opacity:0;transform:scale(.5)}74%{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(1.5)}}.pack-count{flex-direction:column;align-items:center;gap:2px;display:flex}.pc-num{font-family:var(--display);color:var(--accent);font-variant-numeric:tabular-nums;font-size:clamp(36px,5vw,54px);font-weight:800;line-height:1}.pack-count.empty .pc-num{color:var(--fg-faint)}.pc-lbl{color:var(--fg-soft);font-size:14px}.regen-line{color:var(--fg-soft);font-size:13.5px}.regen-line b{color:var(--fg);font-weight:600}.regen-line.err{color:#f0a3a3}.btn.big{padding:14px 34px;font-size:16px}.btn{font-family:var(--display);border:1px solid var(--line2);color:var(--fg);background:0 0;border-radius:12px;padding:13px 28px;font-size:15px;font-weight:600;transition:all .15s}.btn:hover{border-color:var(--fg-soft)}.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}.btn.primary:hover{filter:brightness(1.06)}.btn:disabled{opacity:.45;cursor:not-allowed}.pull-actions{gap:var(--s3);flex-wrap:wrap;justify-content:center;display:flex}.haul{margin-top:var(--s3);flex-wrap:wrap;justify-content:center;gap:8px;display:flex}.haul-chip{color:var(--fg-soft);background:color-mix(in oklab,var(--rc) 10%,var(--elev));border:1px solid color-mix(in oklab,var(--rc) 35%,var(--line));border-radius:999px;align-items:center;gap:6px;padding:5px 12px;font-size:12.5px;display:inline-flex}.haul-chip b{color:var(--rc);font-family:var(--display)}.session-recap{color:var(--fg-faint);margin-top:var(--s2);font-size:12.5px}.reveal{justify-content:center;align-items:center;gap:var(--s6);flex-direction:column;min-height:64vh;display:flex}.reveal .count{color:var(--fg-soft);font-size:14px}.reveal .count b{color:var(--accent);font-family:var(--display);margin:0 3px;font-size:18px}.stage{width:clamp(280px,32vw,340px);max-width:100%;position:relative}.stage-aura{z-index:0;pointer-events:none;background:radial-gradient(closest-side, color-mix(in oklab,var(--rc) 60%, transparent), transparent 72%);filter:blur(34px);opacity:.35;border-radius:50%;animation:.55s cubic-bezier(.3,.8,.3,1) aurapop;position:absolute;inset:-14% -10%}.stage-aura[data-r=C]{--rc:var(--r-c);opacity:.26}.stage-aura[data-r=PC]{--rc:var(--r-pc);opacity:.34}.stage-aura[data-r=R]{--rc:var(--r-r);opacity:.46}.stage-aura[data-r=SR]{--rc:var(--r-sr);opacity:.58}.stage-aura[data-r=UR]{--rc:var(--r-ur);opacity:.72;inset:-18% -12%}.stage-aura[data-r=L]{--rc:var(--r-l);opacity:.85;inset:-20% -14%}@keyframes aurapop{0%{transform:scale(.7)}to{transform:scale(1)}}.stage .flip-in{z-index:1;position:relative}.reveal-rarity{font-family:var(--display);letter-spacing:.06em;color:var(--rc);font-size:16px;font-weight:700;animation:.45s rarityin}.reveal-rarity[data-r=C]{--rc:var(--r-c)}.reveal-rarity[data-r=PC]{--rc:var(--r-pc)}.reveal-rarity[data-r=R]{--rc:var(--r-r)}.reveal-rarity[data-r=SR]{--rc:var(--r-sr)}.reveal-rarity[data-r=UR]{--rc:var(--r-ur)}.reveal-rarity[data-r=L]{--rc:var(--r-l)}.reveal-rarity[data-r=UR],.reveal-rarity[data-r=L]{letter-spacing:.1em;font-size:19px}@keyframes rarityin{0%{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}.dots{gap:var(--s2);align-items:center;display:flex}.dots .d{background:var(--line2);border-radius:50%;width:8px;height:8px;transition:all .2s}.dots .d.on{background:var(--accent);transform:scale(1.15)}.dots .d.seen{background:var(--fg-faint)}.navrow{align-items:center;gap:var(--s5);display:flex}.arrow{border:1px solid var(--line2);background:var(--elev);width:46px;height:46px;color:var(--fg);border-radius:50%;justify-content:center;align-items:center;transition:all .15s;display:flex}.arrow svg{width:20px;height:20px}.arrow:hover{border-color:var(--fg-soft)}.arrow:disabled{opacity:.3;cursor:not-allowed}.flip-in{animation:.5s cubic-bezier(.3,.8,.3,1) flipin}@keyframes flipin{0%{opacity:0;transform:rotateY(-14deg)translateY(14px)}to{opacity:1;transform:none}}.reveal-skip{color:var(--fg-faint);cursor:pointer;text-underline-offset:3px;background:0 0;border:none;padding:4px;font-size:13px;text-decoration:underline}.reveal-skip:hover{color:var(--fg-soft)}.reveal-all{gap:var(--s5)}.reveal-all-head{text-align:center;flex-direction:column;gap:4px;display:flex}.reveal-all-head h2{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(22px,2.4vw,28px);font-weight:700}.reveal-all-head .sub{color:var(--fg-soft);font-size:14px}.reveal-grid{gap:var(--s5);grid-template-columns:repeat(auto-fit,minmax(150px,180px));justify-content:center;width:100%;max-width:1000px;display:grid}.rg-card{animation:.5s cubic-bezier(.2,.7,.3,1) both rgin;position:relative}.rg-aura{z-index:0;pointer-events:none;background:radial-gradient(closest-side,color-mix(in oklab,var(--rc) 55%,transparent),transparent 72%);filter:blur(26px);opacity:.3;border-radius:50%;position:absolute;inset:-10% -8%}.rg-aura[data-r=C]{--rc:var(--r-c);opacity:.16}.rg-aura[data-r=PC]{--rc:var(--r-pc);opacity:.22}.rg-aura[data-r=R]{--rc:var(--r-r);opacity:.34}.rg-aura[data-r=SR]{--rc:var(--r-sr);opacity:.46}.rg-aura[data-r=UR]{--rc:var(--r-ur);opacity:.6}.rg-aura[data-r=L]{--rc:var(--r-l);opacity:.72}.rg-card .card-btn{z-index:1;position:relative}@keyframes rgin{0%{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}.wc{aspect-ratio:5/7;border-radius:var(--radius-lg);border:3.5px solid color-mix(in oklab,var(--rc) 65%,var(--line));cursor:pointer;background:#0f110e;transition:transform .2s cubic-bezier(.2,.7,.3,1),border-color .2s,box-shadow .2s;position:relative;overflow:hidden}.wc[data-r=C]{--rc:var(--r-c);box-shadow:0 6px 18px -12px color-mix(in oklab,var(--r-c) 45%,transparent)}.wc[data-r=PC]{--rc:var(--r-pc);box-shadow:0 6px 20px -12px color-mix(in oklab,var(--r-pc) 55%,transparent)}.wc[data-r=R]{--rc:var(--r-r);box-shadow:0 8px 24px -12px color-mix(in oklab,var(--r-r) 62%,transparent)}.wc[data-r=SR]{--rc:var(--r-sr);box-shadow:0 8px 26px -11px color-mix(in oklab,var(--r-sr) 70%,transparent)}.wc[data-r=UR]{--rc:var(--r-ur);box-shadow:0 10px 30px -11px color-mix(in oklab,var(--r-ur) 78%,transparent)}.wc[data-r=L]{--rc:var(--r-l);box-shadow:0 12px 36px -10px color-mix(in oklab,var(--r-l) 85%,transparent)}.wc[data-r=SR],.wc[data-r=UR],.wc[data-r=L]{border-color:color-mix(in oklab,var(--rc) 88%,var(--line))}.wc:hover{border-color:var(--rc);box-shadow:0 18px 42px -20px color-mix(in oklab,var(--rc) 42%,#000);transform:translateY(-5px)}.wc-face{background:linear-gradient(#181c16,#0d0f0c);position:absolute;inset:0}.wc:before{content:\"\";z-index:5;pointer-events:none;border-radius:inherit;position:absolute;inset:0;box-shadow:inset 0 1px #ffffff29,inset 0 0 0 1px #ffffff08,inset 0 -44px 52px -44px #0000008c}.wc:not(.is-noimg) .wc-face:after{content:\"\";pointer-events:none;background:linear-gradient(180deg, color-mix(in oklab,var(--rc) 26%, transparent), transparent 28%);position:absolute;inset:0}.wc-blur{object-fit:cover;filter:blur(22px)saturate(1.1)brightness(.5);z-index:0;width:100%;height:100%;position:absolute;inset:0;transform:scale(1.2)}.wc.is-noimg .wc-blur{display:none}.wc-photo{object-fit:contain;z-index:1;width:100%;height:100%;position:absolute;inset:0}.wc-bg{object-fit:cover;z-index:0;width:100%;height:100%;position:absolute;inset:0;transform:scale(1.8)}.wc-bg.onyx{transform:none}.wc-photo.onyx-photo{object-fit:cover;z-index:1}.wc.is-noimg .wc-face{background:radial-gradient(130% 90% at 50% 14%, color-mix(in oklab,var(--rc) 45%, transparent), transparent 64%), linear-gradient(180deg, color-mix(in oklab,var(--rc) 22%, #171b15), #0c0e0b)}.wc.is-shiny{box-shadow:inset 0 0 0 1px #e9c15a8c,0 0 16px #e9c15a4d,0 0 30px #00000080}.wc.is-shiny:hover{box-shadow:inset 0 0 0 1px #e9c15acc,0 0 22px #e9c15a80,0 18px 42px -20px #000}.wc-holo{z-index:2;pointer-events:none;mix-blend-mode:screen;opacity:.7;background:radial-gradient(circle at 50% 45%,#fff8e0 0%,#fff8e033 20%,#0000 46%) 0 0/175% 175% no-repeat;animation:6.5s ease-in-out infinite alternate shiny-drift;position:absolute;inset:0}.wc-holo.onyx{mix-blend-mode:soft-light;opacity:.9}@keyframes shiny-drift{0%{background-position:16% 12%}to{background-position:84% 82%}}@media (prefers-reduced-motion:reduce){.wc-holo{opacity:.5;background-position:50% 42%;animation:none}}.ox{z-index:1;pointer-events:none;position:absolute;inset:0}.ox-shade{mix-blend-mode:multiply;background:#2e2b36}.ox-tint{mix-blend-mode:color;background:#3b3b42}.ox-wash{background:radial-gradient(120% 80% at 50% 30%,#0000 40%,#05040866 78%,#050408cc 100%),linear-gradient(#0b0a12ec 0%,#0d0c15dd 55%,#0b0a1255 78%,#0b0a12bb 100%)}.ox-lines{opacity:.62;mix-blend-mode:screen;background:linear-gradient(160deg,#fff0b3 0%,#e9c15a 35%,#fff6d0 55%,#d7a93c 80%,#ffe9a6 100%);-webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat}.ox-shine{mix-blend-mode:screen;opacity:.95;background:radial-gradient(circle at 50% 45%,#fffbe8 0%,#f6d98aa6 16%,#e9c15a26 34%,#0000 52%) 0 0/210% 210% no-repeat;animation:5.5s ease-in-out infinite alternate onyx-shimmer;-webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat}@keyframes onyx-shimmer{0%{background-position:12% 8%}to{background-position:88% 86%}}@media (prefers-reduced-motion:reduce){.ox-shine{opacity:.7;background-position:42% 30%;animation:none}}.wc-scrim{pointer-events:none;background:linear-gradient(#0000 20%,#05060533 32%,#050605b3 50%,#050605fb 68%,#050605 100%);position:absolute;inset:0}.wc.bare .wc-cap,.wc.bare .wc-scrim{display:none}.wc-top{z-index:3;justify-content:space-between;align-items:flex-start;gap:6px;display:flex;position:absolute;top:11px;left:11px;right:11px}.wc-rtag{font-family:var(--display);color:#08130e;background:var(--rc);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;box-shadow:0 1px 5px #0006}.wc-flags{align-items:center;gap:5px;display:flex}.wc-count{color:#fff;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#0000008c;border:1px solid #ffffff2e;border-radius:6px;padding:2px 7px;font-size:10.5px;font-weight:600}.wc-new{background:var(--accent);color:var(--accent-ink);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700}.wc-shiny{color:#f3d27a;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#111014;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex;box-shadow:inset 0 0 0 1px #d7a93c,0 0 10px #e9c15a73}.wc-star{border:1px solid color-mix(in oklab,var(--r-l) 55%,#ffffff4d);color:var(--r-l);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#0000008c;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex}.wc-cap{z-index:3;gap:var(--s1);background:linear-gradient(#0000,#0506058c 28%,#050605eb);flex-direction:column;padding:14px 14px 16px;display:flex;position:absolute;bottom:0;left:0;right:0}.wc.bare .wc-cap{background:0 0}.wc-name{font-family:var(--display);color:#fff;text-shadow:0 1px 10px #000000a6;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:15px;font-weight:700;line-height:1.18;display:-webkit-box;overflow:hidden}.wc-cat{color:#ffffffd1;white-space:nowrap;text-overflow:ellipsis;text-shadow:0 1px 6px #000000b3;font-size:10.5px;line-height:1.3;overflow:hidden}.wc-meta{border-top:1px solid #ffffff38;justify-content:space-between;align-items:center;gap:8px;margin-top:9px;padding-top:9px;display:flex}.wc-stats{color:#ffffffd9;letter-spacing:.02em;text-shadow:0 1px 6px #000000b3;gap:12px;font-size:11px;display:flex}.wc-stats b{color:#fff;font-variant-numeric:tabular-nums;font-weight:700}.wc-val{color:var(--r-l);font-variant-numeric:tabular-nums;text-shadow:0 1px 6px #000000b3;white-space:nowrap;align-items:center;gap:4px;font-size:11px;font-weight:700;display:inline-flex}.wc-val:before{content:\"\";background:radial-gradient(circle at 35% 30%,#ffe680,var(--r-l));width:9px;height:9px;box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent);border-radius:50%}.wc-big .wc-name{font-size:22px}.wc-big .wc-cat{white-space:normal;font-size:13px}.wc-big .wc-stats{margin-top:12px;padding-top:12px;font-size:14px}.wc-big .wc-cap{padding:18px 20px 20px}.wc-big .wc-rtag{padding:4px 10px;font-size:12px}.wc-big .wc-top{top:14px;left:14px;right:14px}.coll-head{justify-content:space-between;align-items:flex-start;gap:var(--s4);margin-bottom:var(--s5);flex-wrap:wrap;display:flex}.coll-head h1{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(24px,2.6vw,32px);font-weight:700}.coll-head .meta{color:var(--fg-soft);margin-top:6px;font-size:14px}.coll-tools{gap:var(--s3);flex-wrap:wrap;flex:460px;justify-content:flex-end;align-items:center;display:flex}.search-wrap{flex:300px;align-items:center;min-width:220px;display:flex;position:relative}.search-ico{width:17px;height:17px;color:var(--fg-faint);pointer-events:none;position:absolute;left:14px}.search{background:var(--elev);border:1px solid var(--line);width:100%;color:var(--fg);font-family:var(--body);border-radius:11px;padding:11px 38px 11px 40px;font-size:14px}.search::placeholder{color:var(--fg-faint)}.search:focus{border-color:var(--fg-soft);background:var(--elev2)}.search::-webkit-search-cancel-button{display:none}.search-clear{width:24px;height:24px;color:var(--fg-faint);background:0 0;border:none;border-radius:7px;justify-content:center;align-items:center;font-size:18px;line-height:1;display:flex;position:absolute;right:8px}.search-clear:hover{background:var(--elev2);color:var(--fg)}.tool-actions{gap:var(--s2);flex-wrap:wrap;align-items:center;display:flex}.isel{background:var(--elev);border:1px solid var(--line);border-radius:11px;align-items:center;gap:8px;height:42px;padding:0 12px;transition:all .15s;display:inline-flex;position:relative}.isel:hover,.isel:focus-within{border-color:var(--line2)}.isel svg{width:16px;height:16px;color:var(--fg-soft);flex:none}.isel select{appearance:none;color:var(--fg);font-family:var(--body);cursor:pointer;background:0 0;border:none;outline:none;height:100%;padding:0 18px 0 0;font-size:14px;font-weight:500}.isel:after{content:\"\";border-right:2px solid var(--fg-soft);border-bottom:2px solid var(--fg-soft);pointer-events:none;width:8px;height:8px;position:absolute;right:12px;transform:rotate(45deg)translateY(-2px)}.iconbtn{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);height:42px;font-family:var(--body);white-space:nowrap;border-radius:11px;align-items:center;gap:8px;padding:0 14px;font-size:14px;font-weight:500;transition:all .15s;display:inline-flex}.iconbtn svg{flex:none;width:17px;height:17px}.iconbtn:hover{color:var(--fg);border-color:var(--line2)}.iconbtn.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}.sort-hint{margin:-8px 0 var(--s4);color:var(--fg-soft);font-size:12.5px}.rarity-panel{gap:var(--s3);margin-bottom:var(--s6);flex-direction:column;display:flex}.rarity-meter{gap:5px;height:9px;display:flex}.rm-seg{background:var(--rc);cursor:pointer;border:none;border-radius:999px;min-width:14px;height:100%;padding:0;transition:flex-grow .45s cubic-bezier(.2,.7,.3,1),opacity .2s,filter .2s,transform .15s}.rm-seg:hover{filter:brightness(1.18)}.rm-seg.sel{filter:brightness(1.2);transform:scaleY(1.5)}.rm-seg.dim{opacity:.28}.rarity-legend{gap:var(--s2);flex-wrap:wrap;align-items:center;display:flex}.rl{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);border-radius:999px;align-items:center;gap:8px;padding:7px 13px;font-size:13px;font-weight:500;transition:all .15s;display:inline-flex}.rl:hover{color:var(--fg);border-color:var(--line2)}.rl.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}.rl-dot{border-radius:3px;flex:none;width:9px;height:9px}.rl-n{color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}.rl-sep{background:var(--line2);width:1px;height:22px;margin:0 4px}.rl-ico{flex:none;width:14px;height:14px}.rl.fav.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}.rl.fav.on .rl-ico{fill:var(--r-l);stroke:var(--r-l)}.rl.shiny.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}.card-btn{text-align:left;cursor:pointer;content-visibility:auto;contain-intrinsic-size:auto 300px;background:0 0;border:none;width:100%;margin:0;padding:0;display:block;position:relative}.card-btn.picking .wc{opacity:.55;transition:opacity .15s}.card-btn.picked .wc{opacity:1}.pick-overlay{z-index:10;border-radius:var(--radius-lg);pointer-events:none;border:3px solid #0000;justify-content:flex-end;align-items:flex-start;padding:9px;transition:all .15s;display:flex;position:absolute;inset:0}.pick-overlay .pick-check{color:#fff;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#0000008c;border:2px solid #ffffffe6;border-radius:50%;justify-content:center;align-items:center;width:28px;height:28px;font-size:15px;font-weight:800;display:flex}.pick-overlay.on{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 22%,transparent);box-shadow:0 0 0 2px var(--accent) inset}.pick-check svg{width:16px;height:16px}.pick-overlay.on .pick-check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}.loading-more{color:var(--fg-faint);padding:var(--s3) 0;text-align:center;font-size:13px}.bulk-bar{z-index:40;background:var(--elev2);border:1px solid var(--line2);border-radius:999px;align-items:center;gap:12px;padding:8px 10px 8px 18px;display:flex;position:fixed;bottom:20px;left:50%;transform:translate(-50%);box-shadow:0 18px 44px -18px #000}.bulk-text{color:var(--fg);white-space:nowrap;font-size:13.5px}.bulk-text b{color:var(--r-l)}.bulk-bar .btn{padding:9px 18px}.grid{gap:var(--s5);grid-template-columns:repeat(auto-fill,minmax(200px,1fr));display:grid}.empty{justify-content:center;align-items:center;gap:var(--s3);min-height:44vh;color:var(--fg-soft);text-align:center;flex-direction:column;display:flex}.empty b{font-family:var(--display);color:var(--fg);font-size:19px}.loading{color:var(--fg-faint);padding:var(--s7);text-align:center}.wc.skeleton{border:1px solid var(--line);background:linear-gradient(100deg,#141613 30%,#1c201c 50%,#141613 70%) 0 0/200% 100%;animation:1.2s ease-in-out infinite sk}@keyframes sk{to{background-position:-200% 0}}.modal-backdrop{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);z-index:2147483600;padding:var(--s5);background:#060806b8;justify-content:center;align-items:center;animation:.18s fade;display:flex;position:fixed;inset:0}@keyframes fade{0%{opacity:0}to{opacity:1}}.modal{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);gap:var(--s6);width:100%;max-width:740px;max-height:90vh;padding:var(--s6);grid-template-columns:240px 1fr;display:grid;position:relative;overflow:auto}.modal-card{width:240px}.modal-close{color:var(--fg-soft);cursor:pointer;z-index:2;background:0 0;border:none;font-size:28px;line-height:1;position:absolute;top:12px;right:16px}.modal-close:hover{color:var(--fg)}.modal-info{gap:var(--s4);flex-direction:column;justify-content:flex-start;min-width:0;display:flex}.modal-rar{font-family:var(--display);letter-spacing:.04em;font-size:12px;font-weight:700}.modal-rar[data-r=C]{color:var(--r-c)}.modal-rar[data-r=PC]{color:var(--r-pc)}.modal-rar[data-r=R]{color:var(--r-r)}.modal-rar[data-r=SR]{color:var(--r-sr)}.modal-rar[data-r=UR]{color:var(--r-ur)}.modal-rar[data-r=L]{color:var(--r-l)}.modal-name{font-family:var(--display);letter-spacing:-.01em;font-size:26px;font-weight:700;line-height:1.15}.modal-cat{color:var(--fg-soft);font-size:14px;line-height:1.45}.modal-sum{color:var(--fg-soft);-webkit-line-clamp:4;-webkit-box-orient:vertical;font-size:13.5px;line-height:1.55;display:-webkit-box;overflow:hidden}.modal-sum.muted{color:var(--fg-faint)}.modal .btn{text-align:center;text-decoration:none}.modal-panel{gap:var(--s4);flex-direction:column;display:flex}.modal-wiki{color:var(--accent);align-self:flex-start;font-size:13.5px;font-weight:600;text-decoration:none}.modal-wiki:hover{text-decoration:underline}.actions{border-top:1px solid var(--line);padding-top:var(--s4)}.modal-credit{color:var(--fg-faint);font-size:11px}@media (prefers-reduced-motion:reduce){.flip-in,.stage-aura,.reveal-rarity,.rg-card,.booster-main,.booster-shine{animation:none}.booster,.wc{transition:none}}@media (width<=900px){:host,:root{--sidebar:100%}.app{grid-template-columns:1fr}.side{align-items:center;gap:var(--s4);height:auto;padding:var(--s3) var(--s4);flex-flow:wrap;position:static}.side .brand{margin-right:auto}.side-foot{flex-direction:row;align-items:center;margin-top:0}.nav{-webkit-overflow-scrolling:touch;gap:var(--s2);flex-flow:row;overflow:auto visible}.nav button{white-space:nowrap;flex:none;width:auto;padding:9px 12px}.nav-sep{display:none}.nav-grid{gap:var(--s2);display:flex}.nav-grid a{white-space:nowrap;flex-direction:row;flex:none;padding:9px 12px;font-size:13px}.side-foot{border-top:0;padding:0}}@media (width<=560px){.modal{text-align:center;justify-items:center;gap:var(--s4);padding:var(--s5);grid-template-columns:1fr}.modal-card{width:190px}.facts{grid-template-columns:repeat(2,1fr)}.grid{gap:var(--s4);grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}.actions{gap:var(--s2);margin-top:var(--s2);display:flex}.actions .btn{flex:1}.btn.danger{color:#f0a0a0;border-color:#5a2b2b}.btn.danger:hover{color:#f8caca;border-color:#f26d6d}.af-input-row{align-items:center;display:flex;position:relative}.af-input{background:var(--surface);border:1px solid var(--line2);color:var(--fg);font-family:var(--body);border-radius:9px;flex:1;width:100%;padding:9px 40px 9px 12px;font-size:14px}.af-unit{color:var(--fg-faint);pointer-events:none;font-size:13px;position:absolute;right:12px}.af-input:focus{border-color:var(--accent)}.af-actions{gap:8px;margin-top:4px;display:flex}.af-actions .btn{flex:1}.modal-msg{color:#f0a0a0;font-size:12.5px}.modal-msg.ok{color:var(--accent)}.confirm{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:12px;flex-direction:column;gap:10px;padding:14px;display:flex}.confirm-text{color:var(--fg);font-size:14px;line-height:1.4}.confirm-text b{color:var(--r-l);font-weight:700}.sell2{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:14px;flex-direction:column;gap:14px;padding:16px;display:flex}.sell2-head{font-family:var(--display);color:var(--fg);font-size:15px;font-weight:700}.sell2-block{flex-direction:column;gap:8px;display:flex}.sell2-lab{letter-spacing:.02em;color:var(--fg-soft);text-transform:uppercase;justify-content:space-between;align-items:center;font-size:12px;font-weight:600;display:flex}.sell2-suggest{background:color-mix(in oklab,var(--r-l) 15%,transparent);border:1px solid color-mix(in oklab,var(--r-l) 30%,transparent);color:var(--r-l);cursor:pointer;text-transform:none;letter-spacing:0;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;transition:all .12s}.sell2-suggest:hover{background:color-mix(in oklab,var(--r-l) 24%,transparent)}.sell2 .af-input{font-variant-numeric:tabular-nums;font-size:16px;font-weight:600}.sell2-durs{grid-template-columns:repeat(7,1fr);gap:6px;display:grid}.sell2-dur{background:var(--elev2);border:1px solid var(--line);color:var(--fg-soft);cursor:pointer;font-variant-numeric:tabular-nums;border-radius:9px;padding:9px 2px;font-size:12px;font-weight:600;transition:all .12s}.sell2-dur:hover{color:var(--fg);border-color:var(--line2)}.sell2-dur.on{background:color-mix(in oklab,var(--accent) 16%,transparent);border-color:var(--accent);color:var(--accent)}.market-avg{background:var(--elev);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;padding:12px 14px}.market-avg .ma-label{letter-spacing:.03em;text-transform:uppercase;color:var(--fg-soft);font-size:11.5px;font-weight:600}.market-avg .ma-value{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;margin-top:2px;font-size:24px;font-weight:700}.market-avg .ma-value span{color:var(--fg-faint);font-size:13px;font-weight:600}.chip.hint{color:var(--fg-soft);border-style:dashed}.modal-tabs{background:var(--elev);border:1px solid var(--line);border-radius:10px;align-self:flex-start;gap:4px;margin-top:2px;padding:3px;display:inline-flex}.modal-tabs button{color:var(--fg-soft);font-family:var(--display);cursor:pointer;background:0 0;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;transition:all .15s}.modal-tabs button.on{background:var(--accent);color:var(--accent-ink)}.market-chart{margin-top:var(--s1)}.mc-head{color:var(--fg-soft);margin-bottom:6px;font-size:11.5px}.mc-plot{align-items:stretch;gap:8px;display:flex}.mc-y{text-align:right;min-width:30px;color:var(--fg-faint);font-variant-numeric:tabular-nums;flex-direction:column;justify-content:space-between;padding:2px 0;font-size:10px;display:flex}.mc-plot svg{background:var(--elev);border:1px solid var(--line);border-radius:10px;flex:1;height:56px;display:block}.mc-x{color:var(--fg-faint);justify-content:space-between;margin-top:4px;margin-left:38px;font-size:10px;display:flex}.market-grid{gap:var(--s3);margin-top:var(--s3);grid-template-columns:repeat(4,1fr);display:grid}.mstat{background:var(--elev);border:1px solid var(--line);text-align:center;border-radius:12px;padding:12px 10px}.mstat .l{color:var(--fg-faint);font-size:10.5px}.mstat .v{font-family:var(--display);font-variant-numeric:tabular-nums;margin-top:2px;font-size:20px;font-weight:700}@media (width<=560px){.market-grid{grid-template-columns:repeat(2,1fr)}}.facts{gap:var(--s2);grid-template-columns:repeat(auto-fit,minmax(112px,1fr));display:grid}.fact{background:var(--elev);border:1px solid var(--line);border-radius:11px;padding:10px 13px}.fk{color:var(--fg-faint);font-size:11px}.fv{font-family:var(--display);font-variant-numeric:tabular-nums;margin-top:3px;font-size:18px;font-weight:700;line-height:1.15}.fv.atk{color:#f26d6d}.fv.def{color:#5aa2ff}.fv.val{color:var(--r-l)}.modal-obtained{color:var(--fg-faint);margin-top:calc(-1 * var(--s2));font-size:12px}.modal-backdrop,.modal{overscroll-behavior:contain}.wc.is-unowned{filter:saturate(.72)brightness(.9)}.card-btn:hover .wc.is-unowned{filter:saturate()brightness()}.wc-wish{border:1px solid color-mix(in oklab,var(--r-sr) 60%,#ffffff4d);color:var(--r-sr);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);background:#0000008c;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex}.wc.is-nsfw .wc-photo,.wc.is-nsfw .wc-blur{filter:blur(18px)saturate(.7);transform:scale(1.2)}.wc-nsfw{z-index:3;font:600 11px/1 var(--display);color:var(--fg);border:1px solid var(--line2);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);white-space:nowrap;background:#0009;border-radius:999px;padding:6px 12px;position:absolute;top:44%;left:50%;transform:translate(-50%,-50%)}.grid.dim{opacity:.5;pointer-events:none;transition:opacity .2s}.pager{justify-content:center;align-items:center;gap:var(--s4);margin:var(--s6) 0 var(--s5);display:flex}.pager-info{color:var(--fg-soft);font-variant-numeric:tabular-nums;font-size:13.5px}.auc-item{flex-direction:column;gap:6px;display:flex}.auc-item .card-btn{width:100%}.auc-meta{justify-content:space-between;align-items:center;gap:8px;padding:0 2px;display:flex}.auc-bid{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:5px;font-size:14px;font-weight:700;display:inline-flex}.auc-coin{background:radial-gradient(circle at 35% 30%,#ffe680,var(--r-l));width:11px;height:11px;box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent);border-radius:50%;flex:none}.auc-end{color:var(--fg-soft);font-variant-numeric:tabular-nums;font-size:12.5px}.auc-seller{color:var(--fg-faint);white-space:nowrap;text-overflow:ellipsis;padding:0 2px;font-size:11.5px;overflow:hidden}.auc-seller.lead{color:var(--accent);font-weight:600}.auc-end.soon{color:#f6867a}.mkt-filter{margin-bottom:var(--s5)}.mkt-tabs{gap:var(--s5);border-bottom:1px solid var(--line);margin-bottom:var(--s5);scrollbar-width:none;display:flex;overflow-x:auto}.mkt-tabs button{color:var(--fg-soft);font:inherit;white-space:nowrap;cursor:pointer;background:0 0;border:0;border-bottom:2px solid #0000;margin-bottom:-1px;padding:0 0 12px;font-size:14px;font-weight:500;transition:color .15s,border-color .15s}.mkt-tabs button:hover{color:var(--fg)}.mkt-tabs button.on{color:var(--fg);border-bottom-color:var(--accent);font-weight:600}.auc{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);width:min(900px,94vw);max-height:92vh;padding:var(--s6);gap:var(--s5);flex-direction:column;display:flex;position:relative;overflow:auto;box-shadow:0 40px 90px -30px #000}.auc-top{gap:var(--s6);grid-template-columns:230px 1fr;align-items:start;display:grid}.auc-card .wc{border-radius:14px}.auc-body{gap:var(--s4);flex-direction:column;min-width:0;display:flex}.auc-name{font-family:var(--display);letter-spacing:-.02em;margin-top:6px;font-size:clamp(22px,2.6vw,30px);font-weight:700;line-height:1.1}.auc-cat{color:var(--fg-soft);margin-top:4px;font-size:14px}.auc-by{color:var(--fg-faint);margin-top:6px;font-size:12.5px}.auc-state{background:var(--elev);border:1px solid var(--line);border-radius:14px;flex-direction:column;gap:6px;padding:16px 18px;display:flex}.auc-state[data-phase=sold]{border-color:color-mix(in oklab,var(--accent) 40%,var(--line));background:color-mix(in oklab,var(--accent) 6%,var(--elev))}.auc-row{justify-content:space-between;gap:var(--s4);flex-wrap:wrap;display:flex}.auc-k{color:var(--fg-soft);letter-spacing:.02em;font-size:12px}.auc-price{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:9px;font-size:34px;font-weight:800;line-height:1.1;display:inline-flex}.auc-price.muted{color:var(--fg-soft)}.auc-price .auc-coin{width:17px;height:17px}.auc-clock{text-align:right}.auc-time{font-family:var(--display);font-variant-numeric:tabular-nums;font-size:26px;font-weight:800;line-height:1.2}.auc-clock[data-u=warn] .auc-time{color:var(--r-ur)}.auc-clock[data-u=crit] .auc-time{color:#f6867a;animation:1s ease-in-out infinite auc-pulse}.auc-clock[data-u=end] .auc-time{color:var(--fg-faint)}.auc-sub{color:var(--fg-faint);flex-wrap:wrap;align-items:center;gap:10px;font-size:12.5px;display:flex}.auc-live{color:var(--accent);align-items:center;gap:6px;display:inline-flex}.auc-dot{background:var(--accent);border-radius:50%;width:7px;height:7px;animation:1.8s ease-out infinite auc-live}.auc-flag{border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600}.auc-flag.lead{background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--accent)}.auc-flag.out{color:#f6867a;background:oklab(69.6076% .138906 .0799126/.14)}.auc-act{flex-direction:column;gap:10px;display:flex}.auc-inline{gap:8px;display:flex}.auc-inline .af-input-row{flex:1}.auc-inline .btn{padding:10px 22px}.auc-cta{width:100%;padding:12px}.auc-quick{flex-wrap:wrap;gap:6px;display:flex}.auc-quick button{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);cursor:pointer;border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;transition:all .12s}.auc-quick button:hover{color:var(--fg);border-color:var(--line2)}.auc-bal{color:var(--fg-faint);font-size:12px}.auc-bal.low{color:#f6867a}.auc-note{color:var(--fg-soft);font-size:13px}.auc-bottom{gap:var(--s4);grid-template-columns:1fr 1fr;display:grid}.auc-panel{background:var(--elev);border:1px solid var(--line);border-radius:14px;min-width:0;padding:14px 16px}.auc-panel h3{font-family:var(--display);color:var(--fg-soft);margin-bottom:10px;font-size:13px;font-weight:700}.auc-chart{height:130px;margin-left:36px;position:relative}.auc-chart svg{width:100%;height:100%;display:block;overflow:visible}.auc-chart .mc-y{position:absolute;top:0;bottom:0;left:-36px}.auc-pt{background:var(--accent);width:6px;height:6px;box-shadow:0 0 0 2px var(--elev);border-radius:50%;margin:-3px 0 0 -3px;position:absolute}.auc-axis{color:var(--fg-faint);justify-content:space-between;margin:8px 0 0 36px;font-size:11px;display:flex}.auc-empty{color:var(--fg-faint);padding:8px 0;font-size:13px}.auc-feed{max-height:176px;margin:0;padding:0;list-style:none;overflow:auto}.auc-feed li{border-top:1px solid var(--line);align-items:center;gap:8px;padding:7px 0;font-size:13px;display:flex}.auc-feed li:first-child{border-top:0}.auc-feed .who{white-space:nowrap;text-overflow:ellipsis;flex:1;min-width:0;font-weight:500;overflow:hidden}.auc-feed .me .who{color:var(--accent)}.auc-feed .tag{letter-spacing:.03em;color:var(--accent-ink);background:var(--accent);border-radius:999px;padding:2px 7px;font-size:10.5px;font-weight:700}.auc-feed .amt{color:var(--r-l);font-variant-numeric:tabular-nums;font-weight:700}.auc-feed li:not(.top) .amt{color:color-mix(in oklab,var(--r-l) 70%,var(--fg-soft))}.auc-feed .when{color:var(--fg-faint);text-align:right;min-width:74px;font-size:11.5px}.auc,.auc-feed,.modal,.notif-panel{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}@keyframes auc-pulse{50%{opacity:.55}}@keyframes auc-live{0%{box-shadow:0 0 0 0 color-mix(in oklab,var(--accent) 55%,transparent)}70%{box-shadow:0 0 0 7px #0000}to{box-shadow:0 0 #0000}}@media (width<=760px){.auc-top,.auc-bottom{grid-template-columns:1fr}.auc-card{width:180px;margin:0 auto}}@media (prefers-reduced-motion:reduce){.auc-clock[data-u=crit] .auc-time,.auc-dot{animation:none}}.wc-wish svg,.wc-star svg,.wc-shiny svg{width:12px;height:12px;display:block}.pager-btn{align-items:center;gap:7px;display:inline-flex}.pager-btn svg{width:15px;height:15px}.modal-close .x-ico{width:16px;height:16px}.search-clear .x-ico{width:13px;height:13px}.toasts{z-index:2147483601;flex-direction:column;gap:10px;width:min(360px,100vw - 40px);display:flex;position:fixed;bottom:20px;right:20px}.toast{background:var(--elev2);border:1px solid var(--line2);color:var(--fg);cursor:pointer;border-radius:14px;align-items:flex-start;gap:12px;padding:14px 16px;animation:.25s toast-in;display:flex;box-shadow:0 20px 50px -20px #000}.toast svg{width:18px;height:18px;color:var(--accent);flex:none;margin-top:1px}.toast b{font-size:13.5px;font-weight:600;display:block}.toast span{color:var(--fg-soft);margin-top:2px;font-size:12.5px;line-height:1.4;display:block}@keyframes toast-in{0%{opacity:0;transform:translateY(8px)}}.kbd{border:1px solid var(--line2);background:var(--elev);min-width:22px;height:22px;font:600 11.5px/1 var(--body);color:var(--fg);border-bottom-width:2px;border-radius:6px;justify-content:center;align-items:center;padding:0 6px;display:inline-flex}.kbd-help-scrim{z-index:2147483601;background:#06080699;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}.kbd-help{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);flex-direction:column;gap:10px;min-width:300px;padding:22px 26px;display:flex}.kbd-help h3{font-family:var(--display);margin-bottom:4px;font-size:16px}.kbd-row{color:var(--fg-soft);align-items:center;gap:12px;font-size:13.5px;display:flex}.kbd-row .kbd{min-width:58px}@media (prefers-reduced-motion:reduce){.toast{animation:none}}";
+	if (!window.__wmMounted) {
+		window.__wmMounted = true;
+		initCapture();
 		try {
-			return localStorage.getItem(OFF_KEY) === "1";
-		} catch {
-			return false;
+			if (localStorage.getItem("wm-debug")) window.__wm = wm_exports;
+		} catch {}
+		const CORE = /^\/(pulls|collection|global-collection|marketplace)?\/?$/;
+		const isCore = () => CORE.test(location.pathname);
+		let instance = null;
+		let host = null;
+		let hideStyle = null;
+		function showOverlay() {
+			if (host) return;
+			host = document.createElement("div");
+			host.id = "wm-host";
+			document.body.appendChild(host);
+			const shadow = host.attachShadow({ mode: "open" });
+			const style = document.createElement("style");
+			style.textContent = app_default;
+			shadow.appendChild(style);
+			const root = document.createElement("div");
+			root.id = "wm-app-root";
+			shadow.appendChild(root);
+			hideStyle = document.createElement("style");
+			hideStyle.id = "wm-hide-real";
+			hideStyle.textContent = "html,body{margin:0;background:#0C0D0C}body>*:not(#wm-host){display:none !important}";
+			(document.head || document.documentElement).appendChild(hideStyle);
+			instance = mount(App, { target: root });
 		}
-	};
-	var reBtn = null;
-	function showReenable() {
-		if (reBtn) return;
-		reBtn = document.createElement("button");
-		reBtn.textContent = "WikiMasters +";
-		reBtn.style.cssText = "position:fixed;z-index:2147483600;right:16px;bottom:16px;padding:10px 15px;border-radius:999px;border:1px solid #333833;background:#141613;color:#3CCB8E;font:600 13px/1 system-ui,sans-serif;cursor:pointer;box-shadow:0 10px 28px -14px #000";
-		reBtn.onclick = () => {
+		function hideOverlay() {
+			if (instance) {
+				unmount(instance);
+				instance = null;
+			}
+			if (host) {
+				host.remove();
+				host = null;
+			}
+			if (hideStyle) {
+				hideStyle.remove();
+				hideStyle = null;
+			}
+		}
+		const OFF_KEY = "wm-off";
+		const overlayOff = () => {
 			try {
-				localStorage.removeItem(OFF_KEY);
-			} catch {}
-			location.reload();
+				return localStorage.getItem(OFF_KEY) === "1";
+			} catch {
+				return false;
+			}
 		};
-		document.body.appendChild(reBtn);
-	}
-	function removeReenable() {
-		if (reBtn) {
-			reBtn.remove();
-			reBtn = null;
+		let reBtn = null;
+		function showReenable() {
+			if (reBtn) return;
+			reBtn = document.createElement("button");
+			reBtn.textContent = "WikiMasters +";
+			reBtn.style.cssText = "position:fixed;z-index:2147483600;right:16px;bottom:16px;padding:10px 15px;border-radius:999px;border:1px solid #333833;background:#141613;color:#3CCB8E;font:600 13px/1 system-ui,sans-serif;cursor:pointer;box-shadow:0 10px 28px -14px #000";
+			reBtn.onclick = () => {
+				try {
+					localStorage.removeItem(OFF_KEY);
+				} catch {}
+				location.reload();
+			};
+			document.body.appendChild(reBtn);
 		}
-	}
-	function sync() {
-		if (overlayOff()) {
-			hideOverlay();
-			showReenable();
-			return;
+		function removeReenable() {
+			if (reBtn) {
+				reBtn.remove();
+				reBtn = null;
+			}
 		}
-		removeReenable();
-		if (isCore()) showOverlay();
-		else hideOverlay();
-	}
-	for (const m of ["pushState", "replaceState"]) {
-		const orig = history[m];
-		history[m] = function(...a) {
-			const r = orig.apply(this, a);
+		function sync() {
+			if (overlayOff()) {
+				hideOverlay();
+				showReenable();
+				return;
+			}
+			removeReenable();
+			if (isCore()) showOverlay();
+			else hideOverlay();
+		}
+		for (const m of ["pushState", "replaceState"]) {
+			const orig = history[m];
+			history[m] = function(...a) {
+				const r = orig.apply(this, a);
+				sync();
+				window.dispatchEvent(new Event("wm:route"));
+				return r;
+			};
+		}
+		window.addEventListener("popstate", () => {
 			sync();
 			window.dispatchEvent(new Event("wm:route"));
-			return r;
-		};
+		});
+		function start() {
+			sync();
+		}
+		if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+		else start();
 	}
-	window.addEventListener("popstate", () => {
-		sync();
-		window.dispatchEvent(new Event("wm:route"));
-	});
-	function start() {
-		sync();
-	}
-	if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
-	else start();
 })();

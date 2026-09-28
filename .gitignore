@@ -24,3 +24,7 @@ client-bundles/
 # Only ship the built userscript from dist, not regenerated assets
 wm-userscript/dist/*
 !wm-userscript/dist/wikimasters-app.user.js
+
+# Prod test screenshots
+wm-userscript/.prod-test/
+wm-userscript/.prod-profile/

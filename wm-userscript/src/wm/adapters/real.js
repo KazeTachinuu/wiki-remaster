@@ -1,271 +1,188 @@
 /**
- * Real adapter (wiki-masters.com). Calls the site's own /api/* with the live session and
- * reads the profile captured from the app's Supabase traffic (see ../api.js).
- *
- * Only verified endpoints are wired here. Unverified writes (listing, buy, cancel) route to
- * the native site from the components rather than guessing an endpoint. Wishlist writes are a
- * documented best-guess that fails safe (a rejection rolls the optimistic toggle back).
+ * Real adapter: wiki-masters.com's own /api with the live session.
+ * Every call here is verified against the live site (docs/API_REFERENCE.md).
  */
 
-import { json, postJson, getProfile, patchProfile, bumpEpoch, getUserId } from "../api.js";
+import { api, getProfile, patchProfile, bumpEpoch, getUserId, refreshProfile } from "../api.js";
 import { nCard, nAuction, nBid, nNotification, normSearch, countsFrom, validateCards } from "../schema.js";
 
-let ownedIds = new Set(); // to derive is_new on pack open
-let ownedLoaded = false; // true once the collection has been read at least once
+const PAGE = 50; // server page size; the market rejects limit > 50
+const PACK_CAP = 10;
+const REGEN_MS = 600000; // ponytail: assumed 1 pack / 10 min, the API does not expose the interval
+
+// Catalog ids already owned, to flag new cards on pack open.
+let ownedIds = null;
+
+const qs = (params) =>
+  new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== "" && v !== false)).toString();
+
+function mapCollection(rows) {
+  return rows.map((it) => {
+    const card = nCard(it.card);
+    return {
+      id: it.id, // user card id: what discard, bulk-discard and selling expect
+      card,
+      count: it.count ?? 1,
+      is_shiny: !!it.is_shiny,
+      starred: !!it.starred,
+      obtained_at: it.obtained_at || null,
+      _s: normSearch(card.title + " " + card.category),
+    };
+  });
+}
 
 export const RealData = {
   isReal: true,
   canReset: false,
-  canAct: true,
+  get userId() { return getUserId(); },
 
   async profile() {
-    // Everything here comes from the app's own sync_profile_packs call, captured at
-    // runtime. wikibidous_balance and packs_remaining are documented fields of that
-    // payload; there is no separate currency endpoint.
-    let balance = null;
-    try { balance = (await json("/api/wikibidous")).balance; } catch {}
-    const cap = getProfile() || {};
-    const packs = cap.packs_remaining ?? null;
-    // One pack regenerates every 10 minutes (cap 10). Compute the countdown from the
-    // last regen timestamp the profile provides.
-    let nextRegen = null;
-    if (packs != null && packs < 10 && cap.packs_last_regen_at) {
-      const last = Date.parse(cap.packs_last_regen_at);
-      if (!isNaN(last)) nextRegen = Math.max(0, Math.round((last + 600000 - Date.now()) / 1000));
-    }
+    if (getProfile()?.packs_remaining == null) await refreshProfile();
+    const p = getProfile() || {};
+    const balance = await api("/api/wikibidous").then((d) => d.balance, () => p.wikibidous_balance ?? null);
+    const packs = p.packs_remaining ?? null;
+    const last = Date.parse(p.packs_last_regen_at || "");
+    const regen = packs != null && packs < PACK_CAP && !isNaN(last);
     return {
-      username: cap.username || null,
+      username: p.username || null,
       packs_remaining: packs,
-      pack_cap: 10,
-      currency: balance ?? cap.wikibidous_balance ?? null,
-      next_regen_seconds: nextRegen,
-      is_pro: !!cap.is_pro,
+      pack_cap: PACK_CAP,
+      currency: balance,
+      next_regen_seconds: regen ? Math.max(0, Math.round((last + REGEN_MS - Date.now()) / 1000)) : null,
+      is_pro: !!p.is_pro,
     };
   },
 
   async openPack() {
-    // Know what was already owned before deciding which cards are new.
-    if (!ownedLoaded) {
-      try { await this.collection(); } catch {}
+    ownedIds ??= await this.collection().then((c) => new Set(c.items.map((it) => it.card.id)), () => null);
+    let d;
+    try {
+      d = await api("/api/packs/open", { method: "POST" });
+    } catch (e) {
+      if (e.data?.packs_remaining != null) { bumpEpoch(); patchProfile({ packs_remaining: e.data.packs_remaining }); }
+      if (e.data?.human_verification_required) e.code = "human_verification";
+      throw e;
     }
-    // Read the raw response so we can catch the human-verification challenge the server
-    // returns (the "are you still here?" Turnstile step) instead of a generic failure.
-    const r = await fetch("/api/packs/open", { method: "POST", credentials: "include" });
-    let d = {};
-    try { d = await r.json(); } catch {}
-    if (!r.ok || d.error) {
-      if (d.packs_remaining != null) {
-        bumpEpoch();
-        patchProfile({ packs_remaining: d.packs_remaining });
-      }
-      if (d.human_verification_required) {
-        const e = new Error("Vérification humaine requise");
-        e.code = "human_verification";
-        throw e;
-      }
-      throw new Error(d.error || "Ouverture du paquet impossible.");
-    }
+    bumpEpoch();
+    patchProfile({ packs_remaining: d.packs_remaining });
     const cards = (d.cards || []).map((c) => {
-      const isNew = ownedLoaded ? !ownedIds.has(c.id) : false;
-      ownedIds.add(c.id);
-      return { ...nCard(c), is_new: isNew, is_shiny: !!c.is_shiny };
+      const is_new = !!ownedIds && !ownedIds.has(c.id);
+      ownedIds?.add(c.id);
+      return { ...nCard(c), is_new, is_shiny: !!c.is_shiny };
     });
-    // Keep the captured pack count in sync so the wallet and Pulls counter decrement.
-    // Opening a pack is free, so currency is unchanged; report the last known balance.
-    if (d.packs_remaining != null) {
-      bumpEpoch(); // any sync already in flight is now stale for this field
-      patchProfile({ packs_remaining: d.packs_remaining });
-    }
-    let currency = null;
-    try { currency = (await json("/api/wikibidous")).balance; } catch {}
-    return { cards, packs_remaining: d.packs_remaining, currency: currency ?? getProfile()?.wikibidous_balance ?? null };
+    return { cards, packs_remaining: d.packs_remaining };
   },
 
-  async collection(opts = {}) {
-    // 50 per page, `limit` ignored. Show page 0 immediately via onPartial, then fill the
-    // remaining pages in parallel and report progress, so a slow API never blocks the grid.
-    const map = (arr) => arr.map((it) => {
-      const card = nCard(it.card);
-      return {
-        id: it.id, card, count: it.count ?? 1,
-        is_shiny: !!it.is_shiny, starred: !!it.starred, obtained_at: it.obtained_at || null,
-        _s: normSearch(card.title + " " + (card.category || "")),
-      };
-    });
-    const first = await json("/api/my-collection?sort=rarity&page=0&stats=1");
-    const total = first.total ?? null;
-    const realCounts = first.rarityCounts || null;
-    let items = map(first.collection || []);
-    const statsOf = (loading) => ({
-      unique: total ?? items.length,
-      total: items.reduce((n, it) => n + it.count, 0),
-      catalog: null,
-      counts: realCounts || countsFrom(items),
+  /**
+   * Every page of the collection (50 per page, `limit` ignored). Page 0 streams first via
+   * onPartial. Pages are merged by id: the server's rarity order has no tiebreak, so a card
+   * gained mid-load shifts rows and the same row can land on two pages.
+   */
+  async collection({ onPartial } = {}) {
+    const first = await api("/api/my-collection?sort=rarity&page=0&stats=1");
+    const rows = new Map();
+    const add = (list) => { for (const it of mapCollection(list || [])) rows.set(it.id, it); };
+    add(first.collection);
+    const items = () => [...rows.values()];
+    const total = first.total ?? rows.size;
+    const stats = (loading) => ({
+      unique: total,
+      total: items().reduce((n, it) => n + it.count, 0),
+      counts: first.rarityCounts || countsFrom(items()),
       loading,
     });
-    if (total && total > items.length) {
-      opts.onPartial?.({ items: items.slice(), stats: statsOf(true) });
-      const pages = Math.ceil(total / 50);
+    const pages = Math.ceil(total / PAGE);
+    if (pages > 1) {
+      onPartial?.({ items: items(), stats: stats(true) });
       await Promise.all(
         Array.from({ length: pages - 1 }, (_, i) =>
-          json(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`)
-            .then((d) => { items = items.concat(map(d.collection || [])); opts.onPartial?.({ items: items.slice(), stats: statsOf(true) }); })
-            .catch(() => {})
+          api(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`).then((d) => {
+            add(d.collection);
+            onPartial?.({ items: items(), stats: stats(true) });
+          })
         )
       );
     }
-    ownedIds = new Set(items.map((it) => it.card.id));
-    ownedLoaded = true;
-    return { items, stats: statsOf(false) };
+    ownedIds = new Set(items().map((it) => it.card.id));
+    return { items: items(), stats: stats(false) };
   },
 
-  async cards() {
-    const d = await json("/api/cards?page=0&sort=rarity");
-    return { cards: (d.cards || d.items || []).map(nCard) };
-  },
-
-  // Catalog: the full master set. Verified live shape (RSC-fetched):
-  //   /api/cards?page&sort&q -> { cards[], total, searchHasMore, rarityCounts,
-  //     ownedCardIds[], wishlistCardIds[], friendOwners{}, friendPendingOfferKeys[] }
-  // total is null when q is present; searchHasMore drives pagination. 50 cards/page.
-  // MUST stay server-paged/searched: the catalog is ~2.77M rows, never load-all.
-  // Only sort=rarity is confirmed live; other sort values are gated until probed.
-  async catalog(opts = {}) {
-    const page = opts.page ?? 0;
-    const sort = opts.sort || "rarity"; // verified sorts: rarity | name | atk | def
-    const q = opts.q ? `&q=${encodeURIComponent(opts.q)}` : "";
-    const rarity = opts.rarity ? `&rarity=${opts.rarity}` : ""; // verified param
-    const wishlist = opts.wishlist ? "&wishlist=1" : ""; // verified param
-    const d = await json(`/api/cards?page=${page}&sort=${sort}${q}${rarity}${wishlist}`);
-    const owned = new Set(d.ownedCardIds || []);
-    const wish = new Set(d.wishlistCardIds || []);
-    const friends = d.friendOwners || {};
-    const cards = (d.cards || []).map((c) => ({
-      ...nCard(c),
-      owned: owned.has(c.id),
-      wishlisted: wish.has(c.id),
-      friendCount: Array.isArray(friends[c.id]) ? friends[c.id].length : 0,
-    }));
+  /** The full catalog (~2.77M cards): always server-paged and searched. Pages are 0-based. */
+  async catalog({ page = 0, sort = "rarity", q, rarity, wishlist } = {}) {
+    const d = await api(`/api/cards?${qs({ page, sort, q, rarity, wishlist: wishlist && 1 })}`);
+    const owned = new Set(d.ownedCardIds);
+    const wished = new Set(d.wishlistCardIds);
+    const cards = (d.cards || []).map((c) => ({ ...nCard(c), owned: owned.has(c.id), wishlisted: wished.has(c.id) }));
     validateCards("catalog", cards);
     return { cards, total: d.total ?? null, hasMore: !!d.searchHasMore, rarityCounts: d.rarityCounts || null };
   },
 
-  // Marketplace browse. Verified live shape (2026-09-27):
-  //   /api/marketplace?page&q -> { auctions[], page, limit, hasMore }, open to all.
-  async marketplace(opts = {}) {
-    const page = opts.page ?? 0;
-    const q = opts.q ? `&q=${encodeURIComponent(opts.q)}` : "";
-    const rarity = opts.rarity ? `&rarity=${opts.rarity}` : ""; // verified filter
-    const d = await json(`/api/marketplace?page=${page}${q}${rarity}`);
-    return { auctions: (d.auctions || []).map(nAuction), page: d.page ?? page, hasMore: !!d.hasMore };
+  /** Market browse. Pages are 1-based on the server (page=0 aliases page 1); ours are 0-based. */
+  async marketplace({ page = 0, sort = "recent", q, rarity } = {}) {
+    const d = await api(`/api/marketplace?${qs({ page: page + 1, limit: PAGE, sort, q, rarity })}`);
+    return { auctions: (d.auctions || []).map(nAuction), hasMore: !!d.hasMore };
   },
 
-  // Verified: returns ONLY { sellingCount, maxConcurrentAuctions } (5 free / 10 PRO).
-  async marketplaceMine() {
-    try { return await json("/api/marketplace/mine"); }
-    catch { return { sellingCount: 0, maxConcurrentAuctions: 5 }; }
+  /** My market: listings, active bids, wins, and finished history, in one call. */
+  async myMarket() {
+    const d = await api("/api/marketplace?page=1&limit=1&mine=1");
+    const list = (k) => (d[k] || []).map(nAuction);
+    return { selling: list("selling"), bidding: list("bidding"), won: list("won"), history: list("history"), max: d.maxConcurrentAuctions ?? 5 };
   },
 
-  // Create a listing for one owned card. VERIFIED live (2026-09-27) by capturing the real
-  // request from the native sell form:
-  //   POST /api/marketplace  { card_id, base_amount, duration_minutes }
-  // (card_id is the catalog card id; base_amount is the starting price; duration is minutes.)
-  // Fails safe: a non-2xx throws with the server's message so the caller shows the error.
-  async createAuction(item, { price, durationHours } = {}) {
-    const r = await fetch(`/api/marketplace`, {
-      method: "POST", credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ card_id: item.card?.id, base_amount: price, duration_minutes: Math.round((durationHours || 0) * 60) }),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) { const e = new Error(d.error || "Mise en vente refusée."); e.code = d.code; throw e; }
-    return d;
-  },
-
-  // Place a bid. Verified live (2026-09-27):
-  //   POST /api/marketplace/{auctionId}/bid  { amount }
-  //   200 -> { auction_id, current_bid, bidder_balance }
-  //   409 -> { error, code:"bid_too_low", min }
-  async placeBid(auctionId, amount) {
-    const r = await fetch(`/api/marketplace/${auctionId}/bid`, {
-      method: "POST", credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ amount }),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) { const e = new Error(d.error || "Enchère refusée."); e.code = d.code; e.min = d.min; throw e; }
-    return d; // { auction_id, current_bid, bidder_balance }
-  },
-
-  // One auction with live state + bid history. Verified: GET /api/marketplace/{id}
-  //   -> { auction:{...}, bids:[{ amount, placed_at, bidder{username} }] }
   async auction(id) {
-    const d = await json(`/api/marketplace/${id}`);
-    return { ...nAuction(d.auction || {}), bids: (d.bids || []).map(nBid) };
+    const d = await api(`/api/marketplace/${id}`);
+    return { ...nAuction(d.auction), bids: (d.bids || []).map(nBid) };
   },
 
-  // Our own user id (captured from the app's Supabase calls), to tell if we are top bidder.
-  get userId() { return getUserId(); },
+  /** List an owned copy. `card_id` is the user card id, not the catalog id. Returns { auction_id }. */
+  createAuction: (item, { price, durationHours }) =>
+    api("/api/marketplace", { method: "POST", body: { card_id: item.id, base_amount: price, duration_minutes: Math.round(durationHours * 60) } }),
 
-  // Wishlist writes are UNVERIFIED (no endpoint in the client bundle; only the read field
-  // wishlistCardIds is live). Best-guess REST, fail safe: a rejection throws so the caller
-  // rolls the toggle back and shows an error rather than lying about success.
-  wishlistAdd: (cardId) => postJson(`/api/cards/${cardId}/wishlist`, {}),
-  wishlistRemove: (cardId) => json(`/api/cards/${cardId}/wishlist`, { method: "DELETE" }),
+  /** 409 bid_too_low carries `min`. The amount is held from the balance immediately. */
+  placeBid: (id, amount) => api(`/api/marketplace/${id}/bid`, { method: "POST", body: { amount } }),
 
-  async notifications() {
-    try {
-      const d = await json("/api/notifications");
-      return (d.notifications || []).map(nNotification);
-    } catch { return []; }
-  },
+  /** Lower the starting price. Only below the current base, and only past half the duration. */
+  reprice: (id, amount) => api(`/api/marketplace/${id}/reprice`, { method: "POST", body: { new_base_amount: amount } }),
 
-  // Verified writes only: discard and bid. Listing/buy/cancel/wishlist are not verified,
-  // so they route to the native site (see the components) instead of guessing an endpoint.
-  discard: (ucId) => postJson(`/api/user-cards/${ucId}/discard`, {}),
+  /** Cancel my listing; the card returns to the collection. */
+  cancelAuction: (id) => api(`/api/marketplace/${id}`, { method: "DELETE" }),
 
-  // Market price source. VERIFIED live (2026-09-28) from the native client:
-  //   GET /api/marketplace/cards/{cardId}/sales?scope=summary
-  //     -> { summary: { <rarity>: { average } }, isPro } - an average available to EVERYONE.
-  //   GET /api/marketplace/cards/{cardId}/sales (full)
-  //     -> { sales: [{ final_price, settled_at }] } - Pro only (detailed history + chart).
-  // So the estimated value works for non-Pro accounts too (summary average); only the
-  // detailed sold-price chart is Pro-gated. Returns { soldAvg, soldSeries, ..., isPro }.
+  /** Finalize an ended auction. */
+  settle: (id) => api(`/api/marketplace/${id}/settle`, { method: "POST" }),
+
+  /**
+   * Price data. The summary average is open to everyone and keyed by rarity (a card's rarity
+   * can change; old sales keep theirs). The full sale history is Pro-only (403 pro_required).
+   */
   async marketStats(card) {
-    let d;
-    try {
-      const r = await fetch(`/api/marketplace/cards/${card.id}/sales?scope=summary`, { credentials: "include" });
-      d = await r.json().catch(() => ({}));
-      if (!r.ok) return null;
-    } catch { return null; }
-    const avg = d.summary?.[card.rarity]?.average ?? null;
-    const stats = {
-      soldAvg: avg, soldCount: 0, soldMin: null, soldMax: null,
-      soldSeries: [], activeCount: 0, lowestAsk: null, isPro: !!d.isPro,
-    };
-    if (avg == null && !d.isPro) return null; // nothing to show for this card
-    if (!d.isPro) return stats; // non-Pro: average only, no detailed history
-    // Pro: fetch the full sold history for the chart.
-    try {
-      const r2 = await fetch(`/api/marketplace/cards/${card.id}/sales`, { credentials: "include" });
-      const d2 = await r2.json().catch(() => ({}));
-      const sales = r2.ok && Array.isArray(d2.sales) ? d2.sales : [];
-      const priced = sales.filter((s) => s.final_price != null);
-      const prices = priced.map((s) => s.final_price);
-      stats.soldSeries = priced.map((s) => ({ price: s.final_price, t: Date.parse(s.settled_at || "") || 0 })).sort((a, b) => a.t - b.t);
-      stats.soldCount = prices.length;
-      stats.soldMin = prices.length ? Math.min(...prices) : null;
-      stats.soldMax = prices.length ? Math.max(...prices) : null;
-      if (avg == null && prices.length) stats.soldAvg = Math.round(prices.reduce((s, x) => s + x, 0) / prices.length);
-    } catch {}
+    const d = await api(`/api/marketplace/cards/${card.id}/sales?scope=summary`);
+    const stats = { soldAvg: d.summary?.[card.rarity]?.average ?? null, soldSeries: [], soldCount: 0, soldMin: null, soldMax: null, isPro: !!d.isPro };
+    if (!d.isPro) return stats;
+    const sales = (await api(`/api/marketplace/cards/${card.id}/sales`).catch(() => ({}))).sales || [];
+    const series = sales
+      .filter((s) => s.final_price != null)
+      .map((s) => ({ price: s.final_price, t: Date.parse(s.settled_at || "") || 0 }))
+      .sort((a, b) => a.t - b.t);
+    const prices = series.map((s) => s.price);
+    if (prices.length) {
+      Object.assign(stats, { soldSeries: series, soldCount: prices.length, soldMin: Math.min(...prices), soldMax: Math.max(...prices) });
+      stats.soldAvg ??= Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
+    }
     return stats;
   },
 
-  async specialAvailable() {
-    // Native special/Pro pack: surface it so it is never hidden by our overlay.
-    try {
-      const d = await json("/api/packs/special");
-      return !!(d && (d.available || (d.packs || []).length));
-    } catch { return false; }
-  },
+  notifications: () => api("/api/notifications").then((d) => (d.notifications || []).map(nNotification)),
+
+  /** Mark notifications read; no ids marks all. */
+  markRead: (ids) => api("/api/notifications", { method: "PATCH", body: ids ? { ids } : {} }),
+
+  /** +1 WikiBidou per card. Returns { balance }. */
+  discard: (userCardId) => api(`/api/user-cards/${userCardId}/discard`, { method: "POST" }),
+
+  /** Returns { discarded_count, failed[] }. */
+  bulkDiscard: (userCardIds) => api("/api/user-cards/bulk-discard", { method: "POST", body: { card_ids: userCardIds } }),
+
+  /** A native special/Pro pack is claimable (opened on the native site). */
+  specialAvailable: () => api("/api/packs/special").then((d) => !!d.available, () => false),
 };

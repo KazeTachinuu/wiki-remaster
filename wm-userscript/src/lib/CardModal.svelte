@@ -1,8 +1,12 @@
 <script>
   import Card from "./Card.svelte";
+  import Icon from "./Icon.svelte";
   import { data, RNAME, marketValueFor } from "../wm/index.js";
   import { settings } from "./settings.svelte.js";
-  let { item, onclose, onaction, readonly = false, wishlisted = false, onwishlist = null, extra = null } = $props();
+  import { nf } from "./format.js";
+
+  // `item` is an owned copy ({ id, card, count, ... }), or { card } when `readonly`.
+  let { item, onclose, onaction, readonly = false } = $props();
   const c = $derived(item.card);
 
   let tab = $state("details");
@@ -10,127 +14,97 @@
   let sumState = $state(item.card.summary ? "done" : "loading");
   let market = $state(null);
   let marketState = $state("idle");
-  let mval = $state(null); // estimated market value, shown inline in Détails
+  let mval = $state(null);
 
   let confirmDiscard = $state(false);
+  let sellOpen = $state(false);
   let busy = $state(false);
   let done = $state(false);
   let msg = $state("");
   let msgOk = $state(false);
   let modalEl;
 
-  async function loadSummary() {
-    if (c.summary) return;
-    try {
-      const r = await fetch("https://fr.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(c.title), { headers: { Accept: "application/json" } });
-      if (r.ok) summary = (await r.json()).extract || "";
-    } catch {}
-    sumState = summary ? "done" : "none";
+  // Cards from a pack or the catalog may lack the article extract: fetch it from Wikipedia.
+  if (!c.summary) {
+    fetch("https://fr.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(c.title))
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((d) => (summary = d.extract || ""), () => {})
+      .finally(() => (sumState = summary ? "done" : "none"));
   }
-  loadSummary();
-  marketValueFor(c).then((v) => (mval = v)).catch(() => {});
+  marketValueFor(c).then((v) => (mval = v));
 
-  async function loadMarket() {
-    if (marketState !== "idle") return;
+  $effect(() => {
+    if (tab !== "market" || marketState !== "idle") return;
     marketState = "loading";
-    try {
-      market = await data.marketStats(c);
-      marketState = market ? "done" : "error";
-    } catch { marketState = "error"; }
-  }
-  $effect(() => { if (tab === "market") loadMarket(); });
+    data.marketStats(c).then((m) => { market = m; marketState = "done"; }, () => (marketState = "error"));
+  });
 
-  // In-app listing. The create endpoint is a best guess (see data.createAuction), so it
-  // fails safe: on any server rejection we surface the error and reveal a one-click native
-  // fallback rather than pretend the card was listed.
   const DURATIONS = [1, 3, 6, 12, 24, 48, 72];
-  let sellOpen = $state(false);
   let price = $state("");
   let durationH = $state(24);
-  let sellErr = $state(false);
+
   function openSell() {
-    sellOpen = true; sellErr = false; msg = "";
-    if (!price) price = mval != null ? String(mval) : "";
+    sellOpen = true;
+    msg = "";
+    if (!price && mval != null) price = String(mval);
   }
-  async function sell() {
-    const p = Math.round(Number(price));
-    if (!(p > 0)) { flash("Entrez un prix de départ valide."); return; }
-    busy = true; msg = ""; sellErr = false;
+
+  async function act(action, okMsg) {
+    busy = true;
+    msg = "";
     try {
-      await data.createAuction(item, { price: p, durationHours: durationH });
+      await action();
       onaction?.();
-      done = true; msgOk = true; msg = "Carte mise en vente.";
+      done = true;
+      msgOk = true;
+      msg = okMsg;
     } catch (e) {
-      busy = false; sellErr = true; flash(e?.message || "La mise en vente a échoué.");
+      msgOk = false;
+      msg = e.message;
     }
+    busy = false;
   }
-  function sellNative() { try { localStorage.setItem("wm-off", "1"); } catch {} location.assign("/collection"); }
-  async function discard() {
-    busy = true; msg = "";
-    try {
-      await data.discard(item.id);
-      onaction?.();
-      done = true; msgOk = true; msg = "Carte défaussée. +1 point.";
-    } catch { flash("La défausse a échoué."); busy = false; }
-  }
-  function flash(m) { msg = m; msgOk = false; }
+  const sell = () => act(() => data.createAuction(item, { price: Math.round(Number(price)), durationHours: durationH }), "Carte mise en vente.");
+  const discard = () => act(() => data.discard(item.id), "Carte défaussée. +1 point.");
 
   function onKey(e) {
-    if (e.key === "Escape") { onclose?.(); return; }
-    if (e.key === "Tab" && modalEl) {
-      const f = [...modalEl.querySelectorAll('a[href],button:not([disabled]),input,[tabindex]:not([tabindex="-1"])')].filter((el) => el.offsetParent !== null);
-      if (!f.length) return;
-      const first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    }
+    if (e.key === "Escape") return onclose?.();
+    if (e.key !== "Tab" || !modalEl) return;
+    // Keep focus inside the dialog.
+    const f = [...modalEl.querySelectorAll('a[href],button:not([disabled]),input,[tabindex]:not([tabindex="-1"])')].filter((el) => el.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f.at(-1);
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }
-  const nf = (n) => (n == null ? "-" : n.toLocaleString("fr"));
-  const fmtDate = (s) => {
-    const d = new Date(s);
-    return isNaN(d.getTime()) ? "" : d.toLocaleDateString("fr", { day: "numeric", month: "long", year: "numeric" });
-  };
-  const obtainedLabel = $derived(item.obtained_at ? fmtDate(item.obtained_at) : "");
 
-  // Sold-price history: Y = sale price, X = time (oldest to most recent). Only shown
-  // when there are at least two real sales.
-  const dshort = (t) => { if (!t) return ""; try { return new Date(t).toLocaleDateString("fr", { day: "numeric", month: "short" }); } catch { return ""; } };
-  let chart = $derived.by(() => {
+  const obtained = $derived(item.obtained_at ? new Date(item.obtained_at).toLocaleDateString("fr", { day: "numeric", month: "long", year: "numeric" }) : "");
+  const dshort = (t) => (t ? new Date(t).toLocaleDateString("fr", { day: "numeric", month: "short" }) : "");
+
+  // Sold price over time (Pro only), from at least two sales.
+  const chart = $derived.by(() => {
     const s = market?.soldSeries;
     if (!s || s.length < 2) return null;
     const prices = s.map((p) => p.price);
     const min = Math.min(...prices), max = Math.max(...prices), span = max - min || 1;
     const W = 100, H = 40, pad = 3;
-    const pts = s.map((p, i) => [
-      pad + (i / (s.length - 1)) * (W - 2 * pad),
-      pad + (1 - (p.price - min) / span) * (H - 2 * pad),
-    ]);
+    const pts = s.map((p, i) => [pad + (i / (s.length - 1)) * (W - 2 * pad), pad + (1 - (p.price - min) / span) * (H - 2 * pad)]);
     const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-    return {
-      d,
-      area: d + ` L${pts[pts.length-1][0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`,
-      min, max, first: dshort(s[0].t), last: dshort(s[s.length-1].t),
-    };
+    return { d, area: `${d} L${pts.at(-1)[0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`, min, max, first: dshort(s[0].t), last: dshort(s.at(-1).t) };
   });
 
-  // Lock background scroll while the modal is open.
   $effect(() => {
     const html = document.documentElement;
     const prev = html.style.overflow;
     html.style.overflow = "hidden";
     return () => { html.style.overflow = prev; };
   });
-
-  // Move focus into the dialog on open, restore it to the trigger on close.
-  // The trigger card can be detached by a grid reload (discard/auction), so guard on isConnected.
+  // Focus the dialog on open; give focus back to the trigger on close (if still in the DOM).
   $effect(() => {
     const trigger = document.activeElement;
     modalEl?.focus();
     return () => { if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus(); };
   });
-
-  // Auto-close shortly after a successful auction, with the timer owned by the effect
-  // so it is cleared if the modal unmounts first.
   $effect(() => {
     if (!done) return;
     const t = setTimeout(() => onclose?.(), 1000);
@@ -141,30 +115,27 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="modal-backdrop" onclick={() => onclose?.()} role="presentation">
-  <!-- svelte-ignore a11y_click_events_have_key_events -- Escape closes and focus is trapped; this click only stops backdrop close -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-modal-title" tabindex="-1" bind:this={modalEl} onclick={(e) => e.stopPropagation()}>
-    <button class="modal-close" onclick={() => onclose?.()} aria-label="Fermer"><svg class="x-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-
+    <button class="modal-close" onclick={() => onclose?.()} aria-label="Fermer"><Icon name="close" width={2} class="x-ico" /></button>
     <div class="modal-card"><Card card={c} big caption={false} count={item.count} shiny={item.is_shiny} starred={item.starred} /></div>
-
     <div class="modal-info">
       <span class="modal-rar" data-r={c.rarity}>{RNAME[c.rarity] || c.rarity}</span>
       <h2 class="modal-name" id="wm-modal-title">{c.title}</h2>
       {#if c.category}<div class="modal-cat">{c.category}</div>{/if}
 
       <div class="modal-tabs" role="tablist" aria-label="Détails de la carte">
-        <button role="tab" id="wm-tab-details" aria-selected={tab === "details"} aria-controls="wm-panel-details" class:on={tab === "details"} onclick={() => (tab = "details")}>Détails</button>
-        <button role="tab" id="wm-tab-market" aria-selected={tab === "market"} aria-controls="wm-panel-market" class:on={tab === "market"} onclick={() => (tab = "market")}>Marché</button>
+        <button role="tab" aria-selected={tab === "details"} class:on={tab === "details"} onclick={() => (tab = "details")}>Détails</button>
+        <button role="tab" aria-selected={tab === "market"} class:on={tab === "market"} onclick={() => (tab = "market")}>Marché</button>
       </div>
 
       {#if tab === "details"}
-        <div id="wm-panel-details" role="tabpanel" aria-labelledby="wm-tab-details" class="modal-panel">
+        <div role="tabpanel" class="modal-panel">
           {#if sumState === "loading"}
             <p class="modal-sum muted">Chargement du résumé...</p>
           {:else if summary}
             <p class="modal-sum">{summary}</p>
           {/if}
-
           <div class="facts">
             {#if mval != null}<div class="fact"><div class="fk">Valeur estimée</div><div class="fv val">{nf(mval)} pts</div></div>{/if}
             {#if !readonly}<div class="fact"><div class="fk">Exemplaires</div><div class="fv">{item.count}{#if item.is_shiny} · brillante{/if}</div></div>{/if}
@@ -174,21 +145,12 @@
               <div class="fact"><div class="fk">Défense</div><div class="fv def">{nf(c.def)}</div></div>
             {/if}
           </div>
-          {#if obtainedLabel}<div class="modal-obtained">Obtenue le {obtainedLabel}</div>{/if}
-
+          {#if obtained}<div class="modal-obtained">Obtenue le {obtained}</div>{/if}
           {#if c.wikipedia_url}
             <a class="modal-wiki" href={c.wikipedia_url} target="_blank" rel="noopener noreferrer">Voir l'article Wikipédia</a>
           {/if}
 
-          {#if onwishlist}
-            <button class="btn wish-btn" class:on={wishlisted} onclick={onwishlist}>
-              <svg viewBox="0 0 24 24" fill={wishlisted ? "currentColor" : "none"} stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 20.5S3.5 14.7 3.5 9.2A4.2 4.2 0 0 1 12 6.5a4.2 4.2 0 0 1 8.5 2.7c0 5.5-8.5 11.3-8.5 11.3z"/></svg>
-              {wishlisted ? "Dans la liste de souhaits" : "Ajouter à la liste de souhaits"}
-            </button>
-          {/if}
-          {#if extra}{@render extra()}{/if}
-
-          {#if data.canAct && !readonly && !done}
+          {#if !readonly && !done}
             {#if confirmDiscard}
               <div class="confirm">
                 <div class="confirm-text">Défausser cette carte contre <b>1 point</b> ?</div>
@@ -200,20 +162,16 @@
             {:else if sellOpen}
               <div class="sell2">
                 <div class="sell2-head">Mettre en vente</div>
-
                 <div class="sell2-block">
                   <div class="sell2-lab">
                     <span>Prix de départ</span>
-                    {#if mval != null}
-                      <button type="button" class="sell2-suggest" onclick={() => (price = String(mval))}>Estimé {nf(mval)}</button>
-                    {/if}
+                    {#if mval != null}<button type="button" class="sell2-suggest" onclick={() => (price = String(mval))}>Estimé {nf(mval)}</button>{/if}
                   </div>
                   <div class="af-input-row">
                     <input class="af-input" type="number" min="1" step="1" inputmode="numeric" bind:value={price} placeholder="0" />
                     <span class="af-unit">pts</span>
                   </div>
                 </div>
-
                 <div class="sell2-block">
                   <div class="sell2-lab"><span>Durée de l'enchère</span></div>
                   <div class="sell2-durs">
@@ -222,15 +180,10 @@
                     {/each}
                   </div>
                 </div>
-
                 <div class="af-actions">
                   <button class="btn" disabled={busy} onclick={() => (sellOpen = false)}>Annuler</button>
-                  <button class="btn primary" disabled={busy || !(Number(price) > 0)} onclick={sell}>{busy ? "Mise en vente..." : "Mettre en vente"}</button>
+                  <button class="btn primary" disabled={busy || !(Number(price) >= 1)} onclick={sell}>{busy ? "Mise en vente..." : "Mettre en vente"}</button>
                 </div>
-
-                {#if sellErr}
-                  <button type="button" class="sell-fallback" onclick={sellNative}>Le marché a refusé la vente. Vendre sur le site officiel ?</button>
-                {/if}
               </div>
             {:else}
               <div class="actions">
@@ -239,11 +192,10 @@
               </div>
             {/if}
           {/if}
-
           <div class="modal-credit">Texte de l'article sous licence CC BY-SA 4.0</div>
         </div>
       {:else}
-        <div id="wm-panel-market" role="tabpanel" aria-labelledby="wm-tab-market" class="modal-panel">
+        <div role="tabpanel" class="modal-panel">
           {#if marketState === "loading"}
             <p class="modal-sum muted">Analyse du marché...</p>
           {:else if marketState === "error"}
@@ -254,6 +206,8 @@
                 <div class="ma-label">Prix moyen du marché</div>
                 <div class="ma-value">{nf(market.soldAvg)} <span>pts</span></div>
               </div>
+            {:else}
+              <p class="modal-sum muted">Aucune vente enregistrée pour cette carte.</p>
             {/if}
             {#if chart}
               <div class="market-chart">
@@ -276,16 +230,12 @@
                 <div class="mstat"><div class="l">Ventes</div><div class="v">{market.soldCount}</div></div>
               </div>
             {/if}
-            {#if market.soldAvg == null && !market.soldCount}
-              <p class="modal-sum muted">Aucune vente enregistrée pour cette carte.</p>
-            {/if}
             {#if !market.isPro}
               <div class="rarity-note">Historique détaillé des ventes réservé aux membres Pro. La moyenne reste visible.</div>
             {/if}
           {/if}
         </div>
       {/if}
-
       {#if msg}<div class="modal-msg" class:ok={msgOk}>{msg}</div>{/if}
     </div>
   </div>

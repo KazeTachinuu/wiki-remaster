@@ -1,8 +1,9 @@
 <script>
+  import Icon from "./Icon.svelte";
   import { settings } from "./settings.svelte.js";
+  import { nf } from "./format.js";
   let { card, count = 1, isNew = false, shiny = false, starred = false, value = undefined,
         owned = true, wishlisted = false, big = false, caption = true } = $props();
-  const nf = (n) => Number(n).toLocaleString("fr");
   let hasValue = $derived(typeof value === "number");
   // Blur images flagged nsfw_image when the viewer keeps sensitive content hidden (our
   // substitution for the game's server-side blurredCardIds; matches the real "grid blurs").
@@ -51,9 +52,9 @@
   <div class="wc-top">
     <span class="wc-rtag" data-r={card.rarity}>{card.rarity}</span>
     <span class="wc-flags">
-      {#if wishlisted}<span class="wc-wish" title="Liste de souhaits" aria-label="Liste de souhaits"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 20.5S3.5 14.7 3.5 9.2A4.2 4.2 0 0 1 12 6.5a4.2 4.2 0 0 1 8.5 2.7c0 5.5-8.5 11.3-8.5 11.3z"/></svg></span>{/if}
-      {#if starred}<span class="wc-star" title="Favori" aria-label="Favori"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg></span>{/if}
-      {#if shiny}<span class="wc-shiny" title="Brillante" aria-label="Brillante"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 6.4L20 10l-6.1 1.6L12 18l-1.9-6.4L4 10l6.1-1.6z"/></svg></span>{/if}
+      {#if wishlisted}<span class="wc-wish" title="Liste de souhaits" aria-label="Liste de souhaits"><Icon name="heart" filled width={0} /></span>{/if}
+      {#if starred}<span class="wc-star" title="Favori" aria-label="Favori"><Icon name="star" filled width={0} /></span>{/if}
+      {#if shiny}<span class="wc-shiny" title="Brillante" aria-label="Brillante"><Icon name="sparkle" filled width={0} /></span>{/if}
       {#if count > 1}<span class="wc-count">x{count}</span>{/if}
       {#if isNew}<span class="wc-new">Nouvelle</span>{/if}
     </span>

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { createQueue } from "./queue.js";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));

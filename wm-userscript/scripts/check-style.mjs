@@ -22,6 +22,8 @@ const BANNED = {
   "♥": "heart glyph (use an SVG icon)",
   "♡": "heart glyph (use an SVG icon)",
   "✦": "sparkle glyph (use an SVG icon)",
+  "✓": "check glyph (use an SVG icon)",
+  "✔": "check glyph (use an SVG icon)",
   "✧": "sparkle glyph (use an SVG icon)",
   "“": "smart quote (use \")",
   "”": "smart quote (use \")",

@@ -1,10 +1,17 @@
 import { mount, unmount } from "svelte";
 import App from "./App.svelte";
 import appCss from "./app.css?inline";
-import { initCapture } from "./wm/index.js";
+import * as wm from "./wm/index.js";
+
+// One copy per page: the prod test injects a local build next to an installed one.
+if (!window.__wmMounted) {
+window.__wmMounted = true;
 
 // Patch fetch early (document-start) so we can read the app's own profile call.
-initCapture();
+wm.initCapture();
+
+// Test hook for scripts/prod-test.mjs: exposes the domain layer only when opted in.
+try { if (localStorage.getItem("wm-debug")) window.__wm = wm; } catch {}
 
 // We only take over the core routes; every other route falls back to the real app.
 const CORE = /^\/(pulls|collection|global-collection|marketplace)?\/?$/;
@@ -89,3 +96,4 @@ window.addEventListener("popstate", () => {
 function start() { sync(); }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
 else start();
+}

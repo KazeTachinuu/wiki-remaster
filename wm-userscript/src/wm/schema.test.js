@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { normSearch, nCard, nAuction, nBid, notifHref, countsFrom, validateCards, RNAME } from "./schema.js";
 
 describe("normSearch", () => {

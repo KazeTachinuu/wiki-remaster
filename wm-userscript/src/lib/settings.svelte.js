@@ -1,27 +1,36 @@
-// Global, persisted UI preferences. A .svelte.js module so runes work and any
-// component importing `settings` reacts to changes.
+// Persisted UI preferences: display toggles plus each screen's last sort, filter and tab.
+// Any change is saved automatically.
 const KEY = "wm-settings";
 
+const DEFAULTS = {
+  hideStats: false, // hide ATK/DEF everywhere
+  hideSensitive: true, // blur images flagged nsfw_image until revealed
+  collection: { sort: "rarity", filter: "ALL", favOnly: false, shinyOnly: false },
+  catalog: { sort: "rarity", rarity: "", wishOnly: false },
+  market: { tab: "browse", sort: "recent", rarity: "" },
+};
+
 function load() {
-  try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { return {}; }
+  try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
 }
 
-export const settings = $state({
-  hideStats: false, // hide ATK/DEF everywhere (the user does not care about them)
-  hideSensitive: true, // blur images flagged nsfw_image until the viewer reveals them
-  ...load(),
+const saved = load();
+export const settings = $state(
+  Object.fromEntries(Object.entries(DEFAULTS).map(([k, v]) => [k, typeof v === "object" ? { ...v, ...saved[k] } : saved[k] ?? v]))
+);
+
+$effect.root(() => {
+  $effect(() => {
+    const json = JSON.stringify(settings); // reads every field, so any change re-saves
+    try { localStorage.setItem(KEY, json); } catch {}
+  });
 });
 
-function persist() {
-  try { localStorage.setItem(KEY, JSON.stringify({ hideStats: settings.hideStats, hideSensitive: settings.hideSensitive })); } catch {}
-}
+export const toggleHideStats = () => (settings.hideStats = !settings.hideStats);
+export const toggleHideSensitive = () => (settings.hideSensitive = !settings.hideSensitive);
 
-export function toggleHideStats() {
-  settings.hideStats = !settings.hideStats;
-  persist();
-}
-
-export function toggleHideSensitive() {
-  settings.hideSensitive = !settings.hideSensitive;
-  persist();
+/** Switch back to the native site (the overlay stays off until re-enabled). */
+export function useOriginalSite(path) {
+  try { localStorage.setItem("wm-off", "1"); } catch {}
+  path ? location.assign(path) : location.reload();
 }
