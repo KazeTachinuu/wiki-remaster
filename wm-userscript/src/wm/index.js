@@ -31,7 +31,7 @@ export async function marketValueFor(card) {
   if (marketCache.has(card.id)) return marketCache.get(card.id);
   try {
     const s = await data.marketStats(card);
-    const v = s && !s.proRequired ? (s.soldAvg ?? s.lowestAsk ?? null) : null;
+    const v = s ? (s.soldAvg ?? s.lowestAsk ?? null) : null;
     marketCache.set(card.id, v); // cache a legitimately derived value (incl. a real null)
     return v;
   } catch {

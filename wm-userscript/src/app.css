@@ -415,8 +415,10 @@
 .sell2-dur.on{background:color-mix(in oklab,var(--accent) 16%,transparent);border-color:var(--accent);color:var(--accent)}
 .sell-fallback{background:none;border:none;padding:0;color:var(--fg-soft);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;text-decoration:underline}
 .sell-fallback:hover{color:var(--fg)}
-.market-pro{display:flex;flex-direction:column;gap:6px}
-.mp-title{font-family:var(--display);font-weight:700;font-size:13px;color:var(--fg-soft)}
+.market-avg{background:var(--elev);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.market-avg .ma-label{font-size:11.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--fg-soft)}
+.market-avg .ma-value{font-family:var(--display);font-weight:700;font-size:24px;color:var(--r-l);font-variant-numeric:tabular-nums;margin-top:2px}
+.market-avg .ma-value span{font-size:13px;color:var(--fg-faint);font-weight:600}
 .chip.hint{color:var(--fg-soft);border-style:dashed}
 
 /* modal tabs + market */

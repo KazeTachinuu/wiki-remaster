@@ -133,6 +133,7 @@ export const MockData = {
       soldSeries,
       activeCount: 1 + Math.floor(next() * 3),
       lowestAsk: Math.round(base * 0.9),
+      isPro: true,
     };
   },
 

@@ -35,7 +35,7 @@
     marketState = "loading";
     try {
       market = await data.marketStats(c);
-      marketState = market ? (market.proRequired ? "pro" : "done") : "error";
+      marketState = market ? "done" : "error";
     } catch { marketState = "error"; }
   }
   $effect(() => { if (tab === "market") loadMarket(); });
@@ -246,14 +246,15 @@
         <div id="wm-panel-market" role="tabpanel" aria-labelledby="wm-tab-market" class="modal-panel">
           {#if marketState === "loading"}
             <p class="modal-sum muted">Analyse du marché...</p>
-          {:else if marketState === "pro"}
-            <div class="market-pro">
-              <div class="mp-title">Historique de prix</div>
-              <p class="modal-sum muted">L'historique des ventes est réservé aux membres Pro, comme sur le site officiel.</p>
-            </div>
           {:else if marketState === "error"}
             <p class="modal-sum muted">Marché indisponible pour le moment.</p>
           {:else if market}
+            {#if market.soldAvg != null}
+              <div class="market-avg">
+                <div class="ma-label">Prix moyen du marché</div>
+                <div class="ma-value">{nf(market.soldAvg)} <span>pts</span></div>
+              </div>
+            {/if}
             {#if chart}
               <div class="market-chart">
                 <div class="mc-head">Prix de vente dans le temps</div>
@@ -274,14 +275,12 @@
                 <div class="mstat"><div class="l">Max</div><div class="v">{nf(market.soldMax)}</div></div>
                 <div class="mstat"><div class="l">Ventes</div><div class="v">{market.soldCount}</div></div>
               </div>
-            {:else}
+            {/if}
+            {#if market.soldAvg == null && !market.soldCount}
               <p class="modal-sum muted">Aucune vente enregistrée pour cette carte.</p>
             {/if}
-            {#if market.activeCount}
-              <div class="market-active">{market.activeCount} en vente, dès <b>{nf(market.lowestAsk)}</b></div>
-            {/if}
-            {#if market.soldCount || market.activeCount}
-              <div class="rarity-note">Estimation d'après les annonces publiques du marché.</div>
+            {#if !market.isPro}
+              <div class="rarity-note">Historique détaillé des ventes réservé aux membres Pro. La moyenne reste visible.</div>
             {/if}
           {/if}
         </div>

@@ -224,35 +224,41 @@ export const RealData = {
   // so they route to the native site (see the components) instead of guessing an endpoint.
   discard: (ucId) => postJson(`/api/user-cards/${ucId}/discard`, {}),
 
-  // Verified market source (from the client): GET /api/marketplace/cards/{cardId}/sales
-  // -> { sales: [{ final_price, settled_at, rarity }] }. It is PRO-gated: a non-Pro account
-  // gets { code:"pro_required" }, which the real client shows as a distinct "Pro only" state
-  // (not a generic error). We mirror that: return { proRequired:true } so the tab can say so,
-  // instead of claiming the market is unavailable for every card. Sold history only.
+  // Market price source. VERIFIED live (2026-09-28) from the native client:
+  //   GET /api/marketplace/cards/{cardId}/sales?scope=summary
+  //     -> { summary: { <rarity>: { average } }, isPro } - an average available to EVERYONE.
+  //   GET /api/marketplace/cards/{cardId}/sales (full)
+  //     -> { sales: [{ final_price, settled_at }] } - Pro only (detailed history + chart).
+  // So the estimated value works for non-Pro accounts too (summary average); only the
+  // detailed sold-price chart is Pro-gated. Returns { soldAvg, soldSeries, ..., isPro }.
   async marketStats(card) {
     let d;
     try {
-      const r = await fetch(`/api/marketplace/cards/${card.id}/sales`, { credentials: "include" });
+      const r = await fetch(`/api/marketplace/cards/${card.id}/sales?scope=summary`, { credentials: "include" });
       d = await r.json().catch(() => ({}));
-      if (!r.ok) return d.code === "pro_required" ? { proRequired: true } : null;
+      if (!r.ok) return null;
     } catch { return null; }
-    const sales = Array.isArray(d.sales) ? d.sales : null;
-    if (!sales) return null;
-    const priced = sales.filter((s) => s.final_price != null);
-    const prices = priced.map((s) => s.final_price);
-    const soldSeries = priced
-      .map((s) => ({ price: s.final_price, t: Date.parse(s.settled_at || "") || 0 }))
-      .sort((a, b) => a.t - b.t);
-    const mean = (a) => (a.length ? Math.round(a.reduce((s, x) => s + x, 0) / a.length) : null);
-    return {
-      soldCount: prices.length,
-      soldAvg: mean(prices),
-      soldMin: prices.length ? Math.min(...prices) : null,
-      soldMax: prices.length ? Math.max(...prices) : null,
-      soldSeries,
-      activeCount: 0, // this endpoint is settled sales only
-      lowestAsk: null,
+    const avg = d.summary?.[card.rarity]?.average ?? null;
+    const stats = {
+      soldAvg: avg, soldCount: 0, soldMin: null, soldMax: null,
+      soldSeries: [], activeCount: 0, lowestAsk: null, isPro: !!d.isPro,
     };
+    if (avg == null && !d.isPro) return null; // nothing to show for this card
+    if (!d.isPro) return stats; // non-Pro: average only, no detailed history
+    // Pro: fetch the full sold history for the chart.
+    try {
+      const r2 = await fetch(`/api/marketplace/cards/${card.id}/sales`, { credentials: "include" });
+      const d2 = await r2.json().catch(() => ({}));
+      const sales = r2.ok && Array.isArray(d2.sales) ? d2.sales : [];
+      const priced = sales.filter((s) => s.final_price != null);
+      const prices = priced.map((s) => s.final_price);
+      stats.soldSeries = priced.map((s) => ({ price: s.final_price, t: Date.parse(s.settled_at || "") || 0 })).sort((a, b) => a.t - b.t);
+      stats.soldCount = prices.length;
+      stats.soldMin = prices.length ? Math.min(...prices) : null;
+      stats.soldMax = prices.length ? Math.max(...prices) : null;
+      if (avg == null && prices.length) stats.soldAvg = Math.round(prices.reduce((s, x) => s + x, 0) / prices.length);
+    } catch {}
+    return stats;
   },
 
   async specialAvailable() {
