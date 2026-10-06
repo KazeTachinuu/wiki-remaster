@@ -75,6 +75,8 @@ bun scripts/readme-shots.mjs   # README screenshots, read-only
 scripts/check-live.sh --install # daily live check: desktop alert + GitHub issue on failure
 ```
 
+- Mock world: 6 players, 2 friend groups, a running market, trades and chats, from real cards (`mock/world.js`, `mock/snapshot.json`; refresh with `bun scripts/snapshot-prod.mjs`)
+- Faster market: `WM_MOCK_MARKET_SPEED=60 bun run dev` (an hour a minute)
 - Big mock collection: `WM_MOCK_CARDS=1000 bun run dev` (`WM_MOCK_SHINY=1` all shiny, `WM_MOCK_NOIMG=1` no pictures)
 - Mock faults: `POST /api/__fault` (`{ "status": 525, "count": 2 }`, `{ "delay": 7000 }`, `{ "human": true }`); Pro / V.I.P.: `POST /api/__profile`
 - `test:prod` diffs API shapes against `docs/api-shapes.json` (`--update-shapes`, `--only=market,trades`, `--write=discard,sell,bid,notif`)

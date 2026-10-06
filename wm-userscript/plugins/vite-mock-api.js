@@ -1,10 +1,12 @@
 /**
  * Dev-only mock of wiki-masters.com's /api, mounted on the Vite server (no second process).
  * Routes and shapes mirror the live site (docs/API_REFERENCE.md), so the app runs the real
- * adapter against it. State is in memory and resets on restart.
+ * adapter against it. State is in memory and resets on restart. The data is a world of six players
+ * (mock/world.js) built from real cards (mock/snapshot.json), with a market that keeps running.
  */
 
 import { CATALOG, RARITY_WEIGHTS, SNAPSHOT_PRICES } from "../mock/catalog.js";
+import { buildWorld, advanceMarket } from "../mock/world.js";
 
 const PAGE = 50;
 const PACK_SIZE = 5;
@@ -51,8 +53,6 @@ export default function mockApiPlugin() {
         proDaily: null, // the calendar day the Pro daily pack was claimed
         specialAt: 0, // when the next special pack can be opened
         collection: new Map(), // user card id -> { id, card, count, is_shiny, starred, obtained_at }
-        bids: new Map(), // auction id -> [{ id, amount, bidder, bidder_id, placed_at }]
-        listings: new Map(), // my auctions: id -> raw auction
         read: new Set(), // read notification ids
       };
 
@@ -60,72 +60,41 @@ export default function mockApiPlugin() {
         const id = "uc_" + ++seq;
         state.collection.set(id, { id, card, count: 1, is_shiny, starred: false, obtained_at: iso() });
       };
-      // One of each Legendary look: plain, gold (no image), onyx (shiny, no image), onyx over a photo.
-      const L = CATALOG.find((c) => c.rarity === "L" && c.image_url) || CATALOG[0];
-      const legend = (id, over, shiny) => addOwned({ ...L, ...over, id, rarity: "L", rarity_order: 5 }, shiny);
+      // The world (mock/world.js): six players in two groups of friends, their collections, a
+      // market that keeps running, trades, chats and notifications, all from real cards in their
+      // real proportions. Built again by /api/reset.
+      const priceOf = (card) => card.avg ?? PRICE[card.rarity] ?? 10;
+      const SPEED = Number(process.env.WM_MOCK_MARKET_SPEED) || 1; // simulated market minutes per minute
       // A big collection for load tests: WM_MOCK_CARDS=1000 (and WM_MOCK_SHINY=1 for all shiny,
-      // WM_MOCK_NOIMG=1 for none with a picture) seeds that many copies of the catalogue's cards.
+      // WM_MOCK_NOIMG=1 for none with a picture) adds that many copies of the catalogue's cards.
       const SEED = { cards: Number(process.env.WM_MOCK_CARDS) || 0, shiny: Number(process.env.WM_MOCK_SHINY ?? SHINY_CHANCE), noImg: process.env.WM_MOCK_NOIMG === "1" };
-      function seedCollection() {
-        legend("L_img", {}, false);
-        legend("L_gold", { wikipedia_title: "Légendaire (sans image)", image_url: null }, false);
-        legend("L_onyx", { wikipedia_title: "Légendaire brillante", image_url: null }, true);
-        legend("L_onyx_img", { wikipedia_title: "Légendaire brillante (image)" }, true);
+      let world, FRIENDS = [];
+      const ME = { id: "me", username: state.profile.username, avatar_url: null };
+      const userOf = (id) => { const p = world.players.find((x) => x.id === id); return p && { id: p.id, username: p.username, avatar_url: null }; };
+      // cards the world gives me (won auctions, unsold listings coming back) join my collection
+      const drainMine = () => { for (const u of world.collections.get("me").splice(0)) state.collection.set(u.id, { ...u, count: 1 }); };
+      function seedWorld() {
+        world = buildWorld(CATALOG, priceOf);
+        state.collection = new Map();
+        drainMine();
         for (let i = 0; i < SEED.cards; i++) {
           const base = CATALOG[i % CATALOG.length];
           addOwned({ ...base, id: `${base.id}~${i}`, wikipedia_title: `${base.wikipedia_title} ${i + 1}`, ...(SEED.noImg ? { image_url: null } : {}) }, Math.random() < SEED.shiny);
         }
+        FRIENDS = world.friendships.filter((f) => f.includes("me")).map(([a, b]) => userOf(a === "me" ? b : a));
+        state.trades = world.trades;
+        state.chats = world.chats;
+        state.humanRequired = false;
       }
-      seedCollection();
+      seedWorld();
 
       const ownsCard = (cardId) => [...state.collection.values()].some((u) => u.card.id === cardId);
-
-      // --- trades ---------------------------------------------------------------------
-      // Three friends with deterministic collections, and trades shaped like the live data:
-      // two incoming offers (one with coins), a counter-offer chain (with coins), and an offer I sent.
-      const FRIENDS = [
-        { id: "u_basile", username: "Basile", avatar_url: null },
-        { id: "u_alix", username: "alix", avatar_url: CATALOG.find((c) => c.image_url)?.image_url || null },
-        { id: "u_capucine", username: "Capucine", avatar_url: null },
-      ];
-      const ME = { id: "me", username: state.profile.username, avatar_url: null };
-      // alix owns the whole catalog plus a shiny second copy of every fourth card: more than one
-      // page (PAGE rows), like real collections, so paging, search and filters run on the server
-      const ownedBy = (n) => (n === 1 ? [...CATALOG.map((card) => [card, false]), ...CATALOG.filter((_, i) => i % 4 === 0).map((card) => [card, true])]
-        : CATALOG.filter((_, i) => i % 3 === n).map((card, i) => [card, i === 2]));
-      const friendCards = new Map(FRIENDS.map((f, n) => [f.id, ownedBy(n).map(([card, is_shiny], i) => ({
-        id: `${f.id}_uc_${i}`, card, count: 1, is_shiny, starred: false, obtained_at: iso(), user_id: f.id, owned_by_viewer: ownsCard(card.id), tags: [],
-      }))]));
-      const userOf = (id) => (id === "me" ? ME : FRIENDS.find((f) => f.id === id));
-      const cardOfCopy = (owner, ucId) => (owner === "me" ? state.collection.get(ucId) : friendCards.get(owner)?.find((u) => u.id === ucId));
+      const friendCards = { get: (id) => (world.collections.get(id) || []).map((u) => ({ ...u, count: 1, user_id: id, owned_by_viewer: ownsCard(u.card.id), tags: [] })) };
+      const cardOfCopy = (owner, ucId) => (owner === "me" ? state.collection.get(ucId) : world.collections.get(owner)?.find((u) => u.id === ucId));
       const item = (tradeId, owner, uc) => ({ id: "ti_" + ++seq, card: { ...uc.card, is_shiny: uc.is_shiny }, card_id: uc.card.id, is_shiny: uc.is_shiny, trade_id: tradeId,
         offered_by: owner, user_card_id: uc.id, snapshot_rarity: uc.card.rarity, snapshot_atk: uc.card.atk, snapshot_def: uc.card.def });
       const trade = (o) => ({ status: "pending", parent_trade_id: null, initiator_wikibidous: 0, recipient_wikibidous: 0, created_at: iso(), updated_at: iso(), ...o,
         initiator: userOf(o.initiator_id), recipient: userOf(o.recipient_id) });
-      // Rebuilt by /api/reset (after the collection, since the seeded offers use my first copies).
-      function seedTrades() {
-        const mine = [...state.collection.values()];
-        state.trades = [
-          trade({ id: "tr_alix", initiator_id: "u_alix", recipient_id: "me", created_at: ago(7 * 86400000), updated_at: ago(7 * 86400000) }),
-          trade({ id: "tr_k_root", initiator_id: "me", recipient_id: "u_basile", status: "countered", created_at: ago(5 * 3600000), updated_at: ago(5 * 3600000) }),
-          trade({ id: "tr_k_counter", initiator_id: "u_basile", recipient_id: "me", status: "declined", parent_trade_id: "tr_k_root", recipient_wikibidous: 100, created_at: ago(4 * 3600000), updated_at: ago(3600000) }),
-          trade({ id: "tr_march", initiator_id: "me", recipient_id: "u_capucine", initiator_wikibidous: 20, created_at: ago(2 * 3600000), updated_at: ago(2 * 3600000) }),
-          trade({ id: "tr_k_new", initiator_id: "u_basile", recipient_id: "me", initiator_wikibidous: 30, created_at: ago(40 * 60000), updated_at: ago(40 * 60000) }),
-        ];
-        const seed = (t, give, get) => { t.items = [...give.map((uc) => item(t.id, "me", uc)), ...get.map(([owner, uc]) => item(t.id, owner, uc))]; };
-        const [k0, k1, , k3, k4] = friendCards.get("u_basile"), [d0] = friendCards.get("u_alix"), [m0, m1] = friendCards.get("u_capucine");
-        seed(state.trades[0], [mine[1]], [["u_alix", d0]]);
-        seed(state.trades[1], [mine[0]], [["u_basile", k0]]);
-        seed(state.trades[2], [mine[0]], [["u_basile", k1]]);
-        seed(state.trades[3], [mine[2]], [["u_capucine", m0], ["u_capucine", m1]]);
-        seed(state.trades[4], [mine[3]], [["u_basile", k3], ["u_basile", k4]]);
-        state.chats = new Map(FRIENDS.map((f) => [f.id, [
-          { id: "m_" + f.id + "_1", sender_id: f.id, recipient_id: "me", content: "Salut, ça te dit un échange ?", created_at: ago(26 * 3600000), read: true },
-          { id: "m_" + f.id + "_2", sender_id: "me", recipient_id: f.id, content: "Carrément, je regarde ta collection.", created_at: ago(25 * 3600000), read: true },
-        ]]));
-        state.humanRequired = false;
-      }
-      seedTrades();
       const HUMAN = { error: "Vérification humaine requise.", code: "human_verification_required", human_verification_required: true };
       const pendingCopies = (owner) => state.trades.filter((t) => t.status === "pending").flatMap((t) => t.items).filter((i) => i.offered_by === owner).map((i) => i.user_card_id);
 
@@ -169,42 +138,17 @@ export default function mockApiPlugin() {
         return { ...card, is_shiny };
       }
 
-      // --- market -------------------------------------------------------------------
-      // Stable auctions per catalog card (about 30% of cards are listed 2-4 times, like the
-      // real market, so same-card comparison has something to compare), plus my listings.
-      const ends = new Map();
-      const copies = (card) => (rng(card.id + "dup")() < 0.3 ? 2 + Math.floor(rng(card.id + "n")() * 3) : 1);
-      function synthAuction(card, k = 0) {
-        const next = rng(k ? `${card.id}~${k}` : card.id);
-        const id = k ? `auc_${card.id}~${k}` : "auc_" + card.id;
-        const base = Math.round(PRICE[card.rarity] * 0.8);
-        if (!ends.has(id)) ends.set(id, Date.now() + Math.round(next() * 20 + 1) * 3600000);
-        const history = state.bids.get(id);
-        const bid = history?.at(-1)?.amount ?? (next() < 0.5 ? Math.round(PRICE[card.rarity] * (1 + next())) : null);
-        const top = history?.at(-1)?.bidder_id ?? (bid != null ? "other" : null);
-        return {
-          id, card_id: card.id, card, is_shiny: k === 2 || next() < 0.06, status: "active",
-          base_amount: base, current_bid: bid, effective_bid: bid ?? base, current_bidder_id: top,
-          final_price: null, created_at: iso(ends.get(id) - 86400000), end_at: iso(ends.get(id)),
-          settled_at: null, base_repriced_at: null, winner_id: null,
-          seller: { username: ["Dorian", "Elsa", "Félix", "Gaspard", "Hortense"][Math.floor(next() * 5)] },
-          seller_id: "other", owned: ownsCard(card.id), // owned = I own a copy, like the real API
-        };
-      }
-      const findAuction = (id) => {
-        if (state.listings.has(id)) return state.listings.get(id);
-        const [, cid, k] = String(id).match(/^auc_(.+?)(?:~(\d+))?$/) || [];
-        const card = CATALOG.find((c) => String(c.id) === cid);
-        return card ? synthAuction(card, Number(k || 0)) : null;
-      };
-      // A card's sales by the rarity they sold at: about a third of the cards also sold at the
-      // rarity just below (a card's rarity can change), like the live summary keyed by rarity.
-      const RARITY_BELOW = { PC: "C", R: "PC", SR: "R", UR: "SR", L: "UR" };
-      const soldRarities = (card) => { const next = rng(card.id + "r"); return next() < 0.35 && RARITY_BELOW[card.rarity] ? [card.rarity, RARITY_BELOW[card.rarity]] : [card.rarity]; };
+      // --- market: the world's, caught up on each request -------------------------------------
+      const advance = () => { advanceMarket(world, Date.now(), priceOf, SPEED); drainMine(); };
+      const findAuction = (id) => world.auctions.find((a) => a.id === id) ?? null;
+      // an auction as the API sends it (its bids apart, `owned` = I own a copy, like the real API)
+      const view = ({ bids, user_card_id, user_card, ...a }) => ({ ...a, owned: ownsCard(a.card.id) });
+      const salesOf = (card) => world.auctions.filter((a) => a.status === "settled_sold" && a.card.id === card.id);
+      // a card's sold average at its rarity: from the market's history, else the snapshot's figure
       const summary = (card) => {
-        const next = rng(card.id);
-        if (next() < 0.3) return {};
-        return Object.fromEntries(soldRarities(card).map((r) => [r, { average: Math.round(PRICE[r] * (0.7 + next() * 0.8)) }]));
+        const sold = salesOf(card).map((a) => a.final_price);
+        const average = sold.length ? Math.round(sold.reduce((x, y) => x + y, 0) / sold.length) : card.avg ?? null;
+        return average == null ? {} : { [card.rarity]: { average } };
       };
 
       // --- http ---------------------------------------------------------------------
@@ -253,10 +197,9 @@ export default function mockApiPlugin() {
         // Mock-only: the real profile comes from Supabase, see src/wm/api.js.
         if (p === "/api/profile") { regen(); return send(res, 200, { ...p_, next_regen_seconds: nextRegenSeconds(), regen_seconds: REGEN_SECONDS, pack_cap: PACK_CAP }); }
         if (p === "/api/reset" && m === "POST") {
-          state.collection.clear(); state.listings.clear(); state.bids.clear();
           Object.assign(p_, { packs_remaining: PACK_CAP, wikibidous_balance: START_BALANCE, pity_counter: 0 });
-          state.proDaily = null; state.specialAt = 0;
-          seedCollection(); seedTrades();
+          state.proDaily = null; state.specialAt = 0; state.read.clear();
+          seedWorld();
           return send(res, 200, { ok: true });
         }
 
@@ -348,19 +291,21 @@ export default function mockApiPlugin() {
         }
 
         if (p === "/api/marketplace" && m === "GET") {
+          advance();
           if (q("mine") === "1") {
-            const mine = [...state.listings.values()];
-            const bidding = [...state.bids.keys()].map(findAuction).filter((a) => a && a.status === "active");
+            const mine = world.auctions.filter((a) => a.seller_id === "me");
             return send(res, 200, {
               auctions: [], page: 1, limit: 1, hasMore: false, mine: true, maxConcurrentAuctions: MAX_AUCTIONS[p_.is_pro ? "pro" : "base"],
-              selling: mine.filter((a) => a.status === "active"), bidding, won: [], history: mine.filter((a) => a.status !== "active"),
+              selling: mine.filter((a) => a.status === "active").map(view),
+              bidding: world.auctions.filter((a) => a.status === "active" && a.bids.some((b) => b.bidder_id === "me")).map(view),
+              won: world.auctions.filter((a) => a.status === "settled_sold" && a.winner_id === "me").map(view),
+              history: mine.filter((a) => a.status !== "active").map(view),
             });
           }
           const pg = Math.max(1, page) - 1; // 1-based like the real server, page=0 aliases page 1
-          const src = filterCards(CATALOG, url);
-          const all = src.flatMap((c) => Array.from({ length: copies(c) }, (_, k) => synthAuction(c, k)));
+          const all = filterCards(world.auctions.filter((a) => a.status === "active"), url, (a) => a.card).map(view);
           const by = { price_asc: (a, b) => a.effective_bid - b.effective_bid, price_desc: (a, b) => b.effective_bid - a.effective_bid, ending_soon: (a, b) => a.end_at.localeCompare(b.end_at) };
-          if (by[q("sort")]) all.sort(by[q("sort")]);
+          all.sort(by[q("sort")] || ((a, b) => b.created_at.localeCompare(a.created_at)));
           return send(res, 200, { auctions: all.slice(pg * PAGE, pg * PAGE + PAGE), page: pg + 1, limit: PAGE, hasMore: pg * PAGE + PAGE < all.length });
         }
 
@@ -369,38 +314,39 @@ export default function mockApiPlugin() {
           const uc = state.collection.get(b.card_id); // the user card id, like the real server
           if (!uc) return send(res, 409, { error: "Vous ne possédez pas cette carte" });
           if (!(b.base_amount >= 1)) return send(res, 400, { error: "Prix invalide." });
-          if ([...state.listings.values()].filter((a) => a.status === "active").length >= MAX_AUCTIONS[p_.is_pro ? "pro" : "base"]) return send(res, 409, { error: "Limite de ventes atteinte." });
+          if (world.auctions.filter((a) => a.seller_id === "me" && a.status === "active").length >= MAX_AUCTIONS[p_.is_pro ? "pro" : "base"]) return send(res, 409, { error: "Limite de ventes atteinte." });
           state.collection.delete(uc.id);
           const aid = "mine_" + ++seq;
           const now = Date.now();
-          state.listings.set(aid, {
-            id: aid, card_id: uc.card.id, card: uc.card, is_shiny: uc.is_shiny, status: "active", user_card: uc,
-            base_amount: b.base_amount, current_bid: null, effective_bid: b.base_amount, current_bidder_id: null,
+          world.auctions.push({
+            id: aid, card_id: uc.card.id, card: uc.card, is_shiny: uc.is_shiny, status: "active", user_card: uc, bids: [],
+            base_amount: b.base_amount, listing_base_amount: b.base_amount, current_bid: null, effective_bid: b.base_amount, current_bidder_id: null, current_bidder: null,
             final_price: null, created_at: iso(now), end_at: iso(now + b.duration_minutes * 60000),
-            settled_at: null, base_repriced_at: null, winner_id: null, seller: { username: p_.username }, seller_id: "me", owned: false,
+            settled_at: null, base_repriced_at: null, winner_id: null, seller: { id: "me", username: p_.username, avatar_url: null }, seller_id: "me",
           });
           return send(res, 201, { auction_id: aid });
         }
 
         if ((id = match(p, /^\/api\/marketplace\/([^/]+)\/bid$/)?.[0]) && m === "POST") {
+          advance();
           const a = findAuction(id);
           const { amount } = await readBody(req);
           const min = (a?.current_bid ?? a?.base_amount - 1) + 1;
-          if (!a || a.seller_id === "me") return send(res, 409, { error: "Enchère impossible." });
+          if (!a || a.status !== "active" || a.seller_id === "me") return send(res, 409, { error: "Enchère impossible." });
           if (!(amount >= min)) return send(res, 409, { error: `Mise trop basse (minimum ${min} wikibidous)`, code: "bid_too_low", min });
-          const hist = state.bids.get(id) || [];
-          const held = hist.at(-1)?.bidder_id === "me" ? hist.at(-1).amount : 0; // raising my own bid
+          const held = a.current_bidder_id === "me" ? a.current_bid : 0; // raising my own bid
           if (amount - held > p_.wikibidous_balance) return send(res, 409, { error: "Solde insuffisant." });
-          hist.push({ id: "b" + ++seq, amount, bidder: { username: p_.username }, bidder_id: "me", placed_at: iso() });
-          state.bids.set(id, hist);
+          const bid = { id: "b" + ++seq, amount, bidder: { id: "me", username: p_.username, avatar_url: null }, bidder_id: "me", placed_at: iso() };
+          a.bids.push(bid);
+          Object.assign(a, { current_bid: amount, effective_bid: amount, current_bidder_id: "me", current_bidder: bid.bidder });
           p_.wikibidous_balance -= amount - held; // only the top bid is held, like the real server
           return send(res, 200, { auction_id: id, current_bid: amount, bidder_balance: p_.wikibidous_balance });
         }
 
         if ((id = match(p, /^\/api\/marketplace\/([^/]+)\/reprice$/)?.[0]) && m === "POST") {
-          const a = state.listings.get(id);
+          const a = findAuction(id);
           const { new_base_amount: v } = await readBody(req);
-          if (!a) return send(res, 404, { error: "Enchère introuvable." });
+          if (!a || a.seller_id !== "me") return send(res, 404, { error: "Enchère introuvable." });
           const half = (Date.parse(a.created_at) + Date.parse(a.end_at)) / 2;
           if (Date.now() < half) return send(res, 409, { error: "La baisse de prix n'est possible qu'après la moitié du temps écoulée" });
           if (!(v >= 1 && v < a.base_amount)) return send(res, 400, { error: "Indiquez un montant inférieur à la mise de départ actuelle" });
@@ -409,47 +355,43 @@ export default function mockApiPlugin() {
         }
 
         if ((id = match(p, /^\/api\/marketplace\/([^/]+)\/settle$/)?.[0]) && m === "POST") {
-          const a = state.listings.get(id);
-          if (!a || Date.parse(a.end_at) > Date.now()) return send(res, 409, { error: "Enchère pas encore terminée." });
-          Object.assign(a, { status: a.current_bid ? "settled_sold" : "settled_unsold", settled_at: iso(), final_price: a.current_bid });
-          if (!a.current_bid) state.collection.set(a.user_card.id, a.user_card);
+          advance(); // the market settles ended auctions itself
+          const a = findAuction(id);
+          if (!a || a.status === "active") return send(res, 409, { error: "Enchère pas encore terminée." });
           return send(res, 200, { status: a.status });
         }
 
         if ((id = match(p, /^\/api\/marketplace\/([^/]+)$/)?.[0])) {
+          advance();
           const a = findAuction(id);
           if (!a) return send(res, 404, { error: "Enchère introuvable." });
           if (m === "DELETE") {
-            if (a.seller_id !== "me" || a.current_bid) return send(res, 409, { error: "Impossible d'annuler" });
+            if (a.seller_id !== "me" || a.current_bid || a.status !== "active") return send(res, 409, { error: "Impossible d'annuler" });
             Object.assign(a, { status: "cancelled", settled_at: iso() });
-            state.collection.set(a.user_card.id, a.user_card);
+            const uc = a.user_card ?? { id: "uc_" + ++seq, card: a.card, is_shiny: a.is_shiny, starred: false, obtained_at: iso() };
+            state.collection.set(uc.id, { ...uc, count: 1 });
             return send(res, 200, { status: "cancelled" });
           }
-          const { user_card, ...auction } = a;
-          return send(res, 200, { auction, bids: (state.bids.get(id) || []).slice().reverse() });
+          return send(res, 200, { auction: view(a), bids: a.bids.slice().reverse() });
         }
 
         if ((id = match(p, /^\/api\/marketplace\/cards\/([^/]+)\/sales$/)?.[0])) {
           const card = CATALOG.find((c) => c.id === id) || [...state.collection.values()].find((u) => u.card.id === id)?.card;
           if (!card) return send(res, 404, { error: "Carte introuvable." });
+          advance();
           if (q("scope") === "summary") return send(res, 200, { wikipedia_title: card.wikipedia_title, summary: summary(card), isPro: p_.is_pro });
-          const next = rng(card.id + "sales");
-          // each sale keeps the rarity it sold at (the older ones at the rarity below, when it changed)
-          const rs = soldRarities(card);
-          const sales = Array.from({ length: 3 + Math.floor(next() * 6) }, (_, i) => {
-            const rarity = i < 2 ? rs.at(-1) : rs[0];
-            return { id: `${card.id}_s${i}`, rarity, final_price: Math.round(PRICE[rarity] * (0.7 + next() * 0.8)), settled_at: iso(Date.now() - (9 - i) * 86400000) };
-          });
+          const sales = salesOf(card).map((a) => ({ id: a.id, rarity: a.card.rarity, final_price: a.final_price, settled_at: a.settled_at }));
           return send(res, 200, { sales });
         }
 
         if (p === "/api/notifications") {
           if (m === "PATCH") {
             const { ids } = await readBody(req);
-            for (const n of NOTIFS) if (!ids || ids.includes(n.id)) state.read.add(n.id);
+            for (const n of world.notifications) if (!ids || ids.includes(n.id)) state.read.add(n.id);
             return send(res, 200, { success: true });
           }
-          return send(res, 200, { notifications: NOTIFS.map((n) => ({ ...n, read: n.read || state.read.has(n.id) })) });
+          advance();
+          return send(res, 200, { notifications: world.notifications.map((n) => ({ ...n, read: n.read || state.read.has(n.id) })) });
         }
 
         if (p === "/api/human-check" && m === "POST") {
@@ -459,13 +401,14 @@ export default function mockApiPlugin() {
           return send(res, 200, { ok: true });
         }
         if (p === "/api/friends") {
-          return send(res, 200, {
-            friendships: FRIENDS.map((f, i) => ({ id: "fr_" + i, status: "accepted", requester: f, addressee: ME, requester_id: f.id, addressee_id: "me", created_at: ago(9 * 86400000) })),
-            counts: { accepted: FRIENDS.length, incoming: 0, outgoing: 0 },
-          });
+          const row = ([a, b], i, status) => ({ id: `fr_${status}_${i}`, status, requester: userOf(a), addressee: userOf(b), requester_id: a, addressee_id: b, created_at: ago((9 + i) * 86400000) });
+          const mine = (f) => f.includes("me");
+          const accepted = world.friendships.filter(mine).map((f, i) => row(f, i, "accepted"));
+          const incoming = world.requests.filter(([, b]) => b === "me").map((f, i) => row(f, i, "pending"));
+          return send(res, 200, { friendships: [...accepted, ...incoming], counts: { accepted: accepted.length, incoming: incoming.length, outgoing: 0 } });
         }
         if ((id = match(p, /^\/api\/profile\/([^/]+)\/collection$/)?.[0])) {
-          const f = FRIENDS.find((x) => x.username === decodeURIComponent(id));
+          const f = world.players.find((x) => x.id !== "me" && x.username === decodeURIComponent(id));
           if (!f) return send(res, 404, { error: "Profil introuvable." });
           // like the live route (checked by test:prod): filtered by q and rarity, rarity order (L first)
           // unless sort=name (any other sort value also gives name order), total only with a search
@@ -474,6 +417,7 @@ export default function mockApiPlugin() {
           return send(res, 200, { collection: all.slice(page * PAGE, page * PAGE + PAGE), total: q("q") ? all.length : null, rarityCounts: {}, tagOptions: [], profileId: f.id, pendingTradeCardIds: pendingCopies(f.id) });
         }
         if ((id = match(p, /^\/api\/chat\/([^/]+)$/)?.[0])) {
+          if (!state.chats.has(id) && FRIENDS.some((f) => f.id === id)) state.chats.set(id, []);
           const list = state.chats.get(id);
           if (!list) return send(res, 404, { error: "Conversation introuvable." });
           if (m === "POST") {
@@ -550,14 +494,4 @@ const SAMPLE_SPECIAL_PACKS = [
   { id: "sciences", name: "Sciences", description: "Cinq cartes Super Rare ou mieux." },
   { id: "histoire", name: "Histoire", description: "Cinq cartes Super Rare ou mieux." },
   { id: "arts", name: "Arts", description: "Cinq cartes Super Rare ou mieux." },
-];
-// Shaped like the live rows (types, titles and data keys recorded by test:prod, see
-// docs/api-shapes.json): every row carries its own data.title and data.message.
-const NOTIFS = [
-  { id: "n0", type: "trade_offer", data: { title: "🔄 Nouvelle offre d'échange !", message: "alix vous propose un échange.", trade_id: "tr_alix", initiator_id: "u_alix", initiator_username: "alix" }, read: false, created_at: ago(2 * 60000) },
-  { id: "n1", type: "marketplace_outbid", data: { title: "📉 Vous avez été surenchéri", message: "Quelqu'un a surenchéri sur Albert Einstein.", auction_id: "auc_card_1", card_id: "card_1", card_title: "Albert Einstein", new_bid: 640, previous_bid: 600 }, read: false, created_at: ago(5 * 60000) },
-  { id: "n2", type: "battle_invite", data: { title: "Nouveau défi !", message: "Basile vous défie en duel.", battle_id: "b1", challenger_id: "u_basile", challenger_username: "Basile" }, read: false, created_at: ago(40 * 60000) },
-  { id: "n3", type: "trade_accepted", data: { title: "✅ Offre acceptée !", message: "Capucine a accepté votre offre.", trade_id: "tr_march", recipient_id: "u_capucine", recipient_username: "Capucine" }, read: true, created_at: ago(3 * 3600000) },
-  { id: "n4", type: "marketplace_auction_sold", data: { title: "💰 Carte vendue !", message: "Marie Curie s'est vendue 210 WikiBidous.", auction_id: "auc_card_2", card_id: "card_2", card_title: "Marie Curie", final_price: 210 }, read: true, created_at: ago(26 * 3600000) },
-  { id: "n5", type: "marketplace_auction_unsold", data: { title: "Enchère terminée sans acheteur", message: "Votre vente de Léonard de Vinci s'est terminée sans enchère.", auction_id: "auc_card_3", card_id: "card_3", card_title: "Léonard de Vinci" }, read: true, created_at: ago(30 * 3600000) },
 ];

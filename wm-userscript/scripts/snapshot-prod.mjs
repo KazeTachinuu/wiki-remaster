@@ -10,6 +10,9 @@ import { renameSync, existsSync, readFileSync } from "node:fs";
 const OUT = new URL("../mock/snapshot.json", import.meta.url).pathname;
 const PER_RARITY = 40;
 const MAX_PAGES = 6; // marketplace pages of 50 listings per rarity
+// a real collection's cards too: market cards skew rare and pictured, a collection has the real
+// mix (two thirds Commun, half without a picture). Sampled evenly, card fields only.
+const COLLECTION_SAMPLE = 600;
 const RARITIES = ["C", "PC", "R", "SR", "UR", "L"];
 const NAME = { C: "Commun", PC: "Peu Commun", R: "Rare", SR: "Super Rare", UR: "Ultra Rare", L: "Légendaire" };
 const PAUSE_MS = 450; // the game reads bursts as automation: one request at a time, spaced
@@ -85,6 +88,33 @@ for (const [i, rarity] of RARITIES.entries()) {
   if (mine.length < PER_RARITY) warn(`${NAME[rarity]}: ${mine.length} distinct cards on the market (fewer listed than ${PER_RARITY})`);
   ok(`${label} ${String(mine.length).padStart(2)} cards, typical listing ${median ?? "-"} pts`);
 }
+// a real collection's mix: my own cards (card fields only, never who owns them)
+hdr("A real collection's mix of cards");
+const mineRows = [];
+for (let page = 0; page < 40; page++) {
+  tick(`my collection, page ${page + 1}, ${mineRows.length} cards  ${dim(`server ${secs(slowest)} at worst`)}`);
+  // a failed page is asked again once; only a real short page ends the collection
+  const d = (await get(`/api/my-collection?sort=rarity&page=${page}&stats=0`)) ?? (await get(`/api/my-collection?sort=rarity&page=${page}&stats=0`));
+  if (!d) { warn(`my collection, page ${page + 1} failed twice: kept the ${mineRows.length} cards read`); break; }
+  const rows = d.collection || [];
+  mineRows.push(...rows);
+  if (rows.length < 50) break;
+}
+tickEnd();
+const seen = new Set(cards.map((x) => x.id));
+const step = Math.max(1, mineRows.length / COLLECTION_SAMPLE);
+let added = 0;
+for (let k = 0; k < mineRows.length && added < COLLECTION_SAMPLE; k = Math.floor(k + step) === k ? k + 1 : Math.floor(k + step)) {
+  const card = mineRows[k]?.card;
+  if (!card?.id || seen.has(card.id) || card.nsfw_image || UNSAFE.test(`${card.category || ""} ${card.wikipedia_title || ""}`)) continue;
+  seen.add(card.id); added++;
+  cards.push({
+    id: card.id, wikipedia_title: card.wikipedia_title, wikipedia_url: card.wikipedia_url, category: card.category, summary: card.summary ?? null,
+    rarity: card.rarity, atk: card.atk, def: card.def, q_score: card.q_score, pageviews: card.pageviews,
+    image_url: card.image_url, hide_image: !!card.hide_image, avg: null,
+  });
+}
+ok(`${added} cards from a ${mineRows.length}-card collection, ${cards.filter((x) => !x.image_url || x.hide_image).length} of all ${cards.length} without a picture`);
 await site.close();
 
 function medianOf(xs) { const s = xs.filter((x) => x != null).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; }
@@ -93,6 +123,7 @@ const prices = Object.fromEntries(RARITIES.map((r) => [r, medianOf(cards.filter(
 // recap, aligned
 console.log("");
 console.log(dim(`    ${"rarity".padEnd(11)} ${"cards".padStart(5)} ${"photo".padStart(5)} ${"priced".padStart(6)} ${"typical".padStart(8)}`));
+for (const row of recap) { const rr = RARITIES.find((x) => NAME[x] === row[0]); const all = cards.filter((x) => x.rarity === rr); row[1] = all.length; row[2] = all.filter((x) => x.image_url && !x.hide_image).length; }
 for (const [name, n, photo, priced, median] of recap) console.log(`    ${name.padEnd(11)} ${String(n).padStart(5)} ${String(photo).padStart(5)} ${String(priced).padStart(6)} ${String(median ?? "-").padStart(5)} pts`);
 console.log("");
 if (failed) warn(`${failed} of ${requestsDone} requests failed (cards kept, without a price)`);
