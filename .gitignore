@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build caches
+.vite/
+**/.vite/
+
+# OS / tooling
+.DS_Store
+*.log
+
+# Playwright / agent scratch output (not source)
+.playwright-mcp/
+tool-results/
+
+# Local screenshots (not source)
+/*.png
+
+# Downloaded proprietary wiki-masters.com client code kept locally as a reference
+# for verification only; not redistributed.
+client-bundles/
+
+# Only ship the built userscript from dist, not regenerated assets
+wm-userscript/dist/*
+!wm-userscript/dist/wikimasters-app.user.js
+
+# Prod test screenshots
+wm-userscript/.prod-test/
+wm-userscript/.prod-profile/
