@@ -1,14 +1,6 @@
 // A card's market, by rarity: a card can change rarity, and its sales keep the rarity they sold
 // at, so prices only compare within one rarity (the game's own Pro market view groups them so).
 
-import { RARITIES_DESC } from "./schema.js";
-
-/** The rarities this card has sold at (its current one always first), rarest next. */
-export function marketRarities(market, current) {
-  const seen = new Set([...Object.keys(market?.averages || {}), ...(market?.sales || []).map((s) => s.rarity)]);
-  return [current, ...RARITIES_DESC.filter((r) => r !== current && seen.has(r))];
-}
-
 /**
  * One rarity's market: the average every account sees (the summary), and from a Pro account's
  * sale list the price series (oldest first), count, min, max and the 10 latest sales.
@@ -25,4 +17,18 @@ export function rarityMarket(market, rarity) {
     max: prices.length ? Math.max(...prices) : null,
     recent: sales.slice(-10).reverse(),
   };
+}
+
+/**
+ * The market at a glance, what a player decides on: the price (sold average), the last sale and
+ * the cheapest live copy, each as a gap to that price (in %), and a quick-sale price.
+ * @param {{ avg, series }} rm  one rarity's market (rarityMarket)
+ * @param {number|null} cheapest  the cheapest live normal copy of the card, if any
+ */
+export function marketVerdict(rm, cheapest) {
+  const pct = (v) => (rm.avg && v != null ? Math.round(((v - rm.avg) / rm.avg) * 100) : null);
+  const last = rm.series.at(-1)?.price ?? null;
+  // ponytail: sells first by undercutting the cheapest listing by 1, never above the market price
+  const sellAt = cheapest != null ? Math.max(1, Math.min(cheapest - 1, rm.avg ?? cheapest)) : rm.avg;
+  return { last, lastPct: pct(last), cheapest, cheapestPct: pct(cheapest), sellAt };
 }

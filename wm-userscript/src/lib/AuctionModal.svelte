@@ -9,10 +9,11 @@
 
   let { auction, balance = null, onclose, onwallet, onswitch } = $props();
 
-  let a = $state(auction);
-  let bids = $state(auction.bids || []);
+  // writable deriveds: start from the props, take local updates, reset if a prop changes
+  let a = $derived(auction);
+  let bids = $derived(auction.bids || []);
   let iBid = $state(false);
-  let bal = $state(balance);
+  let bal = $derived(balance);
   let busy = $state(false);
   let msg = $state("");
   let msgOk = $state(false);
@@ -37,8 +38,13 @@
   // Every live listing of this card, side by side (null while loading, [] on failure).
   let others = $state(null);
   let soldAvg = $state(null);
-  data.sameCard(auction.card).then((l) => (others = l), () => (others = []));
-  marketValueFor(auction.card).then((v) => (soldAvg = v));
+  $effect(() => {
+    const card = auction.card;
+    let live = true; // a late answer for a card no longer shown is dropped
+    data.sameCard(card).then((l) => live && (others = l), () => live && (others = []));
+    marketValueFor(card).then((v) => live && (soldAvg = v));
+    return () => (live = false);
+  });
 
   let now = $state(Date.now());
   $effect(() => { const t = setInterval(() => (now = Date.now()), 1000); return () => clearInterval(t); });
@@ -57,7 +63,7 @@
   const canReprice = $derived(mine && phase === "live" && a.bid == null && now >= repriceAt);
   const bidders = $derived(new Set(bids.map((b) => b.bidder)).size);
 
-  let amount = $state(String(auction.bid != null ? auction.bid + 1 : auction.base ?? 1));
+  let amount = $derived(String(auction.bid != null ? auction.bid + 1 : auction.base ?? 1));
   let newBase = $state("");
   const tooPoor = $derived(bal != null && Number(amount) > bal);
 
@@ -113,9 +119,8 @@
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onclose?.()} />
 
-<div class="modal-backdrop" onclick={() => onclose?.()} role="presentation">
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="auc" role="dialog" aria-modal="true" aria-labelledby="wm-auc-title" tabindex="-1" use:anchorCentered onclick={(e) => e.stopPropagation()}>
+<div class="modal-backdrop" onclick={(e) => e.target === e.currentTarget && onclose?.()} role="presentation">
+  <div class="auc" role="dialog" aria-modal="true" aria-labelledby="wm-auc-title" tabindex="-1" use:anchorCentered>
     <button class="modal-close" onclick={() => onclose?.()} aria-label="Fermer"><Icon name="close" width={2} class="x-ico" /></button>
 
     <div class="auc-top">

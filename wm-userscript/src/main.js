@@ -62,7 +62,15 @@ function hideOverlay() {
 const OFF_KEY = "wm-off";
 const LAST_KEY = "wm-last"; // last remastered route, where "Remaster" brings you back to
 const overlayOff = () => { try { return localStorage.getItem(OFF_KEY) === "1"; } catch { return false; } };
-const SWAP_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4L3 8l4 4M3 8h13M17 20l4-4-4-4M21 16H8"/></svg>';
+// the swap icon, built as nodes (no innerHTML: extension stores flag it)
+function swapIcon() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg"), path = document.createElementNS(NS, "path");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", width: 15, height: 15, fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) svg.setAttribute(k, v);
+  path.setAttribute("d", "M7 4L3 8l4 4M3 8h13M17 20l4-4-4-4M21 16H8");
+  svg.append(path);
+  return svg;
+}
 let switchBtn = null;
 function renderSwitch(remastered) {
   if (!switchBtn) {
@@ -80,7 +88,9 @@ function renderSwitch(remastered) {
     switchBtn.id = "wm-switch";
     document.body.appendChild(switchBtn);
   }
-  switchBtn.innerHTML = SWAP_ICON + `<span>${remastered ? "Site original" : "Remaster"}</span>`;
+  const label = document.createElement("span");
+  label.textContent = remastered ? "Site original" : "Remaster";
+  switchBtn.replaceChildren(swapIcon(), label);
   switchBtn.classList.toggle("to-remaster", !remastered);
   switchBtn.title = remastered ? "Revenir au site d'origine (aucune fonctionnalité perdue)" : "Revenir à l'interface remaster";
   switchBtn.setAttribute("aria-label", switchBtn.title);

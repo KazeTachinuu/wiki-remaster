@@ -20,6 +20,7 @@ export const MockData = {
       packs_remaining: p.packs_remaining,
       pack_cap: p.pack_cap,
       currency: p.wikibidous_balance,
+      regen_seconds: p.regen_seconds,
       next_regen_seconds: p.next_regen_seconds,
       is_pro: !!p.is_pro,
       is_vip: !!p.is_vip,

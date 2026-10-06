@@ -28,6 +28,12 @@ export function countdown(s, { seconds = false } = {}) {
   return seconds ? `${sec} s` : "< 1 min";
 }
 
+/** A short wait, clock style for a tight spot: "4:05", "1 h 05" past an hour. */
+export function clock(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.max(0, s % 60);
+  return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
 /** Seconds from now until an ISO date (0 once passed, null if unparseable). */
 export function secondsUntil(iso, now = Date.now()) {
   const t = Date.parse(iso || "");

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1A1D19"/>
+      <stop offset="1" stop-color="#0A0B0A"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5EE0A8"/>
+      <stop offset="1" stop-color="#22A06B"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".55" r=".5">
+      <stop offset="0" stop-color="#3CCB8E" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#3CCB8E" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <rect x=".75" y=".75" width="126.5" height="126.5" rx="27.25" fill="none" stroke="#fff" stroke-opacity=".07" stroke-width="1.5"/>
+  <circle cx="64" cy="70" r="52" fill="url(#glow)"/>
+  <!-- the card behind, a quiet echo -->
+  <rect x="38" y="22" width="54" height="76" rx="9" fill="#3CCB8E" fill-opacity=".18" transform="rotate(-9 65 60)"/>
+  <!-- the card -->
+  <rect x="38" y="28" width="54" height="76" rx="9" fill="url(#card)" transform="rotate(5 65 66)"/>
+  <!-- a fine W, cut in the card's ink -->
+  <path d="M48.5 55 L56.5 80 L65 61 L73.5 80 L81.5 55" fill="none" stroke="#0C1A13" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" transform="rotate(5 65 66)"/>
+</svg>

@@ -4,7 +4,8 @@
   import { anchorCentered } from "./anchor.js";
   import Icon from "./Icon.svelte";
   import ListingCompare from "./ListingCompare.svelte";
-  import { marketRarities, rarityMarket } from "../wm/market.js";
+  import { rarityMarket, marketVerdict } from "../wm/market.js";
+  import { compareListings } from "../wm/compare.js";
   import { data, RNAME, marketValueFor } from "../wm/index.js";
   import { settings } from "./settings.svelte.js";
   import { nf } from "./format.js";
@@ -14,8 +15,8 @@
   const c = $derived(item.card);
 
   let tab = $state("details");
-  let summary = $state(item.card.summary || "");
-  let sumState = $state(item.card.summary ? "done" : "loading");
+  let summary = $derived(c.summary || "");
+  let sumState = $derived(c.summary ? "done" : "loading");
   let market = $state(null);
   let marketState = $state("idle");
   let mval = $state(null);
@@ -29,13 +30,19 @@
   let modalEl;
 
   // Cards from a pack or the catalog may lack the article extract: fetch it from Wikipedia.
-  if (!c.summary) {
-    fetch("https://fr.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(c.title))
+  $effect(() => {
+    if (c.summary) return;
+    const ctl = new AbortController();
+    fetch("https://fr.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(c.title), { signal: ctl.signal })
       .then((r) => (r.ok ? r.json() : {}))
-      .then((d) => (summary = d.extract || ""), () => {})
-      .finally(() => (sumState = summary ? "done" : "none"));
-  }
-  marketValueFor(c).then((v) => (mval = v));
+      .then((d) => { summary = d.extract || ""; sumState = summary ? "done" : "none"; }, () => { if (!ctl.signal.aborted) sumState = "none"; });
+    return () => ctl.abort();
+  });
+  $effect(() => {
+    let live = true;
+    marketValueFor(c).then((v) => live && (mval = v));
+    return () => (live = false);
+  });
 
   $effect(() => {
     if (tab !== "market" || marketState !== "idle") return;
@@ -96,13 +103,15 @@
   const obtained = $derived(item.obtained_at ? new Date(item.obtained_at).toLocaleDateString("fr", { day: "numeric", month: "long", year: "numeric" }) : "");
   const dshort = (t) => (t ? new Date(t).toLocaleDateString("fr", { day: "numeric", month: "short" }) : "");
 
-  // The market by rarity (a card's sales keep the rarity they sold at): its current one first,
-  // every other one it sold at to pick from; the selected one's average for every account, its
-  // price over time, stats and latest sales for a Pro account.
-  let rarityPick = $state(null);
-  const rarities = $derived(marketRarities(market, c.rarity));
-  const shownRarity = $derived(rarities.includes(rarityPick) ? rarityPick : c.rarity);
-  const rm = $derived(rarityMarket(market, shownRarity));
+  // The card's market: its sales at the rarity it has now. The game re-tiers cards over time and
+  // keeps older sales under their old rarity, prices of a card that is no longer the same tier.
+  const rm = $derived(rarityMarket(market, c.rarity));
+  // the cheapest live normal copy
+  const deal = $derived(listings ? compareListings(listings, now).rows.find((r) => r.cheapest && !r.is_shiny) ?? null : null);
+  const v = $derived(marketVerdict(rm, deal?.price ?? null));
+  const gap = (p) => (p == null ? "" : p === 0 ? "au prix du marché" : p < 0 ? `${-p} % sous le marché` : `${p} % au-dessus`);
+  function sellNow() { tab = "details"; price = String(v.sellAt); openSell(); }
+  let hover = $state(null); // the chart point read out (pointer or keyboard)
   const dtime = (t) => new Date(t).toLocaleString("fr", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
   // Sold price over time (Pro only), from at least two sales.
@@ -114,7 +123,12 @@
     const W = 100, H = 40, pad = 3;
     const pts = s.map((p, i) => [pad + (i / (s.length - 1)) * (W - 2 * pad), pad + (1 - (p.price - min) / span) * (H - 2 * pad)]);
     const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-    return { d, area: `${d} L${pts.at(-1)[0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`, min, max, first: dshort(s[0].at), last: dshort(s.at(-1).at) };
+    const avgY = rm.avg == null ? null : Math.min(H, Math.max(0, pad + (1 - (rm.avg - min) / span) * (H - 2 * pad)));
+    return {
+      d, area: `${d} L${pts.at(-1)[0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`, first: dshort(s[0].at), last: dshort(s.at(-1).at),
+      avgY: avgY == null ? null : (avgY / H) * 100, // in % of the plot height, like each point's y
+      points: s.map((p, i) => ({ ...p, x: pts[i][0], y: (pts[i][1] / H) * 100 })),
+    };
   });
 
   $effect(() => {
@@ -138,9 +152,8 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="modal-backdrop" onclick={() => onclose?.()} role="presentation">
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-modal-title" tabindex="-1" bind:this={modalEl} use:anchorCentered onclick={(e) => e.stopPropagation()}>
+<div class="modal-backdrop" onclick={(e) => e.target === e.currentTarget && onclose?.()} role="presentation">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-modal-title" tabindex="-1" bind:this={modalEl} use:anchorCentered>
     <button class="modal-close" onclick={() => onclose?.()} aria-label="Fermer"><Icon name="close" width={2} class="x-ico" /></button>
     <div class="modal-card"><Card card={c} big caption={false} count={item.count} shiny={item.is_shiny} starred={item.starred} /></div>
     <div class="modal-info">
@@ -225,47 +238,68 @@
           {:else if marketState === "error"}
             <p class="modal-sum muted">Marché indisponible pour le moment.</p>
           {:else if market}
-            {#if rarities.length > 1}
-              <div class="pill-picks market-rarities" role="radiogroup" aria-label="Rareté">
-                {#each rarities as r (r)}
-                  <button role="radio" aria-checked={r === shownRarity} class:on={r === shownRarity} style="--kind:var(--r-{r.toLowerCase()})" onclick={() => (rarityPick = r)}>{RNAME[r]}</button>
-                {/each}
-              </div>
-            {/if}
             {#if rm.avg != null}
-              <div class="market-avg">
-                <div class="ma-label">Prix moyen en {RNAME[shownRarity]}</div>
-                <div class="ma-value">{nf(rm.avg)} <span>pts</span></div>
-              </div>
-            {:else}
-              <p class="modal-sum muted">Aucune vente en {RNAME[shownRarity]} pour cette carte.</p>
-            {/if}
-            {#if chart}
-              <div class="market-chart">
-                <div class="mc-head">Prix de vente dans le temps</div>
-                <div class="mc-plot">
-                  <div class="mc-y"><span>{nf(chart.max)}</span><span>{nf(chart.min)}</span></div>
-                  <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Prix de vente dans le temps">
-                    <path d={chart.area} fill="var(--accent)" fill-opacity="0.12" />
-                    <path d={chart.d} fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
-                  </svg>
+              <!-- the answers first: what it is worth, where the last sale went, the best buy now -->
+              <div class="mk-kpis">
+                <div class="mk-kpi">
+                  <span class="mk-h">Prix du marché</span>
+                  <b class="gold">{nf(rm.avg)}</b>
+                  <small>{rm.count ? `${rm.count} vente${rm.count > 1 ? "s" : ""}, de ${nf(rm.min)} à ${nf(rm.max)}` : "moyenne des ventes"}</small>
                 </div>
-                <div class="mc-x"><span>{chart.first}</span><span>{chart.last}</span></div>
+                {#if v.last != null}
+                  <div class="mk-kpi">
+                    <span class="mk-h">Dernière vente</span>
+                    <b>{nf(v.last)}</b>
+                    <small class:up={v.lastPct > 0} class:down={v.lastPct < 0}>{gap(v.lastPct)}</small>
+                  </div>
+                {/if}
+                {#if deal}
+                  <button class="mk-kpi buy" class:good={v.cheapestPct < 0} onclick={() => openListing(deal)} aria-label="Voir la vente la moins chère, {nf(deal.price)} WikiBidous">
+                    <span class="mk-h">En vente dès</span>
+                    <b>{nf(deal.price)}</b>
+                    <small>{gap(v.cheapestPct)}<Icon name="next" width={2} /></small>
+                  </button>
+                {/if}
               </div>
-            {/if}
-            {#if rm.count}
-              <div class="market-grid">
-                <div class="mstat"><div class="l">Ventes</div><div class="v">{rm.count}</div></div>
-                <div class="mstat"><div class="l">Min</div><div class="v">{nf(rm.min)}</div></div>
-                <div class="mstat"><div class="l">Max</div><div class="v">{nf(rm.max)}</div></div>
-              </div>
-              <section class="market-recent">
-                <h3>Dernières ventes</h3>
-                <ol>{#each rm.recent as sale (sale.id ?? sale.at)}<li><span>{dtime(sale.at)}</span><b><span class="auc-coin"></span>{nf(sale.price)}</b></li>{/each}</ol>
-              </section>
+              {#if !readonly && !done && item.count && v.sellAt}
+                <div class="mk-sell">
+                  <span>Pour vendre vite : <b>{nf(v.sellAt)} pts</b>{deal ? ", juste sous l'offre la moins chère" : ", le prix du marché"}</span>
+                  <button class="btn primary" onclick={sellNow}>Mettre en vente</button>
+                </div>
+              {/if}
+              {#if chart}
+                {@const pt = hover != null ? chart.points[hover] : null}
+                <section class="mk-price">
+                  <h3 class="mk-h">Évolution des prix</h3>
+                  <div class="mk-plot">
+                    <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                      <path d={chart.area} fill="var(--accent)" fill-opacity="0.12" />
+                      <path d={chart.d} fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+                    </svg>
+                    {#if chart.avgY != null}<div class="mk-avgline" style:top="{chart.avgY}%"><span>marché</span></div>{/if}
+                    <!-- one slice per sale, as wide as its share of the plot: easy to hit, each a focusable readout -->
+                    {#each chart.points as p, i (p.id ?? p.at)}
+                      <button class="mk-slice" class:on={hover === i} style:left="{p.x}%" style:width="{100 / chart.points.length}%" style:--y="{p.y}%"
+                        onpointerenter={() => (hover = i)} onpointerleave={() => hover === i && (hover = null)} onfocus={() => (hover = i)} onblur={() => (hover = null)}
+                        aria-label="{dtime(p.at)} : {nf(p.price)} points"></button>
+                    {/each}
+                    {#if pt}<div class="mk-tip" class:flip={pt.x > 70} class:flop={pt.x < 30} style:left="{pt.x}%" style:top="{pt.y}%"><b><span class="auc-coin"></span>{nf(pt.price)}</b>{dtime(pt.at)}</div>{/if}
+                  </div>
+                  <div class="mk-x"><span>{chart.first}</span><span>{chart.last}</span></div>
+                </section>
+              {/if}
+            {:else}
+              <p class="modal-sum muted">Aucune vente de cette carte pour le moment.</p>
             {/if}
           {/if}
-          {#if marketState !== "error"}<ListingCompare {listings} soldAvg={rarityMarket(market, c.rarity).avg} {now} onpick={openListing} />{/if}
+          <!-- what can be bought now comes before the history -->
+          {#if marketState !== "error"}<ListingCompare {listings} soldAvg={rm.avg} {now} onpick={openListing} />{/if}
+          {#if market && rm.count}
+            <details class="mk-history">
+              <summary>Historique des ventes <span>{rm.recent.length}{rm.count > rm.recent.length ? ` sur ${rm.count}` : ""}</span></summary>
+              <ol class="mk-list">{#each rm.recent as sale (sale.id ?? sale.at)}<li><span>{dtime(sale.at)}</span><b><span class="auc-coin"></span>{nf(sale.price)}</b></li>{/each}</ol>
+            </details>
+          {/if}
         </div>
       {/if}
       {#if msg}<div class="modal-msg" class:ok={msgOk}>{msg}</div>{/if}

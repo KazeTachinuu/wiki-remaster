@@ -3,7 +3,7 @@
   // part (faces), or the rarity art, framed in the rarity colour, the rarity code readable in a
   // corner. Never a whole card squeezed into a few pixels.
   import { settings } from "./settings.svelte.js";
-  import { rarityArt } from "./cardArt.js";
+  import { rarityArt } from "./art.js";
   let { card, shiny = false } = $props();
   let failed = $state(false);
   // a sensitive image stays hidden here too: the rarity art stands in

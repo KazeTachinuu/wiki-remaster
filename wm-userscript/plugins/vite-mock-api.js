@@ -243,7 +243,7 @@ export default function mockApiPlugin() {
         }
 
         // Mock-only: the real profile comes from Supabase, see src/wm/api.js.
-        if (p === "/api/profile") { regen(); return send(res, 200, { ...p_, next_regen_seconds: nextRegenSeconds(), pack_cap: PACK_CAP }); }
+        if (p === "/api/profile") { regen(); return send(res, 200, { ...p_, next_regen_seconds: nextRegenSeconds(), regen_seconds: REGEN_SECONDS, pack_cap: PACK_CAP }); }
         if (p === "/api/reset" && m === "POST") {
           state.collection.clear(); state.listings.clear(); state.bids.clear();
           Object.assign(p_, { packs_remaining: PACK_CAP, wikibidous_balance: START_BALANCE, pity_counter: 0 });

@@ -19,8 +19,9 @@
 /* Any element tagged with a rarity gets its colour as --rc. */
 [data-r="C"]{--rc:var(--r-c)}[data-r="PC"]{--rc:var(--r-pc)}[data-r="R"]{--rc:var(--r-r)}
 [data-r="SR"]{--rc:var(--r-sr)}[data-r="UR"]{--rc:var(--r-ur)}[data-r="L"]{--rc:var(--r-l)}
-#wm-app-root{color-scheme:dark;font-family:var(--body);color:var(--fg);-webkit-font-smoothing:antialiased;line-height:1.5}
+#wm-app-root{color-scheme:dark;scrollbar-color:var(--line2) transparent;caret-color:var(--accent);font-family:var(--body);color:var(--fg);-webkit-font-smoothing:antialiased;line-height:1.5}
 #wm-app-root button{font-family:inherit;cursor:pointer}
+#wm-app-root ::selection{background:color-mix(in oklab,var(--accent) 32%,transparent);color:var(--fg)}
 #wm-app-root img{display:block}
 #wm-app-root a{color:inherit;text-decoration:none}
 #wm-app-root :is(a,button,input,select,textarea,[tabindex]:not([tabindex="-1"])):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -74,7 +75,7 @@
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:var(--s4);
   padding:var(--s5) clamp(var(--s5),4vw,var(--s7));
   border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;
-  background:color-mix(in oklab,var(--bg) 86%,transparent);backdrop-filter:blur(10px)}
+  background:color-mix(in oklab,var(--bg) 96%,transparent);}
 .crumb{font-family:var(--display);font-weight:600;font-size:16px;letter-spacing:-.01em}
 .wallet{display:flex;align-items:center;gap:var(--s2)}
 .wallet .menu-btn,.nav-short{display:none}
@@ -86,6 +87,21 @@
 .chip b{color:var(--fg);font-weight:600}
 .chip .cico{width:14px;height:14px;flex:none}
 .chip .cico.pk{color:var(--accent)} .chip .cico.coin{color:var(--r-l)}
+/* the pack chip: while packs regenerate, a ring fills around the icon toward the next one, and the wait shows beside the count */
+.pk-ring{position:relative;display:grid;place-items:center;width:22px;height:22px;margin:-4px -3px -4px -4px}
+.pk-chip.regen .pk-ring::before{content:"";position:absolute;inset:0;border-radius:50%;
+  background:conic-gradient(var(--accent) calc(var(--p) * 1turn),var(--line2) 0);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 calc(100% - 1.5px));mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 calc(100% - 1.5px))}
+.pk-chip.regen .pk-ring .cico{width:12px;height:12px}
+.pk-next{padding-left:8px;margin-left:1px;border-left:1px solid var(--line2);font-size:12px;font-weight:500;color:var(--fg-soft);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pk-next.ready{color:var(--accent);font-weight:600}
+/* today's Pro pack waiting: a small gold tag, the chip leads to it */
+.pk-pro{padding:3px 7px;border-radius:999px;font:700 10.5px/1 var(--display);letter-spacing:.03em;color:var(--accent-ink);background:var(--r-l);white-space:nowrap}
+button.pk-chip{font:inherit;cursor:pointer;transition:border-color .15s}
+button.pk-chip:hover{border-color:var(--line2)}
+.pk-chip{position:relative}
+/* phones: the tag shrinks to a gold dot on the icon (its words stay in the label) */
+@media(max-width:560px){.pk-pro{position:absolute;top:4px;left:26px;width:9px;height:9px;padding:0;font-size:0;box-shadow:0 0 0 2px var(--elev)}}
 .badge{display:inline-flex;align-items:center;font-family:var(--display);font-weight:700;font-size:11px;letter-spacing:.04em;padding:6px 11px;border-radius:999px}
 .badge.pro{background:var(--accent);color:var(--accent-ink)}
 
@@ -95,15 +111,18 @@
 .loadbar.on{opacity:1}
 .loadbar::before{content:"";position:absolute;inset:0 auto 0 0;width:45%;border-radius:0 3px 3px 0;
   background:linear-gradient(90deg,transparent,var(--accent) 30%,#b6f5d8 60%,var(--accent) 85%,transparent);
-  box-shadow:0 0 12px color-mix(in oklab,var(--accent) 70%,transparent),0 0 3px var(--accent);animation:loadbar 1.25s cubic-bezier(.45,.05,.4,.95) infinite}
+  box-shadow:0 0 12px color-mix(in oklab,var(--accent) 70%,transparent),0 0 3px var(--accent)}
+/* animated only while shown: a hidden bar must not keep the page painting */
+.loadbar.on::before{animation:loadbar 1.25s cubic-bezier(.45,.05,.4,.95) infinite}
 @keyframes loadbar{from{transform:translateX(-110%)}to{transform:translateX(330%)}}
 /* centred with margin auto, not left:50% (which would cap its width at half the screen) */
 .loadcap{position:fixed;left:0;right:0;margin-inline:auto;width:max-content;bottom:24px;z-index:2147483602;display:flex;align-items:center;gap:10px;max-width:calc(100vw - 32px);
-  padding:10px 16px 10px 14px;border-radius:999px;background:color-mix(in oklab,var(--elev2) 92%,transparent);backdrop-filter:blur(8px);
+  padding:10px 16px 10px 14px;border-radius:999px;background:color-mix(in oklab,var(--elev2) 92%,transparent);
   border:1px solid var(--line2);box-shadow:0 18px 40px -18px #000;color:var(--fg);font-size:13px;font-weight:500;
   opacity:0;transform:translateY(10px);transition:opacity .25s ease,transform .25s ease;pointer-events:none}
 .loadcap.on{opacity:1;transform:none}
 .loadcap .spin{color:var(--accent);width:14px;height:14px}
+.loadcap:not(.on) .spin{animation:none}
 .loadcap.slow .spin{color:var(--r-ur)}
 .loadcap-txt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .loadcap-t{color:var(--fg-faint);font-variant-numeric:tabular-nums;flex:none}
@@ -155,7 +174,14 @@
 .snd-vol{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:10px;color:var(--fg-soft);transition:opacity .15s}
 .snd-vol.off{opacity:.5}
 .snd-vol svg{width:16px;height:16px}
-.snd-vol input{width:100%;accent-color:var(--accent);cursor:pointer}
+.snd-vol input{width:100%;height:20px;margin:0;background:none;cursor:pointer;-webkit-appearance:none;appearance:none}
+.snd-vol input::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(var(--accent),var(--accent)) 0/var(--pct) 100% no-repeat,var(--line2)}
+.snd-vol input::-moz-range-track{height:4px;border-radius:2px;background:var(--line2)}
+.snd-vol input::-moz-range-progress{height:4px;border-radius:2px;background:var(--accent)}
+.snd-vol input::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border-radius:50%;background:var(--fg);border:none;box-shadow:0 1px 4px #0008;transition:transform .12s}
+.snd-vol input::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--fg);border:none;box-shadow:0 1px 4px #0008;transition:transform .12s}
+.snd-vol input:hover::-webkit-slider-thumb,.snd-vol input:active::-webkit-slider-thumb{transform:scale(1.15)}
+.snd-vol input:hover::-moz-range-thumb,.snd-vol input:active::-moz-range-thumb{transform:scale(1.15)}
 .snd-vol output{min-width:4ch;text-align:right;font-variant-numeric:tabular-nums;color:var(--fg);font-size:13px}
 .snd-note{font-size:12px;line-height:1.4;color:var(--fg-faint)}
 .notif-panel{position:absolute;top:46px;right:0;width:min(340px,86vw);max-height:66vh;overflow:auto;background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);box-shadow:0 24px 60px -24px #000;z-index:31;padding:var(--s2);overscroll-behavior:contain}
@@ -186,7 +212,7 @@
 .link-btn{background:none;border:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .pull-ready .sub{color:var(--fg-soft);margin-top:calc(-1 * var(--s3));font-size:15px}
 
-/* Booster: the real foil pack (/card_pack.png), floating with a holographic sheen,
+/* Booster: the real foil pack (inline, art.js; --pack), floating with a holographic sheen,
    that shakes and bursts open on click. */
 /* The pack fills the height left after the title, counter and buttons (~540px of chrome),
    so it grows on tall screens and never pushes the button below the fold. 0.773 = 2550/3300. */
@@ -196,16 +222,17 @@
 .booster:hover:not(:disabled):not(.opening){transform:translateY(-8px)}
 .booster:disabled{cursor:default}
 .booster-main{position:absolute;inset:0;transform-origin:50% 60%;animation:booster-float 5.5s ease-in-out infinite}
-.booster-main img{width:100%;height:100%;object-fit:contain;display:block;-webkit-user-drag:none;user-select:none}
+/* the pack, its stacked copies and the sheen all draw the one inline image (--pack): it ships once */
+.booster-img{position:absolute;inset:0;background:var(--pack) center/contain no-repeat}
 /* foil sheen, clipped to the pack silhouette via the pack image as a mask */
 .booster-shine{position:absolute;inset:0;pointer-events:none;mix-blend-mode:screen;opacity:0;
   background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.85) 47%,rgba(150,210,255,.7) 50%,rgba(255,236,180,.7) 53%,transparent 60%);
   background-repeat:no-repeat;background-size:260% 260%;
-  -webkit-mask:url(/card_pack.png) center/contain no-repeat;mask:url(/card_pack.png) center/contain no-repeat;
+  -webkit-mask:var(--pack) center/contain no-repeat;mask:var(--pack) center/contain no-repeat;
   animation:booster-sheen 5s ease-in-out infinite}
 @keyframes booster-sheen{0%{background-position:130% 0;opacity:0}30%{opacity:.95}52%{background-position:-30% 100%;opacity:.95}72%,100%{background-position:-30% 100%;opacity:0}}
 @keyframes booster-float{0%,100%{transform:translateY(0) rotate(-1.2deg)}50%{transform:translateY(-12px) rotate(1.2deg)}}
-.booster-back{position:absolute;inset:0;background-size:contain;background-repeat:no-repeat;background-position:center;filter:brightness(.62) grayscale(.25)}
+.booster-back{position:absolute;inset:0;background:var(--pack) center/contain no-repeat;filter:brightness(.62) grayscale(.25)}
 .booster-back.b1{transform:translate(11px,9px) rotate(4deg) scale(.985);opacity:.7}
 .booster-back.b2{transform:translate(22px,18px) rotate(8deg) scale(.97);opacity:.4}
 .booster.is-empty .booster-main{filter:grayscale(.7) brightness(.55);opacity:.8;animation-play-state:paused}
@@ -251,7 +278,7 @@
 .pull-ready[data-kind="special"]{--kind:var(--r-l)}
 .pull-ready[data-kind="pro"] .tab-ready,.pull-ready[data-kind="pro"] .tabs button.on{border-bottom-color:var(--kind)}
 .pull-ready[data-kind="special"] .tabs button.on{border-bottom-color:var(--kind)}
-.pull-ready:not([data-kind="normal"]) .booster-main img{filter:drop-shadow(0 0 28px color-mix(in oklab,var(--kind) 55%,transparent)) drop-shadow(0 0 70px color-mix(in oklab,var(--kind) 30%,transparent))}
+.pull-ready:not([data-kind="normal"]) .booster-img{filter:drop-shadow(0 0 28px color-mix(in oklab,var(--kind) 55%,transparent)) drop-shadow(0 0 70px color-mix(in oklab,var(--kind) 30%,transparent))}
 .pull-ready:not([data-kind="normal"]) .btn.primary{background:var(--kind);border-color:var(--kind);color:#15121c}
 .pull-ready:not([data-kind="normal"]) .pw-time{color:var(--kind)}
 .booster-mark{position:absolute;left:50%;bottom:9%;transform:translateX(-50%);padding:5px 14px;border-radius:999px;font:800 13px/1 var(--display);letter-spacing:.12em;
@@ -260,8 +287,6 @@
 .pill-picks button{padding:7px 16px;border-radius:999px;font:600 13.5px var(--body);color:var(--fg-soft);background:var(--elev);border:1px solid var(--line);cursor:pointer;transition:color .15s,border-color .15s}
 .pill-picks button:hover{color:var(--fg);border-color:var(--line2)}
 .pill-picks button.on{color:var(--fg);border-color:var(--kind,var(--accent));background:color-mix(in oklab,var(--kind,var(--accent)) 12%,var(--elev))}
-.market-rarities{justify-content:flex-start;margin-bottom:var(--s3)}
-.market-recent h3{font-family:var(--display);font-size:13px;color:var(--fg-soft);margin:var(--s4) 0 8px}
 .market-recent ol{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
 .market-recent li{display:flex;justify-content:space-between;align-items:center;gap:var(--s3);padding:8px 14px;font-size:13px;color:var(--fg-soft);font-variant-numeric:tabular-nums}
 .market-recent li + li{border-top:1px solid var(--line)}
@@ -389,16 +414,17 @@
 .wc-top{position:absolute;top:11px;left:11px;right:11px;z-index:3;display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
 .wc-rtag{font-family:var(--display);font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;color:var(--accent-ink);background:var(--rc);box-shadow:0 1px 5px rgba(0,0,0,.4)}
 .wc-flags{display:flex;gap:5px;align-items:center}
-.wc-count{background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:6px;backdrop-filter:blur(3px)}
+.wc-count{background:rgba(0,0,0,.72);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:6px;}
 .wc-new{background:var(--accent);color:var(--accent-ink);font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px}
-.wc-shiny{background:#111014;color:#f3d27a;font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;box-shadow:inset 0 0 0 1px #d7a93c,0 0 10px #e9c15a73;backdrop-filter:blur(3px)}
-.wc-star{background:rgba(0,0,0,.55);border:1px solid color-mix(in oklab,var(--r-l) 55%,rgba(255,255,255,.3));color:var(--r-l);font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;backdrop-filter:blur(3px)}
+.wc-shiny{background:#111014;color:#f3d27a;font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;box-shadow:inset 0 0 0 1px #d7a93c,0 0 10px #e9c15a73;}
+.wc-star{background:rgba(0,0,0,.72);border:1px solid color-mix(in oklab,var(--r-l) 55%,rgba(255,255,255,.3));color:var(--r-l);font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;}
 .wc-cap{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:14px 14px 16px;display:flex;flex-direction:column;gap:var(--s1);background:linear-gradient(to top,rgba(5,6,5,.92),rgba(5,6,5,.55) 72%,transparent)}
 .wc.bare .wc-cap{background:none}
 .wc-name{font-family:var(--display);font-weight:700;font-size:15px;line-height:1.18;color:#fff;text-shadow:0 1px 10px rgba(0,0,0,.65);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .wc-cat{font-size:10.5px;color:rgba(255,255,255,.82);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 6px rgba(0,0,0,.7)}
-.wc-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.22)}
-.wc-stats{display:flex;gap:12px;font-size:11px;color:rgba(255,255,255,.85);letter-spacing:.02em;text-shadow:0 1px 6px rgba(0,0,0,.7)}
+.wc-meta{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 8px;margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.22)}
+/* a stat never breaks inside itself; on a narrow card the value drops to its own line instead */
+.wc-stats{display:flex;gap:.9em;white-space:nowrap;font-size:11px;color:rgba(255,255,255,.85);letter-spacing:.02em;text-shadow:0 1px 6px rgba(0,0,0,.7)}
 .wc-stats b{color:#fff;font-weight:700;font-variant-numeric:tabular-nums}
 .wc-val{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:var(--r-l);font-variant-numeric:tabular-nums;text-shadow:0 1px 6px rgba(0,0,0,.7);white-space:nowrap}
 .wc-val::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--coin);box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent)}
@@ -438,6 +464,21 @@
 .isel svg{width:16px;height:16px;color:var(--fg-soft);flex:none}
 .isel select{appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--fg);font-family:var(--body);font-size:14px;font-weight:500;padding:0 18px 0 0;height:100%;cursor:pointer;outline:none}
 #wm-app-root option{background:var(--elev);color:var(--fg)}
+/* customizable select (Chromium 135+): the open list in the app's style, the native one elsewhere */
+@supports (appearance:base-select){
+  #wm-app-root select,#wm-app-root ::picker(select){appearance:base-select}
+  #wm-app-root select{display:inline-flex;align-items:center}
+  #wm-app-root select::picker-icon{display:none} /* .isel draws its own chevron */
+  #wm-app-root ::picker(select){background:var(--elev);border:1px solid var(--line2);border-radius:12px;padding:4px;margin-block:6px;
+    box-shadow:0 18px 40px -16px #000;min-width:anchor-size(width);
+    opacity:0;translate:0 -4px;transition:opacity .15s ease,translate .15s ease,overlay .15s allow-discrete,display .15s allow-discrete}
+  #wm-app-root select:open::picker(select){opacity:1;translate:0 0}
+  @starting-style{#wm-app-root select:open::picker(select){opacity:0;translate:0 -4px}}
+  #wm-app-root option{background:none;color:var(--fg-soft);font:500 14px/1.2 var(--body);padding:9px 12px;border-radius:8px;cursor:pointer;transition:background .12s,color .12s}
+  #wm-app-root option::checkmark{display:none}
+  #wm-app-root option:hover,#wm-app-root option:focus-visible{background:var(--elev2);color:var(--fg);outline:none}
+  #wm-app-root option:checked{color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,transparent)}
+}
 .isel::after{content:"";position:absolute;right:12px;width:8px;height:8px;border-right:2px solid var(--fg-soft);border-bottom:2px solid var(--fg-soft);transform:rotate(45deg) translateY(-2px);pointer-events:none}
 .iconbtn{display:inline-flex;align-items:center;gap:8px;background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);height:42px;padding:0 14px;border-radius:11px;font-family:var(--body);font-size:14px;font-weight:500;white-space:nowrap;transition:.15s}
 .iconbtn svg{width:17px;height:17px;flex:none}
@@ -465,11 +506,13 @@
 .rl.fav.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}
 .rl.fav.on .rl-ico{fill:var(--r-l);stroke:var(--r-l)}
 .rl.shiny.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}
-.card-btn{position:relative;display:block;width:100%;padding:0;margin:0;border:none;background:none;text-align:left;cursor:pointer;content-visibility:auto;contain-intrinsic-size:auto 300px}
+.card-btn{position:relative;display:block;width:100%;padding:0;margin:0;border:none;background:none;text-align:left;cursor:pointer;content-visibility:auto;contain-intrinsic-size:auto 300px;
+  /* content-visibility clips paint to the box: leave room for the hover lift and its shadow */
+  overflow-clip-margin:40px}
 .card-btn.picking .wc{opacity:.55;transition:opacity .15s}
 .card-btn.picked .wc{opacity:1}
 .pick-overlay{position:absolute;inset:0;z-index:10;border-radius:var(--radius-lg);border:3px solid transparent;display:flex;align-items:flex-start;justify-content:flex-end;padding:9px;pointer-events:none;transition:.15s}
-.pick-overlay .pick-check{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.9);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;backdrop-filter:blur(3px)}
+.pick-overlay .pick-check{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.9);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;}
 .pick-overlay.on{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 22%,transparent);box-shadow:0 0 0 2px var(--accent) inset}
 .pick-check svg{width:16px;height:16px}
 .pick-overlay.on .pick-check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -486,7 +529,7 @@
 @keyframes sk{to{background-position:-200% 0}}
 
 /* card detail modal */
-.modal-backdrop{position:fixed;inset:0;background:rgba(6,8,6,.72);backdrop-filter:blur(6px);z-index:2147483600;display:flex;align-items:flex-start;justify-content:center;padding:var(--s4) var(--s5);animation:fade .18s ease}
+.modal-backdrop{position:fixed;inset:0;background:rgba(6,8,6,.84);z-index:2147483600;display:flex;align-items:flex-start;justify-content:center;padding:var(--s4) var(--s5);animation:fade .18s ease}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 /* card : info = 1 : φ. The modal grows with the screen, so the card does too (240px at 740). */
 .modal{position:relative;background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);max-width:clamp(740px,46vw,960px);width:100%;max-height:calc(100dvh - 2 * var(--s4));overflow:auto;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.618fr);gap:var(--s6);padding:var(--s6);align-items:start}
@@ -501,6 +544,71 @@
 .modal-sum.muted{color:var(--fg-faint)}
 .modal .btn{text-decoration:none;text-align:center}
 .modal-panel{display:flex;flex-direction:column;align-items:stretch;gap:var(--s4)}
+/* the card stays in view while a long tab scrolls beside it */
+.modal-card{position:sticky;top:0;align-self:start}
+/* the market tab: one price summary, then plain lists under one heading style */
+.mk-h,.modal .cmp-head h3{font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);margin:0 0 var(--s2)}
+.mk-price{background:var(--elev);border:1px solid var(--line);border-radius:var(--radius);padding:var(--s4)}
+/* the decision row: market price, last sale, best buy; each a label, a number, what it means */
+.mk-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:var(--s2)}
+.mk-kpi{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;padding:var(--s3) var(--s3) 10px;border-radius:12px;background:var(--elev);border:1px solid var(--line);text-align:left;color:var(--fg);font:inherit}
+.mk-kpi .mk-h{margin:0}
+.mk-kpi b{font:700 24px/1.15 var(--display);font-variant-numeric:tabular-nums}
+.mk-kpi b.gold{color:var(--r-l)}
+.mk-kpi small{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--fg-faint);line-height:1.3}
+.mk-kpi small svg{width:12px;height:12px;flex:none}
+/* the best buy is a way in: it opens that listing; under the market price it reads as a deal */
+.mk-kpi.buy{cursor:pointer;transition:border-color .15s,background .15s}
+.mk-kpi.buy:hover{border-color:var(--line2);background:var(--elev2)}
+.mk-kpi.buy.good{border-color:color-mix(in oklab,var(--accent) 40%,var(--line));background:color-mix(in oklab,var(--accent) 7%,var(--elev))}
+.mk-kpi.buy.good small{color:var(--accent);font-weight:600}
+/* owners: the quick-sale price and the way to it */
+.mk-sell{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);flex-wrap:wrap;padding:10px 10px 10px var(--s4);border-radius:12px;border:1px dashed var(--line2);font-size:13px;color:var(--fg-soft)}
+.mk-sell b{color:var(--fg)}
+.mk-sell span{flex:1 1 200px}
+.mk-sell .btn{padding-block:8px;margin-left:auto}
+.mk-plot{position:relative;height:104px;margin-top:var(--s4)}
+.mk-plot svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+/* the average as a dashed rule across the plot */
+.mk-avgline{position:absolute;left:0;right:0;border-top:1px dashed color-mix(in oklab,var(--r-l) 55%,transparent);pointer-events:none}
+.mk-avgline span{position:absolute;left:0;bottom:3px;padding:0 4px;border-radius:4px;background:var(--elev);font-size:10px;font-weight:600;color:color-mix(in oklab,var(--r-l) 80%,transparent)}
+/* each sale: a full-height slice to hover or focus, its dot drawn at the price */
+.mk-slice{position:absolute;top:0;bottom:0;translate:-50% 0;padding:0;border:none;background:none;cursor:crosshair}
+.mk-slice::before{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:1px solid var(--line2);opacity:0;transition:opacity .12s}
+.mk-slice::after{content:"";position:absolute;left:50%;top:var(--y);width:7px;height:7px;translate:-50% -50%;border-radius:50%;background:var(--surface);border:2px solid var(--accent);transition:scale .12s}
+.mk-slice.on::before{opacity:1}
+.mk-slice.on::after{scale:1.4;background:var(--accent)}
+#wm-app-root .mk-slice:focus-visible{outline:none}
+#wm-app-root .mk-slice:focus-visible::after{box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 40%,transparent)}
+.mk-tip{position:absolute;translate:-50% calc(-100% - 12px);display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 10px;border-radius:9px;
+  background:var(--elev2);border:1px solid var(--line2);box-shadow:0 10px 24px -12px #000;font-size:11px;color:var(--fg-soft);white-space:nowrap;pointer-events:none;z-index:1}
+.mk-tip b{display:inline-flex;align-items:center;gap:5px;font:700 14px/1.2 var(--display);color:var(--r-l);font-variant-numeric:tabular-nums}
+.mk-tip.flip{translate:calc(-100% + 16px) calc(-100% - 12px)}
+.mk-tip.flop{translate:-16px calc(-100% - 12px)}
+/* the full sale list, folded under its count */
+.mk-history{border-top:1px solid var(--line);padding-top:var(--s3)}
+.mk-history summary{list-style:none;display:flex;align-items:center;gap:var(--s2);cursor:pointer;font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint)}
+.mk-history summary::-webkit-details-marker{display:none}
+.mk-history summary span{letter-spacing:0;text-transform:none;font-weight:500;color:var(--fg-faint)}
+.mk-history summary::after{content:"";width:6px;height:6px;margin-left:auto;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;rotate:45deg;translate:0 -2px;transition:rotate .15s}
+.mk-history[open] summary::after{rotate:225deg;translate:0 2px}
+.mk-history summary:hover{color:var(--fg-soft)}
+.mk-list{list-style:none;margin:var(--s3) 0 0;padding:0}
+.mk-list li{display:flex;justify-content:space-between;align-items:center;padding:7px 2px;font-size:13px;color:var(--fg-soft);font-variant-numeric:tabular-nums}
+.mk-list li + li{border-top:1px solid var(--line)}
+.mk-list b{display:inline-flex;align-items:center;gap:6px;color:var(--r-l)}
+.mk-x{display:flex;justify-content:space-between;font-size:11px;color:var(--fg-faint);margin-top:var(--s1)}
+/* live listings sit flat in the modal, like the sales above them, not a box in a box */
+.modal .cmp{background:none;border:none;padding:0}
+.modal .cmp-head{margin-bottom:var(--s2);flex-direction:column;align-items:flex-start;gap:2px}
+.modal .cmp-head h3{margin:0}
+/* in the card detail the listings are the main act: one line each, no scroll box inside the scrolling modal */
+.modal .cmp-list{max-height:none;overflow:visible}
+.modal .cmp-row{grid-template-columns:minmax(72px,auto) minmax(0,1fr) auto minmax(0,auto);row-gap:0}
+.modal .cmp-gap{text-align:left}
+.modal .cmp-time{flex-wrap:nowrap}
+.modal .cmp-tag{display:none}
+.modal .cmp .auc-empty{padding-top:0}
 .modal-wiki{color:var(--accent);font-weight:600;font-size:13.5px;text-decoration:none;align-self:flex-start}
 .modal-wiki:hover{text-decoration:underline}
 .actions{border-top:1px solid var(--line);padding-top:var(--s4)}
@@ -515,7 +623,7 @@
   .app{grid-template-columns:1fr}
   .side{position:fixed;inset:auto 0 0 0;height:auto;z-index:20;flex-direction:row;gap:0;
     padding:6px max(6px,env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-right));
-    border-right:0;border-top:1px solid var(--line);background:color-mix(in oklab,var(--surface) 90%,transparent);backdrop-filter:blur(16px)}
+    border-right:0;border-top:1px solid var(--line);background:color-mix(in oklab,var(--surface) 97%,transparent);}
   .side .brand,.nav-sep,.nav-grid,.side-foot{display:none}
   .nav{flex:1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;overflow:visible}
   .nav button{flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden}
@@ -545,7 +653,7 @@
   .pager{gap:var(--s2)}
   .pager-btn{flex:1 1 0;min-width:0;justify-content:center;padding-inline:var(--s3)}
   .pager-info{flex:none}
-  .tool-actions > *{flex:none}
+  .tool-actions > *{flex:1 0 auto;justify-content:center;padding-inline:10px}
   .rarity-legend:not(.picker-chips){flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-inline:calc(-1 * var(--s4));padding-inline:var(--s4)}
   .rarity-legend:not(.picker-chips) > *{flex:none}
   /* what floats at the bottom sits above the tab bar */
@@ -573,8 +681,8 @@
   .bulk-bar .btn{flex:1 1 0;padding-inline:var(--s3)}
 }
 @media(max-width:560px){
-  .modal{grid-template-columns:1fr;justify-items:center;text-align:center;gap:var(--s4);padding:var(--s5)}
-  .modal-card{width:190px}
+  .modal{grid-template-columns:1fr;justify-items:center;gap:var(--s4);padding:var(--s5)}
+  .modal-card{width:190px;position:static}
   .fact{flex-basis:40%}
   /* two cards a row on every phone: readable at 360 px, roomy on a large phone (a third column
      would squeeze each card's stats line) */
@@ -610,27 +718,15 @@
 .sell2-dur{white-space:nowrap;background:var(--elev2);border:1px solid var(--line);color:var(--fg-soft);border-radius:9px;padding:9px 2px;font-size:12px;font-weight:600;cursor:pointer;transition:.12s;font-variant-numeric:tabular-nums}
 .sell2-dur:hover{color:var(--fg);border-color:var(--line2)}
 .sell2-dur.on{background:color-mix(in oklab,var(--accent) 16%,transparent);border-color:var(--accent);color:var(--accent)}
-.market-avg{background:var(--elev);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
-.market-avg .ma-label{font-size:11.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--fg-soft)}
-.market-avg .ma-value{font-family:var(--display);font-weight:700;font-size:24px;color:var(--r-l);font-variant-numeric:tabular-nums;margin-top:2px}
-.market-avg .ma-value span{font-size:13px;color:var(--fg-faint);font-weight:600}
 
 /* modal tabs + market */
 .modal-tabs{display:inline-flex;gap:4px;background:var(--elev);border:1px solid var(--line);border-radius:10px;padding:3px;align-self:flex-start;margin-top:2px}
 .modal-tabs button{background:none;border:none;color:var(--fg-soft);font-family:var(--display);font-weight:600;font-size:13px;padding:6px 14px;border-radius:8px;cursor:pointer;transition:.15s}
 .modal-tabs button.on{background:var(--accent);color:var(--accent-ink)}
-.market-chart{margin-top:var(--s1)}
-.mc-head{font-size:11.5px;color:var(--fg-soft);margin-bottom:6px}
 .mc-plot{display:flex;gap:8px;align-items:stretch}
 .mc-y{display:flex;flex-direction:column;justify-content:space-between;text-align:right;min-width:30px;padding:2px 0;font-size:10px;color:var(--fg-faint);font-variant-numeric:tabular-nums}
 .mc-plot svg{flex:1;height:56px;display:block;background:var(--elev);border:1px solid var(--line);border-radius:10px}
 .mc-x{display:flex;justify-content:space-between;font-size:10px;color:var(--fg-faint);margin-top:4px;margin-left:38px}
-.market-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:var(--s3);margin-top:var(--s3)}
-.mstat{background:var(--elev);border:1px solid var(--line);border-radius:12px;padding:12px 10px;text-align:center}
-.mstat .l{font-size:10.5px;color:var(--fg-faint)}
-.mstat .v{font-family:var(--display);font-weight:700;font-size:20px;font-variant-numeric:tabular-nums;margin-top:2px}
-@media(max-width:560px){.market-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
-
 /* compact stat strip (replaces the big stat boxes) */
 .facts{display:flex;flex-wrap:wrap;gap:var(--s2)}
 .fact{flex:1 1 112px;background:var(--elev);border:1px solid var(--line);border-radius:11px;padding:10px 13px}
@@ -646,10 +742,10 @@
 .wc.is-unowned{filter:saturate(.72) brightness(.9)}
 .card-btn:hover .wc.is-unowned{filter:saturate(1) brightness(1)}
 /* wishlist heart marker, sits in .wc-flags */
-.wc-wish{background:rgba(0,0,0,.55);border:1px solid color-mix(in oklab,var(--r-sr) 60%,rgba(255,255,255,.3));color:var(--r-sr);font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;backdrop-filter:blur(3px)}
+.wc-wish{background:rgba(0,0,0,.72);border:1px solid color-mix(in oklab,var(--r-sr) 60%,rgba(255,255,255,.3));color:var(--r-sr);font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;}
 /* sensitive-image blur + centred label */
 .wc.is-nsfw .wc-photo,.wc.is-nsfw .wc-blur{filter:blur(18px) saturate(.7);transform:scale(1.2)}
-.wc-nsfw{position:absolute;z-index:3;top:44%;left:50%;transform:translate(-50%,-50%);font:600 11px/1 var(--display);color:var(--fg);background:rgba(0,0,0,.6);border:1px solid var(--line2);padding:6px 12px;border-radius:999px;backdrop-filter:blur(3px);white-space:nowrap}
+.wc-nsfw{position:absolute;z-index:3;top:44%;left:50%;transform:translate(-50%,-50%);font:600 11px/1 var(--display);color:var(--fg);background:rgba(0,0,0,.6);border:1px solid var(--line2);padding:6px 12px;border-radius:999px;white-space:nowrap}
 /* informational (non-interactive) rarity legend on the catalog */
 /* Reloading (search, filter, sort, page): the old results stay, dimmed, while a bar sweeps
    across the top and a soft shimmer passes over the cards, so it never looks frozen. */
@@ -701,8 +797,8 @@
 .auc-foot .auc-seller{min-width:0}
 .auc-dup{flex:none;font:700 11px/1 var(--display);color:var(--fg);background:var(--elev2);border:1px solid var(--line2);border-radius:999px;padding:4px 8px;font-variant-numeric:tabular-nums}
 /* same-card comparison, inside the auction dialog */
-.cmp-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);flex-wrap:wrap;margin-bottom:10px}
-.cmp-head h3{margin:0}
+.cmp-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3);flex-wrap:wrap;margin-bottom:var(--s2)}
+.cmp-head h3,.auc-panel .cmp-head h3{margin:0}
 .cmp-sum{font-size:12.5px;color:var(--fg-soft)}
 .cmp-sum b{color:var(--fg);font-variant-numeric:tabular-nums}
 .cmp-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:calc(5 * 44px);overflow:auto;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
@@ -777,13 +873,13 @@
 .auc-note{color:var(--fg-soft);font-size:13px}
 .auc-bottom{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
 .auc-panel{background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:14px 16px;min-width:0}
-.auc-panel h3{font-family:var(--display);font-weight:700;font-size:13px;color:var(--fg-soft);margin-bottom:10px}
+.auc-panel h3{font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);margin-bottom:var(--s2)}
 .auc-chart{position:relative;height:130px;margin-left:36px}
 .auc-chart svg{width:100%;height:100%;display:block;overflow:visible}
 .auc-chart .mc-y{position:absolute;left:-36px;top:0;bottom:0}
 .auc-pt{position:absolute;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--elev)}
 .auc-axis{display:flex;justify-content:space-between;margin:8px 0 0 36px;font-size:11px;color:var(--fg-faint)}
-.auc-empty{color:var(--fg-faint);font-size:13px;padding:8px 0}
+.auc-empty{color:var(--fg-faint);font-size:13px;padding:2px 0 4px}
 .auc-feed{list-style:none;margin:0;padding:0;max-height:176px;overflow:auto}
 .auc-feed li{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:13px}
 .auc-feed li:first-child{border-top:0}
@@ -1016,6 +1112,17 @@
 .tm-head{display:flex;align-items:center;gap:var(--s3);padding-right:var(--s6)}
 .tm-head h2{font:700 20px/1.2 var(--display)}
 
+/* wide: the packs screen is exactly the window under the top bar, never a scrollbar: the pack
+   takes whatever height the title, count and button leave, at its own shape */
+@media (min-width:1000px){
+  .main:has(> .view > .pulls > .pull-ready){height:100dvh}
+  .view:has(> .pulls > .pull-ready){flex:1;min-height:0;display:flex;flex-direction:column;padding-block:var(--s4) var(--s5)}
+  .pulls:has(> .pull-ready){flex:1;min-height:0;display:flex;flex-direction:column}
+  .pull-ready{flex:1;min-height:0;gap:var(--s4)}
+  .pull-ready .booster-stage{flex:1;min-height:0}
+  .pull-ready .booster{width:auto;height:100%;max-height:620px;min-height:180px}
+}
+
 /* wide: list and preview side by side, the page itself no longer scrolls */
 @media (min-width:1000px){
   .main:has(.tr-split){height:100dvh}
@@ -1185,8 +1292,8 @@
 .coins-field .coins-ico{position:absolute;left:12px;pointer-events:none}
 .coins-field .af-input{height:42px;padding:0 64px 0 36px;font-variant-numeric:tabular-nums;font-weight:600;border-color:color-mix(in oklab,var(--r-l) 40%,var(--line2))}
 .coins-field .af-unit{right:40px}
-.coins-field .af-input::-webkit-inner-spin-button,.coins-field .af-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
-.coins-field .af-input{-moz-appearance:textfield;appearance:textfield}
+.af-input::-webkit-inner-spin-button,.af-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.af-input[type=number]{-moz-appearance:textfield;appearance:textfield}
 .coins-x{position:absolute;right:8px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:0;border-radius:7px;background:transparent;color:var(--fg-faint);cursor:pointer}
 .coins-x:hover{background:var(--elev2);color:var(--fg)}
 .coins-x svg{width:13px;height:13px}
@@ -1265,15 +1372,11 @@
     padding-top:calc(var(--s5) + env(safe-area-inset-top));padding-bottom:calc(var(--s6) + env(safe-area-inset-bottom))}
   /* the close button stays in its corner while the sheet scrolls, readable over a card photo */
   .modal:not(.composer) > .modal-close,.auc > .modal-close{position:fixed;top:calc(var(--s3) + env(safe-area-inset-top));right:var(--s3);
-    width:40px;height:40px;display:grid;place-items:center;border-radius:50%;background:color-mix(in oklab,var(--surface) 80%,transparent);backdrop-filter:blur(8px);border:1px solid var(--line2)}
+    width:40px;height:40px;display:grid;place-items:center;border-radius:50%;background:color-mix(in oklab,var(--surface) 94%,transparent);border:1px solid var(--line2)}
   .modal-info,.modal-panel{justify-self:stretch;width:100%}
   .fact{flex:1 1 28%}
   /* the page says what it is in the top bar: an intro line (and its empty title block) only costs height */
   .meta.lead,.coll-head > div:has(> .meta.lead){display:none}
-  /* a single tool (the market's sort) shares the search row */
-  .coll-tools:has(.tool-actions > :only-child){flex-wrap:nowrap}
-  .coll-tools:has(.tool-actions > :only-child) .search-wrap{flex:1 1 0}
-  .coll-tools:has(.tool-actions > :only-child) .tool-actions{width:auto;flex:none}
   .lbl-long{display:none}
 }
 .lbl-short{display:none}

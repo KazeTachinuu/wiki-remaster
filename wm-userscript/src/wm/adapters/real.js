@@ -75,6 +75,7 @@ export const RealData = {
       packs_remaining: packs,
       pack_cap: PACK_CAP,
       currency: lastBalance,
+      regen_seconds: REGEN_MS[p.is_pro ? "pro" : "base"] / 1000, // one pack's wait, for the progress to the next
       next_regen_seconds: regen ? Math.max(0, Math.round((last + REGEN_MS[p.is_pro ? "pro" : "base"] - Date.now()) / 1000)) : null,
       is_pro: !!p.is_pro,
       is_vip: !!p.is_vip,

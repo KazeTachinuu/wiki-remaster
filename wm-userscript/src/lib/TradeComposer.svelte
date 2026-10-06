@@ -23,17 +23,16 @@
   // onsent(ok): the offer went through (true), or the server answered with an error (false: it may exist anyway)
   let { counter = null, balance = null, onclose, onsent } = $props();
 
+  // writable deriveds: a counter-offer fills them in, the player edits them from there
   // a counter-offer answers the other player: their copies stay theirs, mine stay mine
-  // svelte-ignore state_referenced_locally
-  let friend = $state(counter?.other ?? null);
+  let friend = $derived(counter?.other ?? null);
   let friends = $state(null);
   let friendsError = $state(""); // a failed load is not "no friends"
   function loadFriends() {
     friends = null; friendsError = "";
     data.friends().then((f) => (friends = f), (e) => (friendsError = e.message || "Impossible de charger vos amis."));
   }
-  // svelte-ignore state_referenced_locally
-  if (!friend) loadFriends();
+  $effect(() => { if (!friend) untrack(loadFriends); });
 
   let mine = $state([]);
   let myPending = $state([]); // my copies already locked in a pending trade
@@ -60,22 +59,17 @@
   $effect(() => { const d = theirs.data; if (d) untrack(() => (theirPages = addPage(theirPages, theirs.loaded, d))); });
 
   const asItem = (row) => ({ userCardId: row.id, card: row.card, is_shiny: row.is_shiny });
-  // svelte-ignore state_referenced_locally
-  let give = $state(new Map((counter?.give ?? []).map((it) => [it.userCardId, it])));
-  // svelte-ignore state_referenced_locally
-  let get = $state(new Map((counter?.get ?? []).map((it) => [it.userCardId, it])));
-  // svelte-ignore state_referenced_locally
-  let giveCoins = $state(counter?.giveCoins ?? 0);
-  // svelte-ignore state_referenced_locally
-  let getCoins = $state(counter?.getCoins ?? 0);
+  let give = $derived(new Map((counter?.give ?? []).map((it) => [it.userCardId, it])));
+  let get = $derived(new Map((counter?.get ?? []).map((it) => [it.userCardId, it])));
+  let giveCoins = $derived(counter?.giveCoins ?? 0);
+  let getCoins = $derived(counter?.getCoins ?? 0);
   let tab = $state("mine");
   let sheet = $state(false); // phone: the offer panel is open over the grid
   let busy = $state(false);
   let msg = $state("");
 
   // the countered offer locks its own copies until it is answered: they stay pickable here
-  // svelte-ignore state_referenced_locally
-  const countered = new Set([...(counter?.give ?? []), ...(counter?.get ?? [])].map((it) => it.userCardId));
+  const countered = $derived(new Set([...(counter?.give ?? []), ...(counter?.get ?? [])].map((it) => it.userCardId)));
   const lockedBut = (ids) => new Set([...ids].filter((id) => !countered.has(id)));
   const myLocked = $derived(lockedBut(myPending));
   const theirLocked = $derived(lockedBut(theirs.data?.pending ?? []));
@@ -118,9 +112,8 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="modal-backdrop" role="presentation" onclick={close}>
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="modal composer" class:pick-friend={!friend} role="dialog" aria-modal="true" aria-labelledby="wm-compose-title" tabindex="-1" use:anchorCentered onclick={(e) => e.stopPropagation()}>
+<div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && close()}>
+  <div class="modal composer" class:pick-friend={!friend} role="dialog" aria-modal="true" aria-labelledby="wm-compose-title" tabindex="-1" use:anchorCentered>
     <button class="modal-close" disabled={busy} onclick={close} aria-label="Fermer"><Icon name="close" width={2} class="x-ico" /></button>
     <header class="tm-head">
       {#if friend}<Avatar user={friend} size={36} />{/if}

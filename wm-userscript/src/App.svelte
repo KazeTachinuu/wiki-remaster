@@ -12,7 +12,8 @@
   import SoundSettings from "./lib/SoundSettings.svelte";
   import { settings, toggleHideStats, useOriginalSite } from "./lib/settings.svelte.js";
   import HumanCheck from "./lib/HumanCheck.svelte";
-  import { ago } from "./lib/format.js";
+  import { ago, clock } from "./lib/format.js";
+  import { packTimer } from "./lib/packTimer.svelte.js";
   import { tabTicks } from "./lib/sfx.js";
   import { scrollFade } from "./lib/scrollFade.js";
 
@@ -69,6 +70,24 @@
   // Loads of one kind running at once share one request (a pack open patches the profile and
   // reports a change back to back). The app's own sync re-reads packs, not coins.
   const profileLoads = new Map();
+  // The pack chip counts down to the next free pack on every screen, its ring filling as it nears.
+  const packsFull = $derived(profile?.packs_remaining != null && profile.packs_remaining >= (profile.pack_cap ?? 10));
+  const packTime = packTimer(() => (packsFull ? null : profile?.next_regen_seconds ?? null), () => loadProfile({ sync: true }));
+  const packFill = $derived(packTime.secs != null && profile?.regen_seconds ? 1 - packTime.secs / profile.regen_seconds : 1);
+  // Pro's daily pack (one per calendar day): re-read with each profile, and again past midnight
+  let proDaily = $state(null); // { eligible, claimedToday }
+  $effect(() => {
+    if (!profile?.is_pro) { proDaily = null; return; }
+    let live = true;
+    const read = () => data.proDaily().then((d) => live && (proDaily = d), () => live && (proDaily = null));
+    read();
+    const midnight = new Date(); midnight.setHours(24, 0, 5, 0);
+    const t = setTimeout(read, midnight - Date.now());
+    return () => { live = false; clearTimeout(t); };
+  });
+  const packTitle = $derived(`Paquets : ${profile?.packs_remaining ?? "?"} sur ${profile?.pack_cap ?? 10}` +
+    (packTime.secs == null ? "" : packTime.secs ? `. Prochain dans ${clock(packTime.secs)}` : ". Prochain paquet prêt") +
+    (proDaily?.eligible ? ". Pack PRO du jour disponible" : proDaily?.claimedToday ? ". Pack PRO : le prochain à minuit" : ""));
   function loadProfile(opts = {}) {
     const key = JSON.stringify(opts);
     if (!profileLoads.has(key)) profileLoads.set(key, data.profile(opts).then((p) => (profile = p), () => {}).finally(() => profileLoads.delete(key)));
@@ -145,6 +164,10 @@
     toasts = toasts.filter((t) => t.id !== n.id);
   }
 
+  // A notification without a link is still a control: focusable, and Enter or Space opens it.
+  const asButton = (n) => (n.href ? {} : { role: "button", tabindex: 0,
+    onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openNotif(n, e); } } });
+
   // Keyboard shortcuts. Keys typed into a field stay in the field (Esc leaves it).
   let appEl;
   // every tab bar of the app (dialogs included) ticks when it switches
@@ -214,15 +237,14 @@
             {#if unread.length}<span class="bell-badge">{unread.length}</span>{/if}
           </button>
           {#if notifOpen}
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="notif-scrim" onclick={() => (notifOpen = false)}></div>
+            <div class="notif-scrim" role="presentation" onclick={() => (notifOpen = false)}></div>
             <div class="notif-panel" role="dialog" aria-label="Notifications">
               <div class="notif-head">
                 Notifications{#if unread.length}<span class="notif-count">{unread.length}</span>
                   <button class="link-btn" onclick={() => markRead()}>Tout marquer comme lu</button>{/if}
               </div>
               {#each notifs as n (n.id)}
-                <svelte:element this={n.href ? "a" : "div"} href={n.href} class="notif-item" class:unread={!n.read} onclick={(e) => openNotif(n, e)}>
+                <svelte:element this={n.href ? "a" : "div"} href={n.href} {...asButton(n)} class="notif-item" class:unread={!n.read} onclick={(e) => openNotif(n, e)}>
                   {#if !n.read}<span class="notif-dot"></span>{/if}
                   <div class="notif-body">
                     <div class="notif-title">{n.title}</div>
@@ -237,9 +259,12 @@
           {/if}
         </div>
         {#if profile?.is_pro}<span class="badge pro">Pro</span>{/if}
-        <span class="chip" title="Paquets">
-          <Icon name="pulls" class="cico pk" /><b>{profile?.packs_remaining ?? "-"}</b><span class="chip-cap">/{profile?.pack_cap ?? 10}</span>
-        </span>
+        <button type="button" class="chip pk-chip" class:regen={packTime.secs != null} title={packTitle} aria-label="{packTitle}. Ouvrir des paquets" onclick={() => go(VIEWS[0])}>
+          <span class="pk-ring" style:--p={packFill}><Icon name="pulls" class="cico pk" /></span>
+          <b>{profile?.packs_remaining ?? "-"}</b><span class="chip-cap">/{profile?.pack_cap ?? 10}</span>
+          {#if packTime.secs != null}<span class="pk-next" class:ready={!packTime.secs}>{packTime.secs ? clock(packTime.secs) : "prêt"}</span>{/if}
+          {#if proDaily?.eligible}<span class="pk-pro">+1 PRO</span>{/if}
+        </button>
         <span class="chip" title="WikiBidous">
           <Icon name="coin" class="cico coin" /><b>{profile?.currency ?? "-"}</b>
         </span>
@@ -261,8 +286,7 @@
   </main>
 
   {#if menuOpen}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="sheet-scrim" onclick={() => (menuOpen = false)}></div>
+    <div class="sheet-scrim" role="presentation" onclick={() => (menuOpen = false)}></div>
     <div class="sheet" role="dialog" aria-modal="true" aria-label="Menu">
       <div class="sheet-grab"></div>
       <section class="sheet-sec"><SoundSettings /></section>
@@ -287,7 +311,7 @@
     <div class="toasts" role="status" aria-live="polite">
       {#each toasts as n (n.id)}
         <div class="toast-wrap" role="presentation" onmouseenter={() => clearTimeout(toastTimers.get(n.id))} onmouseleave={() => hideLater(n, 3000)}>
-          <svelte:element this={n.href ? "a" : "div"} href={n.href} class="toast" onclick={(e) => openNotif(n, e)}>
+          <svelte:element this={n.href ? "a" : "div"} href={n.href} {...asButton(n)} class="toast" onclick={(e) => openNotif(n, e)}>
             <Icon name="bell" width={1.8} />
             <div><b>{n.title}</b>{#if n.message}<span>{n.message}</span>{/if}</div>
           </svelte:element>
@@ -298,8 +322,7 @@
   {/if}
 
   {#if help}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="kbd-help-scrim" onclick={() => (help = false)}>
+    <div class="kbd-help-scrim" role="presentation" onclick={() => (help = false)}>
       <div class="kbd-help" role="dialog" aria-label="Raccourcis clavier">
         <h3>Raccourcis clavier</h3>
         {#each SHORTCUTS as [k, what]}<div class="kbd-row"><span class="kbd">{k}</span>{what}</div>{/each}

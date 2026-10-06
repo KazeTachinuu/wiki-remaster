@@ -23,7 +23,7 @@
 </div>
 <label class="snd-vol" class:off={!on}>
   <Icon name="soundLow" />
-  <input type="range" min="0" max="100" step="5" value={pct} oninput={slide} onchange={() => play("success")} aria-label="Volume" aria-valuetext="{pct} %" />
+  <input type="range" min="0" max="100" step="5" value={pct} style:--pct="{pct}%" oninput={slide} onchange={() => play("success")} aria-label="Volume" aria-valuetext="{pct} %" />
   <Icon name="sound" />
   <output>{pct} %</output>
 </label>

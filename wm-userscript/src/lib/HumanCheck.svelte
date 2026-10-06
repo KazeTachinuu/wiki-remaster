@@ -36,9 +36,8 @@
 <svelte:window onkeydown={(e) => open && e.key === "Escape" && resolveHuman(false)} />
 
 {#if open}
-  <div class="modal-backdrop hc-backdrop" role="presentation" onclick={() => resolveHuman(false)}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div class="modal hc" role="dialog" aria-modal="true" aria-labelledby="wm-hc-title" tabindex="-1" use:anchorCentered onclick={(e) => e.stopPropagation()}>
+  <div class="modal-backdrop hc-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && resolveHuman(false)}>
+    <div class="modal hc" role="dialog" aria-modal="true" aria-labelledby="wm-hc-title" tabindex="-1" use:anchorCentered>
       <h2 class="hc-title" id="wm-hc-title">Vérification rapide</h2>
       <p class="hc-sub">Le jeu demande de temps en temps de confirmer que vous êtes humain. Votre action reprendra toute seule.</p>
       {#if failed}

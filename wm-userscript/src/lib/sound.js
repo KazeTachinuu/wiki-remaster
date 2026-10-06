@@ -66,35 +66,38 @@ function bell(freq, t, peak = 0.16, decay = 0.9) {
     o.connect(g).connect(master); o.start(t); o.stop(t + dk + 0.05);
   }
 }
-function tone(type, f0, f1, t, dur, peak) {
+function tone(type, f0, f1, t, dur, peak, attack = 0.004) {
   const o = ctx.createOscillator(), g = ctx.createGain();
   o.type = type; o.frequency.setValueAtTime(f0, t);
   if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
-  env(g, t, peak, 0.004, dur);
+  env(g, t, peak, attack, dur);
   o.connect(g).connect(master); o.start(t); o.stop(t + dur + 0.05);
 }
 // filtered noise with a moving band: rips, swishes, swells
-function noise(t, dur, peak, type, f0, f1, q = 1) {
+function noise(t, dur, peak, type, f0, f1, q = 1, attack = 0.008) {
   const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
   s.buffer = noiseBuf; f.type = type; f.Q.value = q;
   f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
-  env(g, t, peak, 0.008, dur);
+  env(g, t, peak, attack, dur);
   s.connect(f).connect(g).connect(master); s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.05);
 }
 const sparkle = (t, n, spread, top = 1) => { for (let i = 0; i < n; i++) bell(2093 * top * [1, 1.26, 1.5, 1.68, 2][i % 5], t + i * spread, 0.035, 0.35); };
 
-const N = { C4: 261.6, E4: 329.6, G4: 392, B4: 493.9, C5: 523.3, D5: 587.3, E5: 659.3, G5: 784, B5: 987.8, C6: 1046.5, E6: 1318.5, G6: 1568 };
+// a few percent of pitch drift, so a sound heard many times in a row never repeats exactly
+const vary = (f) => f * (1 + (Math.random() - 0.5) * 0.05);
+
+const N = { C4: 261.6, E4: 329.6, G4: 392, B4: 493.9, C5: 523.3, D5: 587.3, E5: 659.3, G5: 784, A5: 880, B5: 987.8, C6: 1046.5, E6: 1318.5, G6: 1568 };
 
 const SOUNDS = {
   rip(t) {
-    noise(t, 0.22, 0.22, "bandpass", 500, 1800, 0.8); // a soft papery tear
-    tone("sine", 110, 48, t + 0.03, 0.26, 0.32); // a soft thump
-    noise(t + 0.16, 0.4, 0.07, "lowpass", 1400, 250, 0.6); // the air coming out
+    // the foil tearing: a quick run of papery crackles climbing as the tear runs across
+    for (let i = 0; i < 4; i++) noise(t + i * 0.035, 0.05, 0.08, "bandpass", 1200 + i * 500, 2600 + i * 600, 1.5);
+    // then the pack opens: a breath of air and a soft tone that both rise (a fall reads as a drop)
+    noise(t + 0.1, 0.35, 0.05, "bandpass", 700, 3200, 0.7);
+    tone("sine", N.C5, N.G5, t + 0.12, 0.25, 0.05, 0.03);
   },
-  flip(t) {
-    noise(t, 0.09, 0.32, "bandpass", 2200, 900, 1.4);
-    tone("triangle", 2400, 1800, t + 0.01, 0.03, 0.05);
-  },
+  // the card turning over: a soft swish of air (eased in, no click), not a knock
+  flip(t) { noise(t, 0.14, 0.12, "bandpass", 1300, 2800, 0.9, 0.025); },
   C(t) { bell(N.E5, t, 0.11, 0.55); },
   PC(t) { bell(N.G5, t, 0.11, 0.5); bell(N.C6, t + 0.07, 0.1, 0.6); },
   R(t) { [N.C5, N.E5, N.G5].forEach((f, i) => bell(f, t + i * 0.07, 0.12, 0.8)); },
@@ -115,22 +118,30 @@ const SOUNDS = {
       const o = ctx.createOscillator(); o.type = "sawtooth"; o.frequency.value = fr; o.detune.value = det;
       o.connect(f); o.start(t); o.stop(t + 2.3);
     }
-    tone("sine", 90, 38, t, 0.7, 0.55);
+    tone("sine", 110, 82, t, 0.6, 0.18); // a warm low swell under the chord, short of a boom
     [N.C5, N.E5, N.G5, N.C6, N.E6, N.G6].forEach((fr, i) => bell(fr, t + 0.12 + i * 0.075, 0.13, 1.3));
     sparkle(t + 0.6, 10, 0.07, 1.25);
   },
-  select(t) { tone("sine", 880, 1320, t, 0.07, 0.16); },
-  deselect(t) { tone("sine", 1320, 880, t, 0.07, 0.12); },
+  // Interface sounds are heard all the time, so they stay felt more than heard: mid-low pitch,
+  // a rounded attack (no click), under 100 ms, a few dB under the pack and rarity sounds, never a world apart.
+  select(t) { const f = vary(N.E5); tone("sine", f, f * 1.33, t, 0.08, 0.09, 0.008); },
+  deselect(t) { const f = vary(N.A5); tone("sine", f, f * 0.75, t, 0.08, 0.07, 0.008); },
   success(t) { bell(N.C6, t, 0.14, 0.6); bell(N.G6, t + 0.09, 0.12, 0.8); },
   error(t) { tone("triangle", 220, 196, t, 0.14, 0.16); tone("triangle", 196, 174.6, t + 0.13, 0.2, 0.14); },
-  tick(t) { tone("sine", 2600, 2400, t, 0.02, 0.04); },
+  // a soft wooden tap for tabs: a low body and a breath of texture on top
+  tick(t) { const f = vary(440); tone("sine", f, f * 0.85, t, 0.05, 0.06, 0.006); noise(t, 0.025, 0.02, "bandpass", 1600, 1100, 1.2); },
 };
 
 /** Play a sound now (or after `delay` seconds). Silent when muted or without Web Audio. */
+const lastAt = {};
 export function play(name, delay = 0) {
   if (!soundOn() || !SOUNDS[name]) return;
   if (!audio()) return;
-  try { SOUNDS[name](ctx.currentTime + 0.01 + delay); } catch {}
+  const t = ctx.currentTime + 0.01 + delay;
+  // the same sound twice within 60 ms (a double click, a quick run of tabs) plays once, never stacked
+  if (t - (lastAt[name] ?? -1) < 0.06) return;
+  lastAt[name] = t;
+  try { SOUNDS[name](t); } catch {}
 }
 
 /** A revealed card: the swish, then its rarity's sting. */

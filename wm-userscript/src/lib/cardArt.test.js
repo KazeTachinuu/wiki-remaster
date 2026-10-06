@@ -1,16 +1,16 @@
 import { describe, it, expect } from "bun:test";
-import { rarityArt } from "./cardArt.js";
+import { artKey } from "./cardArt.js";
 
-describe("rarityArt", () => {
-  it("is the real site's art for the card's rarity", () => {
-    expect(rarityArt({ rarity: "R" })).toBe("https://www.wiki-masters.com/rare.png");
-    expect(rarityArt({ rarity: "L" })).toBe("https://www.wiki-masters.com/legendaire.png");
+describe("artKey", () => {
+  it("is the card's rarity", () => {
+    expect(artKey({ rarity: "R" })).toBe("R");
+    expect(artKey({ rarity: "L" })).toBe("L");
   });
   it("is the onyx art for a shiny Legendary only", () => {
-    expect(rarityArt({ rarity: "L" }, true)).toBe("https://www.wiki-masters.com/shiny/onyx-art.webp");
-    expect(rarityArt({ rarity: "SR" }, true)).toBe("https://www.wiki-masters.com/super_rare.png");
+    expect(artKey({ rarity: "L" }, true)).toBe("onyx");
+    expect(artKey({ rarity: "SR" }, true)).toBe("SR");
   });
   it("falls back to the common art for an unknown rarity", () => {
-    expect(rarityArt({ rarity: "?" })).toBe("https://www.wiki-masters.com/commun.png");
+    expect(artKey({ rarity: "?" })).toBe("C");
   });
 });

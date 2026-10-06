@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { nf, ago, countdown, secondsUntil } from "./format.js";
+import { nf, ago, countdown, secondsUntil, clock } from "./format.js";
 
 const NOW = Date.parse("2026-09-28T12:00:00Z");
 const before = (ms) => new Date(NOW - ms).toISOString();
@@ -45,5 +45,13 @@ describe("secondsUntil", () => {
     expect(secondsUntil(new Date(NOW + 90000).toISOString(), NOW)).toBe(90);
     expect(secondsUntil(before(1000), NOW)).toBe(0);
     expect(secondsUntil(null, NOW)).toBe(null);
+  });
+});
+
+describe("clock", () => {
+  it("minutes and seconds under an hour, hours and minutes past it", () => {
+    expect(clock(245)).toBe("4:05");
+    expect(clock(59)).toBe("0:59");
+    expect(clock(3900)).toBe("1 h 05");
   });
 });

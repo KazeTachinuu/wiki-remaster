@@ -1,11 +1,11 @@
 <script>
   // The WikiBidous one side of a trade adds: a button that opens a number field, closed again
   // (back to 0) by its cross. Opens by itself when there already are coins (counter-offer pre-fill).
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import Icon from "./Icon.svelte";
   let { value = $bindable(0), max = undefined, label = "Ajouter des WB" } = $props();
-  // svelte-ignore state_referenced_locally
-  let open = $state(value > 0);
+  // the starting value only: following `value` would close the field when it is cleared mid-typing
+  let open = $state(untrack(() => value > 0));
   let input = $state();
   // opens empty (not "0") so typing a number does not read "050"
   // in a scrolling list (the offer's sides), the new field scrolls into sight, clear of the faded edge

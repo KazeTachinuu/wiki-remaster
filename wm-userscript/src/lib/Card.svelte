@@ -2,7 +2,8 @@
   import Icon from "./Icon.svelte";
   import { settings } from "./settings.svelte.js";
   import { nf } from "./format.js";
-  import { isOnyx, rarityArt } from "./cardArt.js";
+  import { isOnyx } from "./cardArt.js";
+  import { rarityArt } from "./art.js";
   let { card, count = 1, isNew = false, shiny = false, starred = false, value = undefined,
         owned = true, wishlisted = false, big = false, caption = true, stats = true } = $props();
   // stats: false hides ATK/DEF where the value is what matters (trade picking)

@@ -38,7 +38,7 @@
     void settled;
     ranked = untrack(() => new Map(values));
   });
-  const remote = !!onquery;
+  const remote = $derived(!!onquery);
   const shown = $derived(pickList(items, remote ? { sort, values: ranked, isLocked } : { q, rarity, sort, values: ranked, isLocked }));
 
   // server-filtered: ask again on each change (the search once typing pauses), never on mount
@@ -49,11 +49,9 @@
     asked = next;
     onquery(next);
   };
-  if (remote) {
-    debouncedSearch(() => q, (text) => ask({ q: text }));
-    // a rarity or sort change carries the search as typed, so it costs one request, not two
-    $effect(() => ask({ rarity, sort: sort === "name" ? "name" : "rarity", q: untrack(() => q).trim() }));
-  }
+  debouncedSearch(() => q, (text) => remote && ask({ q: text }));
+  // a rarity or sort change carries the search as typed, so it costs one request, not two
+  $effect(() => { if (remote) ask({ rarity, sort: sort === "name" ? "name" : "rarity", q: untrack(() => q).trim() }); });
   // (the owner of `more` paces those requests)
   const filling = $derived(remote && sort === "value" && !!more && !moreError);
   $effect(() => { if (filling && !loadingMore) untrack(() => more()); });

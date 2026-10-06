@@ -5,6 +5,9 @@
   import { useOriginalSite } from "./settings.svelte.js";
   import { withHumanCheck, needsHuman } from "./humanCheck.js";
   import { countdown, secondsUntil } from "./format.js";
+  import { packTimer } from "./packTimer.svelte.js";
+  // inline (no request), so also same-origin for the foil-shine mask
+  import { PACK_IMG } from "./art.js";
   import { untrack } from "svelte";
   // onprofile: re-read the profile from the game (packs and coins), lighter than onchanged
   let { profile, onchanged, onprofile } = $props();
@@ -15,9 +18,7 @@
   let error = $state("");
   let needVerify = $state(false); // still refused after the in-app human check: native fallback
 
-  // Served at /card_pack.png in both worlds: the real site hosts it there, and dev serves
-  // a local copy from /public, so it is always same-origin (the foil-shine mask needs that).
-  const PACK_IMG = "/card_pack.png";
+
 
 
   let packs = $derived(profile?.packs_remaining ?? null);
@@ -97,28 +98,9 @@
     onchanged?.();
   }
 
-  // Countdown to the next pack (the adapter computes it from the game's regen period). At zero
-  // the pack is ready on the server: like the game's own page, show "Prêt" and ask the game for
-  // the real count once (a sync at most every SYNC_GAP_MS), instead of counting below zero.
-  const SYNC_GAP_MS = 30e3;
-  let secs = $state(null);
-  let lastSync = 0;
-  function ready() {
-    if (Date.now() - lastSync < SYNC_GAP_MS) return;
-    lastSync = Date.now();
-    onprofile?.();
-  }
-  $effect(() => {
-    const n = profile?.next_regen_seconds;
-    if (n == null || (packs != null && profile?.pack_cap != null && packs >= profile.pack_cap)) { secs = null; return; }
-    secs = n;
-    if (n === 0) { ready(); return; }
-    const t = setInterval(() => {
-      secs = Math.max(0, secs - 1);
-      if (!secs) { clearInterval(t); ready(); }
-    }, 1000);
-    return () => clearInterval(t);
-  });
+  // Countdown to the next pack, shared with the top bar's pack chip (none once the packs are full)
+  const timer = packTimer(() => (packs != null && profile?.pack_cap != null && packs >= profile.pack_cap ? null : profile?.next_regen_seconds ?? null), () => onprofile?.());
+  const secs = $derived(timer.secs);
   function fmt(s) {
     if (s <= 0) return "Prêt";
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
@@ -160,11 +142,11 @@
     {/if}
 
     <div class="booster-stage">
-      <button class="booster" class:opening class:is-empty={!openable} onclick={openCurrent} disabled={busy || !openable} aria-label="Ouvrir le paquet">
-        {#if kind === "normal" && !opening && stackDepth > 2}<span class="booster-back b2" style="background-image:url({PACK_IMG})"></span>{/if}
-        {#if kind === "normal" && !opening && stackDepth > 1}<span class="booster-back b1" style="background-image:url({PACK_IMG})"></span>{/if}
+      <button class="booster" style:--pack="url({PACK_IMG})" class:opening class:is-empty={!openable} onclick={openCurrent} disabled={busy || !openable} aria-label="Ouvrir le paquet">
+        {#if kind === "normal" && !opening && stackDepth > 2}<span class="booster-back b2"></span>{/if}
+        {#if kind === "normal" && !opening && stackDepth > 1}<span class="booster-back b1"></span>{/if}
         <span class="booster-main">
-          <img src={PACK_IMG} alt="Paquet WikiMasters" draggable="false" />
+          <span class="booster-img"></span>
           <span class="booster-shine"></span>
           {#if kind !== "normal"}<span class="booster-mark">{kind === "pro" ? "PRO" : "SR+"}</span>{/if}
         </span>

@@ -114,13 +114,12 @@
         <!-- wide: the pane holds the empty state, the list just says so -->
         <div class="tr-col-empty"><p class="tr-col-none">Rien ici pour l'instant.</p>{@render emptyState()}</div>
       {:else}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="tr-rows" bind:this={rowsEl} onkeydown={onRowsKey}>
+        <div class="tr-rows" bind:this={rowsEl}>
           {#each shown as t (t.id)}
             {@const b = balance(t)}
             {@const rounds = chainOf(t, trades).length}
             <button class="tr-row" class:on={selected?.id === t.id} data-id={t.id} aria-current={selected?.id === t.id ? "true" : undefined}
-              onclick={() => select(t)} aria-label="Échange avec {t.other.username}, {dealLine(t.give.length, t.giveCoins, t.get.length, t.getCoins)}, {balanceLabel(b)}">
+              onclick={() => select(t)} onkeydown={onRowsKey} aria-label="Échange avec {t.other.username}, {dealLine(t.give.length, t.giveCoins, t.get.length, t.getCoins)}, {balanceLabel(b)}">
               <Avatar user={t.other} size={40} />
               <span class="tr-row-main">
                 <span class="tr-row-top"><b>{t.other.username}</b><span class="tr-row-when nowrap">{ago(t.updatedAt)}</span></span>
@@ -128,7 +127,7 @@
               </span>
               <!-- settled: the outcome matters more than the balance -->
               {#if tab === "history"}<span class="trade-status" data-s={t.status}>{statusLabel(t.status)}</span>
-              {:else}<span class="tr-badge" data-k={b.kind} title={balanceLabel(b)}>{balanceBadge(b)}</span>{/if}
+              {:else if b.kind !== "unknown"}<span class="tr-badge" data-k={b.kind} title={balanceLabel(b)}>{balanceBadge(b)}</span>{/if}
             </button>
           {/each}
         </div>
