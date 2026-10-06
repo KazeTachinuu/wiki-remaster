@@ -19,13 +19,16 @@ const round = (x) => +x.toFixed(2);
 export const skyKind = (rarity, shiny) => (rarity === "L" ? "nova" : shiny ? "sun" : "star");
 
 /**
- * { stars: [[x, y, r, opacity]] in a 100x140 box, tilt (degrees), jets: [[angle, length, width]] }
- * for the supernova's light jets; the same for the same title.
+ * { stars: [[x, y, r, opacity]] in a 100x140 box, tilt (degrees), jets: [[angle, length, width]]
+ * for the supernova's light jets, twinkle: [[duration, delay]] for the first stars }; the same for
+ * the same title.
  */
 export function cardSky(title, count = 46) {
   const r = random(title);
   const stars = Array.from({ length: count }, () => [round(r() * 100), round(r() * 140), round(0.15 + r() * 0.4), round(0.25 + r() * 0.5)]);
   const tilt = Math.round(r() * 30 - 15);
+  // six stars twinkle, each on its own slow beat (seconds: [duration, delay])
+  const twinkle = Array.from({ length: 6 }, () => [round(3 + r() * 3), round(-r() * 6)]);
   const jets = Array.from({ length: 14 }, (_, k) => [round((k / 14) * 360 + (r() - 0.5) * 16), round(20 + r() * 26), round(1.2 + r() * 2.2)]);
-  return { stars, tilt, jets };
+  return { stars, tilt, jets, twinkle };
 }

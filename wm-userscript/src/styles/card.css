@@ -39,6 +39,27 @@
 .wc-sky.nova .glow2{fill:#fff2c2;fill-opacity:.35}
 .wc-sky.nova .ray{fill:#fff2c2}
 .wc-sky.nova .core{fill:#fff}
+/* a quiet sky that comes alive when looked at: six stars twinkle, the star's light breathes and a
+   wishing star crosses once. Each part is its own small layer that only fades and moves. Still at
+   rest (a grid costs nothing), running on hover and in the detail view's big card, off for
+   reduced motion. */
+.wc-tw{position:absolute;z-index:1;width:3px;height:3px;margin:-1.5px;border-radius:50%;background:#fff;
+  box-shadow:0 0 4px 1px rgba(255,255,255,.55);opacity:.55;animation:twinkle ease-in-out infinite alternate paused}
+.wc-pulse{position:absolute;z-index:1;left:50%;top:37.1%;width:38%;aspect-ratio:1;translate:-50% -50%;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in oklab,var(--rc) 45%,transparent),transparent 68%);
+  opacity:.6;animation:breathe 5.5s ease-in-out infinite alternate paused}
+.wc-pulse.nova{width:60%;background:radial-gradient(circle,rgba(255,242,194,.4),transparent 66%)}
+.wc-pulse.sun{width:48%}
+.wc-comet{position:absolute;z-index:1;left:-30%;width:28%;height:1.5px;border-radius:2px;opacity:0;rotate:18deg;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.15) 40%,#fff);box-shadow:0 0 6px rgba(255,255,255,.6)}
+.card-btn:hover .wc-tw,.card-btn:focus-visible .wc-tw,.wc-big .wc-tw,
+.card-btn:hover .wc-pulse,.card-btn:focus-visible .wc-pulse,.wc-big .wc-pulse{animation-play-state:running}
+.card-btn:hover .wc-comet,.card-btn:focus-visible .wc-comet{animation:comet 1.6s cubic-bezier(.3,.1,.3,1) .25s 1 both}
+.wc-big .wc-comet{animation:comet 1.6s cubic-bezier(.3,.1,.3,1) 1.5s infinite;animation-duration:9s}
+@keyframes twinkle{from{opacity:.05}to{opacity:.95}}
+@keyframes breathe{from{opacity:.35;transform:scale(.92)}to{opacity:.9;transform:scale(1.06)}}
+@keyframes comet{0%{transform:translateX(0);opacity:0}12%{opacity:1}55%{opacity:.9}70%,100%{transform:translateX(560%);opacity:0}}
+@media (prefers-reduced-motion:reduce){.wc-tw,.wc-pulse,.wc-comet{animation:none !important}}
 .wc.is-noimg .wc-cap{background:linear-gradient(to top,rgba(5,6,5,.94),rgba(5,6,5,.7) 62%,transparent)}
 .wc-photo.onyx-photo{object-fit:cover;z-index:1}
 /* a see-through image (a map, a line drawing) on paper, as Wikipedia shows it; room for the caption below */
@@ -51,7 +72,7 @@
 .wc.is-shiny:hover{box-shadow:inset 0 0 0 1px #e9c15acc, 0 0 22px #e9c15a80, 0 18px 42px -20px #000}
 .wc-holo{position:absolute;inset:0;z-index:2;pointer-events:none;mix-blend-mode:screen;opacity:.7;
   background:radial-gradient(circle at 50% 45%, #fff8e0 0%, rgba(255,248,224,.2) 20%, transparent 46%);
-  background-repeat:no-repeat;background-size:175% 175%;animation:shiny-drift 6.5s ease-in-out infinite alternate}
+  background-repeat:no-repeat;background-size:175% 175%;animation:shiny-drift 6.5s ease-in-out infinite alternate paused}
 .wc-holo.onyx{mix-blend-mode:soft-light;opacity:.9}
 @keyframes shiny-drift{0%{background-position:16% 12%}100%{background-position:84% 82%}}
 @media (prefers-reduced-motion:reduce){.wc-holo{animation:none;background-position:50% 42%;opacity:.5}}
@@ -70,9 +91,11 @@
   background:radial-gradient(circle at 50% 45%, #fffbe8 0%, rgba(246,217,138,.65) 16%, rgba(233,193,90,.15) 34%, transparent 52%);
   background-repeat:no-repeat;background-size:210% 210%;
   -webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;
-  animation:onyx-shimmer 5.5s ease-in-out infinite alternate}
+  animation:onyx-shimmer 5.5s ease-in-out infinite alternate paused}
 @keyframes onyx-shimmer{0%{background-position:12% 8%}100%{background-position:88% 86%}}
 @media (prefers-reduced-motion:reduce){.ox-shine{animation:none;background-position:42% 30%;opacity:.7}}
+/* the shiny sheens, like the sky, move only on the card being looked at: a grid at rest is still */
+.card-btn:hover :is(.wc-holo,.ox-shine),.card-btn:focus-visible :is(.wc-holo,.ox-shine),.wc-big :is(.wc-holo,.ox-shine){animation-play-state:running}
 .wc-scrim{position:absolute;inset:0;pointer-events:none;background:linear-gradient(to top,#050605 0%,rgba(5,6,5,.985) 32%,rgba(5,6,5,.7) 50%,rgba(5,6,5,.2) 68%,transparent 80%)}
 .wc.bare .wc-cap{display:none}
 .wc.bare .wc-scrim{display:none}

@@ -10,7 +10,7 @@
 </script>
 
 <svg class="wc-sky {kind}" viewBox="0 0 100 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-  {#each sky.stars as [x, y, r, o]}<circle cx={x} cy={y} {r} fill="#fff" fill-opacity={o} />{/each}
+  {#each sky.stars.slice(6) as [x, y, r, o]}<circle cx={x} cy={y} {r} fill="#fff" fill-opacity={o} />{/each}
   <g transform="translate(50 52) rotate({sky.tilt})">
     {#if kind === "nova"}
       <circle r="44" class="shell" /><circle r="36" class="shell thin" />
@@ -28,3 +28,11 @@
     {/if}
   </g>
 </svg>
+<!-- moving parts on their own layers (only opacity and transform change); they run only while the
+     card is hovered, or in the big card of the detail view, so a grid at rest costs nothing -->
+<span class="wc-pulse {kind}" aria-hidden="true"></span>
+<!-- a wishing star: crosses the sky once each time the card is looked at -->
+<span class="wc-comet" aria-hidden="true" style="top:{8 + ((sky.tilt + 15) / 30) * 22}%"></span>
+{#each sky.stars.slice(0, 6) as [x, y], i}
+  <span class="wc-tw" aria-hidden="true" style="left:{x}%;top:{(y / 140) * 100}%;animation-duration:{sky.twinkle[i][0]}s;animation-delay:{sky.twinkle[i][1]}s"></span>
+{/each}
