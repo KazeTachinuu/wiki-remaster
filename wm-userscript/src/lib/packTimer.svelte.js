@@ -1,8 +1,5 @@
-// The next free pack, counted down every second from the profile (the adapter computes it from
-// the game's regen period). Shared by the packs page and the top bar's pack chip. At zero the pack
-// is ready on the server: like the game's own page, it stops at "prêt" and asks the game for the
-// real count once (onready, at most every SYNC_GAP_MS for every user of it together), instead of
-// counting below zero.
+// Seconds to the next free pack, ticking down from the profile. Used by the packs page and the
+// top bar. At zero it calls onready once (shared throttle) so the real count is re-read.
 const SYNC_GAP_MS = 30e3;
 let lastSync = 0;
 

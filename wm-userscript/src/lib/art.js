@@ -1,6 +1,5 @@
-// The game's art, re-encoded small (WebP sized for 2x screens) and shipped inline with the script:
-// no request, nothing to download on a slow connection. The originals are PNGs of 0.6 to 2 MB
-// on wiki-masters.com; the onyx art is already a light WebP there, so it stays remote.
+// The game's art as small inline WebP (the originals are 0.6 to 2 MB PNGs): no request.
+// The onyx art is already a small WebP on the game's site, so it stays remote.
 import C from "../assets/commun.webp?inline";
 import PC from "../assets/peu_commun.webp?inline";
 import R from "../assets/rare.webp?inline";

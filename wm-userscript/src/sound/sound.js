@@ -83,20 +83,20 @@ function noise(t, dur, peak, type, f0, f1, q = 1, attack = 0.008) {
 }
 const sparkle = (t, n, spread, top = 1) => { for (let i = 0; i < n; i++) bell(2093 * top * [1, 1.26, 1.5, 1.68, 2][i % 5], t + i * spread, 0.035, 0.35); };
 
-// a few percent of pitch drift, so a sound heard many times in a row never repeats exactly
+// ±2.5% pitch, so repeated sounds are not identical
 const vary = (f) => f * (1 + (Math.random() - 0.5) * 0.05);
 
 const N = { C4: 261.6, E4: 329.6, G4: 392, B4: 493.9, C5: 523.3, D5: 587.3, E5: 659.3, G5: 784, A5: 880, B5: 987.8, C6: 1046.5, E6: 1318.5, G6: 1568 };
 
 const SOUNDS = {
   rip(t) {
-    // the foil tearing: a quick run of papery crackles climbing as the tear runs across
+    // tear: four short noise bursts, rising
     for (let i = 0; i < 4; i++) noise(t + i * 0.035, 0.05, 0.08, "bandpass", 1200 + i * 500, 2600 + i * 600, 1.5);
-    // then the pack opens: a breath of air and a soft tone that both rise (a fall reads as a drop)
+    // then a rising whoosh and tone (a falling one sounds like a drop)
     noise(t + 0.1, 0.35, 0.05, "bandpass", 700, 3200, 0.7);
     tone("sine", N.C5, N.G5, t + 0.12, 0.25, 0.05, 0.03);
   },
-  // the card turning over: a soft swish of air (eased in, no click), not a knock
+  // soft swish, eased in so it does not click
   flip(t) { noise(t, 0.14, 0.12, "bandpass", 1300, 2800, 0.9, 0.025); },
   C(t) { bell(N.E5, t, 0.11, 0.55); },
   PC(t) { bell(N.G5, t, 0.11, 0.5); bell(N.C6, t + 0.07, 0.1, 0.6); },
@@ -122,13 +122,12 @@ const SOUNDS = {
     [N.C5, N.E5, N.G5, N.C6, N.E6, N.G6].forEach((fr, i) => bell(fr, t + 0.12 + i * 0.075, 0.13, 1.3));
     sparkle(t + 0.6, 10, 0.07, 1.25);
   },
-  // Interface sounds are heard all the time, so they stay felt more than heard: mid-low pitch,
-  // a rounded attack (no click), under 100 ms, a few dB under the pack and rarity sounds, never a world apart.
+  // Interface sounds: frequent, so quiet, short (<100 ms), mid-low pitch, no click.
   select(t) { const f = vary(N.E5); tone("sine", f, f * 1.33, t, 0.08, 0.09, 0.008); },
   deselect(t) { const f = vary(N.A5); tone("sine", f, f * 0.75, t, 0.08, 0.07, 0.008); },
   success(t) { bell(N.C6, t, 0.14, 0.6); bell(N.G6, t + 0.09, 0.12, 0.8); },
   error(t) { tone("triangle", 220, 196, t, 0.14, 0.16); tone("triangle", 196, 174.6, t + 0.13, 0.2, 0.14); },
-  // a soft wooden tap for tabs: a low body and a breath of texture on top
+  // tab switch: a low tap
   tick(t) { const f = vary(440); tone("sine", f, f * 0.85, t, 0.05, 0.06, 0.006); noise(t, 0.025, 0.02, "bandpass", 1600, 1100, 1.2); },
 };
 
@@ -138,7 +137,7 @@ export function play(name, delay = 0) {
   if (!soundOn() || !SOUNDS[name]) return;
   if (!audio()) return;
   const t = ctx.currentTime + 0.01 + delay;
-  // the same sound twice within 60 ms (a double click, a quick run of tabs) plays once, never stacked
+  // the same sound within 60 ms plays once
   if (t - (lastAt[name] ?? -1) < 0.06) return;
   lastAt[name] = t;
   try { SOUNDS[name](t); } catch {}

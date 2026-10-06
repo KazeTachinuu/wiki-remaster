@@ -52,7 +52,7 @@ export function marketValueFor(card) {
 
 // --- Collection: stale-while-revalidate --------------------------------------------------
 
-// ponytail: one saved copy per browser profile; another account on the same browser sees the
+// One saved copy per browser profile: another account on the same browser sees the
 // old list until the fresh load lands (seconds).
 const COLLECTION_TTL = 7 * 86400e3;
 

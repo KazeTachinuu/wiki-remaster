@@ -20,15 +20,15 @@ export function rarityMarket(market, rarity) {
 }
 
 /**
- * The market at a glance, what a player decides on: the price (sold average), the last sale and
- * the cheapest live copy, each as a gap to that price (in %), and a quick-sale price.
+ * The numbers the card detail leads with: last sale and cheapest listing as a % gap to the
+ * market price (the sold average), and a quick-sale price.
  * @param {{ avg, series }} rm  one rarity's market (rarityMarket)
  * @param {number|null} cheapest  the cheapest live normal copy of the card, if any
  */
 export function marketVerdict(rm, cheapest) {
   const pct = (v) => (rm.avg && v != null ? Math.round(((v - rm.avg) / rm.avg) * 100) : null);
   const last = rm.series.at(-1)?.price ?? null;
-  // ponytail: sells first by undercutting the cheapest listing by 1, never above the market price
+  // 1 under the cheapest listing, capped at the market price
   const sellAt = cheapest != null ? Math.max(1, Math.min(cheapest - 1, rm.avg ?? cheapest)) : rm.avg;
   return { last, lastPct: pct(last), cheapest, cheapestPct: pct(cheapest), sellAt };
 }

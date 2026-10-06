@@ -17,7 +17,7 @@ An unofficial redesign of [wiki-masters.com](https://www.wiki-masters.com), in y
 
 Updates are automatic. **Site original** (or the phone menu) goes back to the original site.
 
-## What's new
+## Features
 
 - **Packs**: tear-open reveal, rarity sounds, next-pack countdown on every screen, Pro daily pack
 - **Collection**: search, sort, filters, bulk discard, instant load
@@ -42,9 +42,10 @@ Updates are automatic. **Site original** (or the phone menu) goes back to the or
 ## Development
 
 ```
+./build.sh                     # everything: userscript, Chrome and Firefox packages
 cd wm-userscript && bun install
 bun run dev                    # localhost:5173, mock API
-bun run build                  # dist/wikimasters-app.user.js
+bun run build                  # the userscript only
 bun test src                   # unit tests
 bun run check                  # style check
 bun run test:prod:login        # once: log in to the game
