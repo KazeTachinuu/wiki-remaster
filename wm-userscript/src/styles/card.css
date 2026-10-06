@@ -24,6 +24,9 @@
 .wc-bg.onyx{transform:none}
 .wc[data-r="C"] .wc-bg,.wc[data-r="PC"] .wc-bg{filter:brightness(.6) saturate(1.2)}
 .wc-photo.onyx-photo{object-fit:cover;z-index:1}
+/* a see-through image (a map, a line drawing) on paper, as Wikipedia shows it; room for the caption below */
+.wc.paper .wc-blur{display:none}
+.wc.paper .wc-photo{background:#e4e2db;padding:12% 10% 34%}
 .wc.is-noimg .wc-face{background:
   radial-gradient(130% 90% at 50% 14%, color-mix(in oklab,var(--rc) 45%, transparent), transparent 64%),
   linear-gradient(180deg, color-mix(in oklab,var(--rc) 22%, #171b15), #0c0e0b)}

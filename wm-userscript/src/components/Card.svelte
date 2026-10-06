@@ -4,6 +4,7 @@
   import { nf } from "../lib/format.js";
   import { isOnyx } from "../lib/cardArt.js";
   import { rarityArt } from "../lib/art.js";
+  import { seeThrough } from "../lib/seeThrough.js";
   let { card, count = 1, isNew = false, shiny = false, starred = false, value = undefined,
         owned = true, wishlisted = false, big = false, caption = true, stats = true } = $props();
   // stats: false hides ATK/DEF where the value is what matters (trade picking)
@@ -18,6 +19,7 @@
 
   // Fall back from a broken photo to the rarity art (never a blank card).
   let imgFailed = $state(false);
+  let paper = $state(false); // a see-through image (a map, a diagram): shown on paper
   let artFailed = $state(false);
   let showPhoto = $derived(!!card.image_url && !imgFailed);
 
@@ -33,7 +35,7 @@
   }
 </script>
 
-<article class="wc" class:is-ready={ready || artFailed} class:wc-big={big} class:bare={!caption} class:is-noimg={!showPhoto} class:is-shiny={shiny} class:is-unowned={!owned} class:is-nsfw={blurred} data-r={card.rarity}>
+<article class="wc" class:paper class:is-ready={ready || artFailed} class:wc-big={big} class:bare={!caption} class:is-noimg={!showPhoto} class:is-shiny={shiny} class:is-unowned={!owned} class:is-nsfw={blurred} data-r={card.rarity}>
   <div class="wc-face">
     {#if onyx}
       <!-- Shiny Legendary: onyx art + dark shade/tint/wash form the black base; the photo
@@ -51,7 +53,7 @@
       <span class="ox ox-shine" aria-hidden="true"></span>
     {:else if showPhoto}
       <img class="wc-blur" src={card.image_url} alt="" aria-hidden="true" loading="lazy" crossorigin="anonymous" />
-      <img class="wc-photo" src={card.image_url} alt={card.title} loading="lazy" crossorigin="anonymous" onerror={() => (imgFailed = true)} use:fadeIn />
+      <img class="wc-photo" src={card.image_url} alt={card.title} loading="lazy" crossorigin="anonymous" onload={(e) => (paper = seeThrough(e.currentTarget))} onerror={() => (imgFailed = true)} use:fadeIn />
     {:else if !artFailed}
       <img class="wc-bg" src={art} alt="" aria-hidden="true" loading="lazy" onerror={() => (artFailed = true)} use:fadeIn />
     {/if}

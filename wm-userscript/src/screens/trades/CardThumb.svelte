@@ -4,14 +4,16 @@
   // corner. Never a whole card squeezed into a few pixels.
   import { settings } from "../../lib/settings.svelte.js";
   import { rarityArt } from "../../lib/art.js";
+  import { seeThrough } from "../../lib/seeThrough.js";
   let { card, shiny = false } = $props();
   let failed = $state(false);
+  let paper = $state(false);
   // a sensitive image stays hidden here too: the rarity art stands in
   const photo = $derived(card.image_url && !failed && !(settings.hideSensitive && card.nsfw_image));
 </script>
 
-<span class="cthumb" class:art={!photo} class:shiny data-r={card.rarity} aria-hidden="true">
-  {#if photo}<img src={card.image_url} alt="" loading="lazy" crossorigin="anonymous" onerror={() => (failed = true)} />
+<span class="cthumb" class:paper class:art={!photo} class:shiny data-r={card.rarity} aria-hidden="true">
+  {#if photo}<img src={card.image_url} alt="" loading="lazy" crossorigin="anonymous" onload={(e) => (paper = seeThrough(e.currentTarget))} onerror={() => (failed = true)} />
   {:else}<img src={rarityArt(card, shiny)} alt="" loading="lazy" />{/if}
   <span class="cthumb-r">{card.rarity}</span>
 </span>
