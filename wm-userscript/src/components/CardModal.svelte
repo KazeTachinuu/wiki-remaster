@@ -19,6 +19,7 @@
   let sumState = $derived(c.summary ? "done" : "loading");
   let market = $state(null);
   let marketState = $state("idle");
+  let marketRetried = false;
   let mval = $state(null);
 
   let confirmDiscard = $state(false);
@@ -47,7 +48,12 @@
   $effect(() => {
     if (tab !== "market" || marketState !== "idle") return;
     marketState = "loading";
-    data.marketStats(c).then((m) => { market = m; marketState = "done"; }, () => (marketState = "error"));
+    // a failure (often the game throttling a burst) is retried once after 3 s, then offers a retry
+    data.marketStats(c).then((m) => { market = m; marketState = "done"; }, () => {
+      if (marketRetried) return (marketState = "error");
+      marketRetried = true;
+      setTimeout(() => (marketState = "idle"), 3000);
+    });
     data.sameCard(c).then((l) => (listings = l), () => (listings = []));
   });
   // the live listings of this card (null while searching), their time left kept current
@@ -236,7 +242,7 @@
           {#if marketState === "loading"}
             <p class="modal-sum muted">Analyse du marché...</p>
           {:else if marketState === "error"}
-            <p class="modal-sum muted">Marché indisponible pour le moment.</p>
+            <div class="modal-sum muted">Marché indisponible pour le moment. <button class="link-btn" onclick={() => (marketState = "idle")}>Réessayer</button></div>
           {:else if market}
             {#if rm.avg != null}
               <!-- the answers first: what it is worth, where the last sale went, the best buy now -->

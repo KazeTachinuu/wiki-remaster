@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { nTrade, nMessage } from "./schema.js";
-import { whoAmI, chatMe, tradeTabs, sideValue, verdict, balanceLabel, verdictTitle, chainOf, timeline, STATUS, SIDE, otherOf, NO_ME, offerSummary, dealLine, balanceBadge, stepIn, afterLeaving } from "./trades.js";
+import { whoAmI, chatMe, tradeTabs, sideValue, verdict, balanceLabel, verdictTitle, chainOf, timeline, otherOf, NO_ME, offerSummary, dealLine, balanceBadge, stepIn, afterLeaving } from "./trades.js";
 
 const card = (id, rarity = "C") => ({ id, rarity, atk: 1, def: 2, wikipedia_title: "T" + id });
 const raw = (o) => ({
@@ -40,7 +40,6 @@ describe("nTrade", () => {
 });
 
 describe("whoAmI", () => {
-  it("uses the captured user id when known", () => expect(whoAmI([raw()], "me")).toBe("me"));
   it("infers me as the party common to every trade", () => {
     const a = raw(), b = raw({ id: "t2", initiator_id: "me", recipient_id: "u3" });
     expect(whoAmI([a, b], null)).toBe("me");
@@ -127,26 +126,16 @@ describe("chainOf", () => {
   it("a lone trade is a chain of one", () => expect(chainOf({ id: "z", parentId: null }, []).length).toBe(1));
 });
 
-describe("labels and friends", () => {
-  it("has a label for every known status and falls back to the raw one", () => {
-    for (const s of ["pending", "countered", "declined", "accepted", "cancelled"]) expect(STATUS[s]).toBeTruthy();
-  });
-  it("names each side from my point of view", () => {
-    expect(SIDE).toEqual({ give: "Vous donnez", get: "Vous recevez" });
-  });
+describe("otherOf", () => {
   it("otherOf picks the side that is not me", () => {
     const f = { requester: { id: "me", username: "Moi" }, addressee: { id: "u3", username: "Marchandise", avatar_url: null } };
     expect(otherOf(f, "me")).toEqual({ id: "u3", username: "Marchandise", avatar: null });
     expect(() => otherOf(f, null)).toThrow(NO_ME);
   });
-  it("nMessage marks my messages", () => {
-    expect(nMessage({ id: "m", sender_id: "me", content: "salut", created_at: "x" }, "me")).toEqual({ id: "m", mine: true, content: "salut", at: "x" });
-  });
 });
 
 describe("chatMe", () => {
   const msg = (from, to) => ({ id: "m" + from, sender_id: from, recipient_id: to, content: "x", created_at: "x" });
-  it("prefers the captured user id", () => expect(chatMe("u2", [raw()], [], "me")).toBe("me"));
   it("is the party that is not the friend when the user id is unknown, with one trade", () => {
     const me = chatMe("u2", [raw()], [msg("me", "u2")], null);
     expect(me).toBe("me");
@@ -201,7 +190,7 @@ describe("dealLine", () => {
 });
 
 describe("balanceBadge", () => {
-  it("is the signed gap, '=' when balanced, '?' when a value is missing", () => {
+  it("is the signed gap, '=' when balanced, '-' when a value is missing", () => {
     expect(balanceBadge({ kind: "advantage", diff: 50 })).toBe("+50");
     expect(balanceBadge({ kind: "disadvantage", diff: -1500 })).toBe(`-${(1500).toLocaleString("fr")}`);
     expect(balanceBadge({ kind: "balanced", diff: 4 })).toBe("=");

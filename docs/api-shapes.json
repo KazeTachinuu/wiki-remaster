@@ -394,7 +394,7 @@
   "auction.card.pageviews": "number",
   "auction.card.q_score": "number",
   "auction.card.rarity": "string",
-  "auction.card.summary": "null",
+  "auction.card.summary": "null|string",
   "auction.card.wikipedia_title": "string",
   "auction.card.wikipedia_url": "string",
   "auction.created_at": "string",
@@ -619,5 +619,39 @@
  "packs/special": {
   "available": "boolean",
   "packs": "array"
+ },
+ "packs/pro-daily": {
+  "claim_date": "string",
+  "claimed_today": "boolean",
+  "eligible": "boolean"
+ },
+ "profile (game sync)": {
+  "activity_blocked_until": "null",
+  "avatar_pos_x": "number",
+  "avatar_pos_y": "number",
+  "avatar_url": "null",
+  "avatar_user_card_id": "null",
+  "cheat_strikes": "number",
+  "created_at": "string",
+  "deleted_at": "null",
+  "hide_sensitive": "boolean",
+  "id": "string",
+  "is_admin": "boolean",
+  "is_moderator": "boolean",
+  "is_pro": "boolean",
+  "is_public": "boolean",
+  "is_vip": "boolean",
+  "last_normal_pack_opened_at": "string",
+  "last_sanction_at": "null",
+  "last_sanction_type": "null",
+  "leaderboard_excluded": "boolean",
+  "pack_human_verified_at": "string",
+  "packs_last_regen_at": "string",
+  "packs_remaining": "number",
+  "pity_counter": "number",
+  "special_pack_last_claimed_at": "null",
+  "username": "string",
+  "username_changed_at": "null",
+  "wikibidous_balance": "number"
  }
 }

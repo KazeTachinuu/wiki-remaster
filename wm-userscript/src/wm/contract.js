@@ -63,3 +63,16 @@ export function diffShapes(before, after) {
   for (const p of Object.keys(after)) if (!(p in before)) added.push(p);
   return { removed, changed, added };
 }
+
+/**
+ * The contract after accepting a live shape: every path either one has, types unioned. A field
+ * missing from one sample (an auction without bids, a null avatar) is kept, so the contract only
+ * learns over runs and never forgets a field because one sample happened to be empty.
+ */
+export function mergeShapes(before = {}, after = {}) {
+  const out = { ...before };
+  for (const [p, t] of Object.entries(after)) {
+    out[p] = p in out ? [...new Set([...out[p].split("|"), ...t.split("|")])].sort().join("|") : t;
+  }
+  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)));
+}

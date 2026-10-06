@@ -418,7 +418,7 @@ if (on("assumptions")) {
 
 // --- contract: the recorded shape of every endpoint the app reads ----------------------------
 if (on("contract")) {
-  const { shapeOf, diffShapes } = await import("../src/wm/contract.js");
+  const { shapeOf, diffShapes, mergeShapes } = await import("../src/wm/contract.js");
   const FILE = new URL("../../docs/api-shapes.json", import.meta.url).pathname;
   const saved = (await Bun.file(FILE).exists()) ? await Bun.file(FILE).json() : null;
   const update = process.argv.includes("--update-shapes") || !saved;
@@ -452,12 +452,19 @@ if (on("contract")) {
     "chat/{id}": friend && `/api/chat/${friend.id}`,
     notifications: "/api/notifications",
     "packs/special": "/api/packs/special",
+    "packs/pro-daily": "/api/packs/pro-daily",
+    // the full sale list answers Pro accounts only: recorded when this account may read it
+    "marketplace/cards/{id}/sales": auction && (async () => { const r = await raw(`/api/marketplace/cards/${auction.card_id}/sales`); return r.status === 200 ? r.body : null; }),
+    // packs, regen time and Pro status: the game's own Supabase sync, replayed (read-only)
+    "profile (game sync)": async () => view.evaluate("window.__wm.refreshProfile().then(() => window.__wm.getProfile())"),
   };
   // one check per endpoint: its own time limit, its own line when it changes
   for (const [key, src] of Object.entries(reads)) {
     if (!src) continue;
     await check(`contract: ${key}`, async () => {
-      live[key] = shapeOf(typeof src === "string" ? await get(src) : src);
+      const body = typeof src === "string" ? await get(src) : typeof src === "function" ? await src() : src;
+      if (body == null) return "not readable by this account, skipped";
+      live[key] = shapeOf(body);
       if (!saved?.[key]) return `${Object.keys(live[key]).length} fields, new in the contract`;
       const d = diffShapes(saved[key], live[key]);
       const lost = [...d.removed.map((p) => `- ${p}`), ...d.changed.map((c) => `~ ${c}`)];
@@ -466,8 +473,9 @@ if (on("contract")) {
     });
   }
   await Bun.write(`${OUT}api-shapes.live.json`, JSON.stringify(live, null, 1) + "\n"); // this run's, to inspect a diff
-  // accepting writes exactly what is live: an endpoint not read this run keeps its old entry
-  if (update) await Bun.write(FILE, JSON.stringify({ ...saved, ...live }, null, 1) + "\n");
+  // accepting merges what is live into the record (types unioned, nothing forgotten); an endpoint
+  // not read this run keeps its old entry
+  if (update) await Bun.write(FILE, JSON.stringify({ ...saved, ...Object.fromEntries(Object.entries(live).map(([k, s]) => [k, mergeShapes(saved?.[k], s)])) }, null, 1) + "\n");
 }
 
 // --- UI smoke (inside the shadow root) ----------------------------------------------------

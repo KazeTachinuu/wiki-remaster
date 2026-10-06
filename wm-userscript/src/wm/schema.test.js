@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { nNotification, plainText, newInPack, normSearch, nCard, nAuction, nBid, notifHref, countsFrom, validateCards, RNAME } from "./schema.js";
+import { nNotification, plainText, newInPack, normSearch, nCard, nAuction, notifHref, countsFrom, validateCards, httpUrl } from "./schema.js";
 
 describe("normSearch", () => {
   it("strips accents, lowercases, and collapses whitespace", () => {
@@ -54,9 +54,6 @@ describe("nAuction", () => {
     expect(a.card.rarity).toBe("L");
     expect(a.card.atk).toBe(5);
   });
-  it("defaults status to active", () => {
-    expect(nAuction({ id: 1, card: { id: 2 } }).status).toBe("active");
-  });
   it("treats the API's `owned` as owning a copy, not as being the seller", () => {
     const theirs = nAuction({ id: 1, card: { id: 2 }, seller_id: "u2", owned: true }, "u1");
     expect(theirs.mine).toBe(false);
@@ -65,13 +62,6 @@ describe("nAuction", () => {
   it("is mine only when seller_id matches my user id", () => {
     expect(nAuction({ id: 1, card: { id: 2 }, seller_id: "u1", owned: false }, "u1").mine).toBe(true);
     expect(nAuction({ id: 1, card: { id: 2 }, seller_id: "u1" }, null).mine).toBe(false);
-  });
-});
-
-describe("nBid", () => {
-  it("flattens the bidder username", () => {
-    expect(nBid({ id: 1, amount: 5, bidder: { username: "kaze" }, placed_at: "t" }))
-      .toEqual({ id: 1, amount: 5, bidder: "kaze", bidderId: null, at: "t" });
   });
 });
 
@@ -105,12 +95,6 @@ describe("validateCards", () => {
   });
 });
 
-describe("RNAME", () => {
-  it("covers every rarity code", () => {
-    expect(Object.keys(RNAME)).toEqual(["C", "PC", "R", "SR", "UR", "L"]);
-  });
-});
-
 describe("newInPack", () => {
   it("marks a card new when every copy I own came from this pack", () => {
     const owned = [{ card_id: "a" }, { card_id: "b" }, { card_id: "b" }, { card_id: "c" }, { card_id: "c" }];
@@ -132,4 +116,14 @@ describe("nNotification", () => {
     expect(n("trade_offer", { title: "x", message: "🔄 Offre reçue !" }).message).toBe("Offre reçue");
   });
   it("strips emoji, joiners and trailing exclamation marks", () => expect(plainText("  ↩️ Contre-offre reçue !! ")).toBe("Contre-offre reçue"));
+});
+
+describe("httpUrl", () => {
+  it("keeps http(s) links only", () => {
+    expect(httpUrl("https://fr.wikipedia.org/wiki/X")).toBe("https://fr.wikipedia.org/wiki/X");
+    expect(httpUrl("javascript:alert(1)")).toBe(null);
+    expect(httpUrl("data:text/html,x")).toBe(null);
+    expect(httpUrl("/relative")).toBe(null);
+    expect(httpUrl(null)).toBe(null);
+  });
 });

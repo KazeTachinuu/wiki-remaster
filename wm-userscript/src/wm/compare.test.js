@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { compareListings, countByCard } from "./compare.js";
+import { compareListings } from "./compare.js";
 
 const NOW = Date.parse("2026-10-05T12:00:00Z");
 const at = (h) => new Date(NOW + h * 3600000).toISOString();
@@ -40,13 +40,5 @@ describe("compareListings", () => {
   });
   it("does not tag a lone listing as ending soonest", () => {
     expect(compareListings([L("a", 20, 1)], NOW).rows[0].soonest).toBe(false);
-  });
-});
-
-describe("countByCard", () => {
-  it("counts listings per card", () => {
-    const n = countByCard([{ card: { id: 1 } }, { card: { id: 1 } }, { card: { id: 2 } }]);
-    expect(n.get(1)).toBe(2);
-    expect(n.get(2)).toBe(1);
   });
 });

@@ -15,10 +15,15 @@ export const RARITIES = ["C", "PC", "R", "SR", "UR", "L"];
 export const RARITIES_DESC = [...RARITIES].reverse();
 
 /** Where a notification leads when clicked (same routes as the native client). */
+/** A link from the server, kept only if it is http(s): never javascript: or data:. */
+export function httpUrl(u) {
+  try { return /^https?:$/.test(new URL(u).protocol) ? u : null; } catch { return null; }
+}
+
 export function notifHref(n) {
   const d = n.data || {};
   const auctionId = d.auction_id || n.auction_id;
-  if (/^marketplace_/.test(n.type) && auctionId) return `/marketplace/${auctionId}`;
+  if (/^marketplace_/.test(n.type) && auctionId) return `/marketplace/${encodeURIComponent(auctionId)}`;
   if (/^trade_/.test(n.type)) return "/trades";
   if (n.type === "battle_invite" && d.battle_id) return "/battle";
   if (n.type === "friend_request") return "/friends";
@@ -44,7 +49,7 @@ export function nCard(c) {
     q_score: c.q_score != null ? Number(c.q_score) : null,
     pageviews: c.pageviews ?? null,
     summary: c.summary || null,
-    wikipedia_url: c.wikipedia_url || null,
+    wikipedia_url: httpUrl(c.wikipedia_url),
     nsfw_image: !!c.nsfw_image,
   };
 }

@@ -6,7 +6,7 @@ const before = (ms) => new Date(NOW - ms).toISOString();
 
 describe("nf", () => {
   it("formats French thousands and shows a dash for missing values", () => {
-    expect(nf(12345)).toBe((12345).toLocaleString("fr"));
+    expect(nf(12345).replace(/\s/g, " ")).toBe("12 345");
     expect(nf(null)).toBe("-");
     expect(nf(undefined)).toBe("-");
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { shapeOf, diffShapes } from "./contract.js";
+import { shapeOf, diffShapes, mergeShapes } from "./contract.js";
 
 describe("shapeOf", () => {
   it("records every field path with its types, array elements merged", () => {
@@ -30,5 +30,19 @@ describe("diffShapes", () => {
     expect(diffShapes(opt, shapeOf({ a: [{}] })).removed).toEqual([]);
     const bidder = shapeOf({ auction: { bidder: { id: 1 } } });
     expect(diffShapes(bidder, shapeOf({ auction: { bidder: null } })).removed).toEqual([]);
+  });
+});
+
+describe("mergeShapes", () => {
+  it("unions types and keeps fields an empty sample did not show", () => {
+    const withBids = shapeOf({ auction: { seller: { avatar_url: "a.png" }, bids: [{ amount: 5 }] } });
+    const noBids = shapeOf({ auction: { seller: { avatar_url: null }, bids: [] } });
+    const m = mergeShapes(withBids, noBids);
+    expect(m["auction.seller.avatar_url"]).toBe("null|string");
+    expect(m["auction.bids[].amount"]).toBe("number");
+  });
+  it("then still catches a real removal and a real type change", () => {
+    const m = mergeShapes(shapeOf({ a: { x: 1, y: "s" } }), shapeOf({ a: { x: null, y: "t" } }));
+    expect(diffShapes(m, shapeOf({ a: { x: "1" } }))).toEqual({ removed: ["a.y"], changed: ["a.x: number -> string"], added: [] });
   });
 });

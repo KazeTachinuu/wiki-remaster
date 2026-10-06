@@ -7,6 +7,12 @@
   .pull-ready{flex:1;min-height:0;gap:var(--s4)}
   .pull-ready .booster-stage{flex:1;min-height:0}
   .pull-ready .booster{width:auto;height:100%;max-height:620px;min-height:180px}
+  /* the reveal too: the card takes the height the counter, rarity, dots and buttons leave */
+  .main:has(> .view > .pulls > .reveal){height:100dvh}
+  .view:has(> .pulls > .reveal){flex:1;min-height:0;display:flex;flex-direction:column;padding-block:var(--s4) var(--s5)}
+  .pulls:has(> .reveal){flex:1;min-height:0;display:flex;flex-direction:column}
+  .reveal:not(.reveal-all){flex:1;min-height:0;gap:var(--s4)}
+  .reveal:not(.reveal-all) .stage{flex:1 1 0;min-height:200px;max-height:728px;width:auto;max-width:520px;aspect-ratio:5/7}
 }
 
 /* wide: list and preview side by side, the page itself no longer scrolls */

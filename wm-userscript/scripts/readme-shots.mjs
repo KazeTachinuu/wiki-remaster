@@ -122,10 +122,19 @@ await Bun.write(`${OUT}cards-before-after.png`, Buffer.from(data, "base64"));
 // --- the remaster's screens, real data: desktop, then a phone ------------------------------
 await view.navigate("https://www.wiki-masters.com/pulls");
 await view.evaluate(`localStorage.removeItem("wm-off")`);
-const screen = async (name) => { await Bun.sleep(2500); await Bun.write(`${OUT}${name}.png`, await view.screenshot()); };
-await go("/collection"); await screen("collection");
-await ev(() => document.querySelector("#wm-host").shadowRoot.querySelector(".grid .card-btn").click()); await screen("card");
-await go("/marketplace"); await screen("market");
+// shoot once `sel` shows, no skeleton is left and the loading bar is gone (then images settle)
+const ROOT = `document.querySelector("#wm-host").shadowRoot`;
+const loaded = (site, sel) => site.waitFor(`${ROOT}.querySelector(${JSON.stringify(sel)}) && !${ROOT}.querySelector(".skeleton, .loadbar.on")`, 30000).then(() => Bun.sleep(1500));
+const screen = async (name, sel) => { await loaded(site, sel); await Bun.write(`${OUT}${name}.png`, await view.screenshot()); };
+await go("/collection"); await screen("collection", ".grid .card-btn");
+// the card detail on its market tab: price, last sale, chart
+await ev(() => document.querySelector("#wm-host").shadowRoot.querySelector(".grid .card-btn").click());
+await loaded(site, ".modal [role=tab]");
+await ev(() => [...document.querySelector("#wm-host").shadowRoot.querySelectorAll(".modal [role=tab]")].find((t) => t.textContent.includes("Marché")).click());
+// loaded: its numbers (or "no sale"), and the live listings no longer placeholders
+await site.waitFor(`(${ROOT}.querySelector(".modal .mk-kpis") || /Aucune vente/.test(${ROOT}.querySelector(".modal-panel")?.textContent)) && !${ROOT}.querySelector(".modal .sk")`, 60000);
+await screen("card", ".modal .mk-kpis, .modal .cmp");
+await go("/marketplace"); await screen("market", ".auc-item");
 await view.evaluate(prevOff ? `localStorage.setItem("wm-off", ${JSON.stringify(prevOff)})` : `localStorage.removeItem("wm-off")`);
 await view.evaluate(`localStorage.removeItem("wm-debug")`);
 await close();
@@ -133,8 +142,8 @@ await close();
 const phone = await realSite({ width: 390, height: 844 });
 // a fresh browser on the same profile: make sure the remaster is on before the shots
 await phone.go("/pulls"); await phone.view.evaluate(`localStorage.removeItem("wm-off")`);
-for (const [path, name] of [["/collection", "phone-collection"], ["/marketplace", "phone-market"], ["/pulls", "phone-packs"]]) {
-  await phone.go(path); await Bun.sleep(3000);
+for (const [path, name, sel] of [["/collection", "phone-collection", ".grid .card-btn"], ["/marketplace", "phone-market", ".auc-item"], ["/pulls", "phone-packs", ".booster"]]) {
+  await phone.go(path); await loaded(phone, sel);
   await Bun.write(`${OUT}${name}.png`, await phone.view.screenshot());
 }
 await phone.view.evaluate(`localStorage.removeItem("wm-debug")`);

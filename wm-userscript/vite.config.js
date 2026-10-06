@@ -7,6 +7,8 @@ import mockApi from "./plugins/vite-mock-api.js";
 
 // Single source of truth for the version: package.json. Bump it there, nowhere else.
 const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"));
+// Tampermonkey's icon, inline (no request)
+const icon = "data:image/png;base64," + readFileSync(fileURLToPath(new URL("./extension/icon-48.png", import.meta.url))).toString("base64");
 
 // Dev (`npm run dev`): Vite + Svelte with HMR, serving index.html, with the mock API
 //   mounted on /api by a plugin (no second process). Open http://localhost:5173.
@@ -26,6 +28,7 @@ export default defineConfig(({ command }) => ({
               description:
                 "Unofficial redesign of wiki-masters.com, on the game's own data and your own session.",
               author: "Hugo Sibony",
+              icon,
               match: ["https://www.wiki-masters.com/*", "https://wiki-masters.com/*"],
               runAt: "document-start",
               grant: "none",

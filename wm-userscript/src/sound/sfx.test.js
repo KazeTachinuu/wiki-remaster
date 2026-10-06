@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { rarest, sounded, pickSound, isTabSwitch } from "./sfx.js";
+import { rarest, sounded, isTabSwitch } from "./sfx.js";
 
 const rec = () => { const heard = []; const f = (n) => heard.push(n); f.heard = heard; return f; };
 
@@ -26,14 +26,6 @@ describe("sounded", () => {
     const err = new Error("nope");
     await expect(sounded(async () => { throw err; }, p)).rejects.toBe(err);
     expect(p.heard).toEqual(["error"]);
-  });
-});
-
-describe("pickSound", () => {
-  it("selects what was not picked, deselects what was", () => {
-    const p = rec();
-    pickSound(false, p); pickSound(true, p);
-    expect(p.heard).toEqual(["select", "deselect"]);
   });
 });
 

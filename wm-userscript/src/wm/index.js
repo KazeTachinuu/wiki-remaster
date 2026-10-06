@@ -13,7 +13,7 @@ import { isRateLimited } from "./api.js";
 export const data = /(^|\.)wiki-masters\.com$/.test(location.hostname) ? RealData : MockData;
 
 export { RNAME, RARITIES, RARITIES_DESC, normSearch } from "./schema.js";
-export { initCapture, refreshProfile, health, activity, isRateLimited } from "./api.js";
+export { initCapture, refreshProfile, getProfile, health, activity, isRateLimited } from "./api.js";
 export { session, recordPull } from "./session.js";
 export { STATUS, SIDE, statusLabel, tradeTabs, sideValue, verdict, balanceLabel, verdictTitle, chainOf, timeline, offerSummary, dealLine, balanceBadge, stepIn, afterLeaving } from "./trades.js";
 

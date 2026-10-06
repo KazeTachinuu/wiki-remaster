@@ -1,4 +1,4 @@
-# Wiki Remaster
+# <img src="wm-userscript/extension/icon-128.png" width="36" alt=""> Wiki Remaster
 
 An unofficial redesign of [wiki-masters.com](https://www.wiki-masters.com), in your browser, on the game's own data and your own session.
 
@@ -51,6 +51,7 @@ bun run check                  # style check
 bun run test:prod:login        # once: log in to the game
 bun run test:prod              # build on the real site, read-only
 bun scripts/readme-shots.mjs   # README screenshots, read-only
+scripts/check-live.sh --install # daily live check: desktop alert + GitHub issue on failure
 ```
 
 - Mock faults: `POST /api/__fault` (`{ "status": 525, "count": 2 }`, `{ "delay": 7000 }`, `{ "human": true }`); Pro / V.I.P.: `POST /api/__profile`
