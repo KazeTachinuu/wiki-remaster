@@ -1,8 +1,8 @@
 <script>
-  // The sound control in the top bar, on every screen: the speaker shows the state at a glance,
-  // and opens a small panel with the volume and the mute switch (the same switch as the pack
-  // screen's speaker and the game's own setting). Moving the volume unmutes; releasing it plays
-  // a short sample so the new level can be heard.
+  // The remaster's one sound control, in the top bar on every screen: the speaker shows the state
+  // at a glance and opens a small panel with the volume and the mute switch (the game's own
+  // setting too). Moving the volume unmutes; releasing it plays a short sample so the new level
+  // can be heard.
   import Icon from "./Icon.svelte";
   import { onSoundChange, onVolumeChange, setSoundOn, setVolume, play } from "./sound.js";
 

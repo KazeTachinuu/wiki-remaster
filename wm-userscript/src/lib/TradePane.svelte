@@ -12,7 +12,7 @@
   import Icon from "./Icon.svelte";
   import { withHumanCheck } from "./humanCheck.js";
   import { dealLayout, sideShape, DEAL } from "./dealLayout.js";
-  import { data, SIDE, sideValue, verdict, chainOf, statusLabel } from "../wm/index.js";
+  import { data, SIDE, sideValue, verdict, chainOf, timeline, dealLine, statusLabel } from "../wm/index.js";
   import { ago, nf } from "./format.js";
   // mode: "trade" | "chat", kept by the screen so it survives a change of trade
   // ondone: the trade was answered (success); onchanged: reload (the outcome may be unknown)
@@ -22,22 +22,32 @@
   let busy = $state(false);
   let msg = $state("");
   let card = $state(null);
-  const v = $derived(verdict(sideValue(t.give, t.giveCoins, values), sideValue(t.get, t.getCoins, values)));
+  // the offer on show: the latest by default, or an earlier one picked in the negotiation
+  // (an id of another negotiation finds nothing here, so switching trades shows the latest)
+  let viewing = $state(null);
   const chain = $derived(chainOf(t, all));
+  const steps = $derived(timeline(chain));
+  const o = $derived(chain.find((c) => c.id === viewing) ?? t);
+  const earlier = $derived(o.id !== t.id);
+  const v = $derived(verdict(sideValue(o.give, o.giveCoins, values), sideValue(o.get, o.getCoins, values)));
   const canAnswer = $derived(t.status === "pending" && t.incoming);
   const canCancel = $derived(t.status === "pending" && !t.incoming);
   const ACT = { accept: ["Accepter l'échange", "primary"], decline: ["Refuser l'échange", "danger"], cancel: ["Annuler l'offre", "danger"] };
   // every card of the trade at one size, as large as the pane allows (see dealLayout)
   let box = $state(null);
-  // the negotiation history fits beside it when that costs the cards little, else it scrolls below
+  // the negotiation fits beside it (see `lay`), else it scrolls below
   let chainH = $state(0);
+  let earlierH = $state(0); // the "earlier offer" banner, when shown, takes its share of the height
   const lay = $derived.by(() => {
     if (!box) return null;
-    const shape = [sideShape(t.give, t.giveCoins), sideShape(t.get, t.getCoins)];
-    const all = dealLayout(box.width, box.height, ...shape);
+    const shape = [sideShape(o.give, o.giveCoins), sideShape(o.get, o.getCoins)];
+    const h = box.height - (earlier ? earlierH + DEAL.bodyGap : 0);
+    const all = dealLayout(box.width, h, ...shape);
     if (!chainH) return all;
-    const both = dealLayout(box.width, box.height - chainH - DEAL.bodyGap, ...shape);
-    return both.fits && both.w >= all.w * DEAL.keepChain ? both : all;
+    const both = dealLayout(box.width, h - chainH - DEAL.bodyGap, ...shape);
+    // with several offers the timeline is how you move between them: it stays in view whenever the
+    // cards still fit; a lone offer's history only does if it costs the cards little
+    return both.fits && (chain.length > 1 || both.w >= all.w * DEAL.keepChain) ? both : all;
   });
   const slim = (cols) => !lay?.stacked && (cols ?? 1) * (lay?.w ?? 0) < DEAL.headWrapBelow;
   const dealVars = ["gap", "pad", "chip", "verdictW", "verdictH", "bodyGap"].map((k) => `--deal-${k}:${DEAL[k]}px`).join(";");
@@ -90,27 +100,37 @@
     {#key t.other.id}<TradeChat friend={t.other} {onopentrade} />{/key}
   {:else}
     <div class="tp-body" bind:contentRect={box} style="{dealVars};--card-w:{lay?.w ?? DEAL.min}px">
+      {#if earlier}
+        <p class="tp-earlier" bind:offsetHeight={earlierH}><span><b>{steps.find((s) => s.offer?.id === o.id)?.text} {steps.find((s) => s.offer?.id === o.id)?.by}</b>, {ago(o.createdAt)}: une offre précédente.</span><button class="btn" onclick={() => (viewing = null)}>Voir la dernière offre</button></p>
+      {/if}
       <div class="tp-sides" class:stacked={lay?.stacked} class:scrolls={lay && !lay.fits} class:measuring={!lay}>
-        <TradeSide label={SIDE.give} items={t.give} coins={t.giveCoins} cols={lay?.give} narrow={slim(lay?.give)} {values} onopen={(it) => (card = it)} />
+        <TradeSide label={SIDE.give} items={o.give} coins={o.giveCoins} cols={lay?.give} narrow={slim(lay?.give)} {values} onopen={(it) => (card = it)} />
         <TradeVerdict {v} />
-        <TradeSide label={SIDE.get} items={t.get} coins={t.getCoins} cols={lay?.get} narrow={slim(lay?.get)} {values} onopen={(it) => (card = it)} />
+        <TradeSide label={SIDE.get} items={o.get} coins={o.getCoins} cols={lay?.get} narrow={slim(lay?.get)} {values} onopen={(it) => (card = it)} />
       </div>
-      {#if chain.length > 1}
+      {#if steps.length > 2 || t.status !== "pending"}
         <section class="tp-chain" bind:offsetHeight={chainH}>
-          <h3>Historique de la négociation</h3>
+          <h3>Négociation</h3>
           <ol>
-            {#each chain as c, i (c.id)}
-              <li class:here={c.id === t.id}>
-                <span class="tp-chain-what"><b>{i === 0 ? "Offre" : "Contre-offre"}</b> de {c.incoming ? c.other.username : "vous"}</span>
-                <span class="trade-status" data-s={c.status}>{statusLabel(c.status)}</span>
-                <span class="nowrap tp-chain-when">{ago(c.createdAt)}</span>
+            {#each steps as s, i (i)}
+              <li data-k={s.kind} class:now={i === steps.length - 1}>
+                {#if s.offer}
+                  <!-- an offer step shows its deal, and its cards above once picked -->
+                  <button class="tp-step" class:on={s.offer.id === o.id} aria-pressed={s.offer.id === o.id} onclick={() => (viewing = s.offer.id)}>
+                    <span class="tp-chain-what"><b>{s.text}</b> {s.by}<span class="tp-step-deal">{dealLine(s.offer.give.length, s.offer.giveCoins, s.offer.get.length, s.offer.getCoins)}</span></span>
+                    <span class="nowrap tp-chain-when">{ago(s.at)}</span>
+                  </button>
+                {:else}
+                  <span class="tp-chain-what"><b>{s.text}</b> {s.by}</span>
+                  {#if s.at}<span class="nowrap tp-chain-when">{ago(s.at)}</span>{/if}
+                {/if}
               </li>
             {/each}
           </ol>
         </section>
       {/if}
     </div>
-    {#if ask || canAnswer || canCancel || msg}
+    {#if !earlier && (ask || canAnswer || canCancel || msg)}
       <footer class="tp-foot">
         {#if ask}
           <div class="tp-confirm" role="alertdialog" aria-label="Confirmation">

@@ -18,6 +18,17 @@ const RANK = { L: 5, UR: 4, SR: 3, R: 2, PC: 1, C: 0 };
 
 const norm = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const iso = (t = Date.now()) => new Date(t).toISOString();
+const byTitle = (a, b) => a.wikipedia_title.localeCompare(b.wikipedia_title, "fr");
+// The filters the real card routes share: `q` searches title and category, `rarity` may repeat
+// (rarity=PC&rarity=C). `cardOf` reads the card out of a row (a catalog card is its own card).
+function filterCards(rows, url, cardOf = (c) => c) {
+  const nq = norm(url.searchParams.get("q"));
+  const rarities = url.searchParams.getAll("rarity");
+  return rows.filter((r) => {
+    const c = cardOf(r);
+    return (!nq || norm(c.wikipedia_title + " " + c.category).includes(nq)) && (!rarities.length || rarities.includes(c.rarity));
+  });
+}
 
 // Deterministic PRNG seeded by a string, so a card's synthesized market data is stable.
 function rng(seed) {
@@ -67,8 +78,12 @@ export default function mockApiPlugin() {
         { id: "u_march", username: "Marchandise", avatar_url: null },
       ];
       const ME = { id: "me", username: state.profile.username, avatar_url: null };
-      const friendCards = new Map(FRIENDS.map((f, n) => [f.id, CATALOG.filter((_, i) => i % 3 === n).map((card, i) => ({
-        id: `${f.id}_uc_${i}`, card, count: 1, is_shiny: i === 2, starred: false, obtained_at: iso(), user_id: f.id, owned_by_viewer: ownsCard(card.id), tags: [],
+      // doobii owns the whole catalog plus a shiny second copy of every fourth card: more than one
+      // page (PAGE rows), like real collections, so paging, search and filters run on the server
+      const ownedBy = (n) => (n === 1 ? [...CATALOG.map((card) => [card, false]), ...CATALOG.filter((_, i) => i % 4 === 0).map((card) => [card, true])]
+        : CATALOG.filter((_, i) => i % 3 === n).map((card, i) => [card, i === 2]));
+      const friendCards = new Map(FRIENDS.map((f, n) => [f.id, ownedBy(n).map(([card, is_shiny], i) => ({
+        id: `${f.id}_uc_${i}`, card, count: 1, is_shiny, starred: false, obtained_at: iso(), user_id: f.id, owned_by_viewer: ownsCard(card.id), tags: [],
       }))]));
       const userOf = (id) => (id === "me" ? ME : FRIENDS.find((f) => f.id === id));
       const cardOfCopy = (owner, ucId) => (owner === "me" ? state.collection.get(ucId) : friendCards.get(owner)?.find((u) => u.id === ucId));
@@ -250,14 +265,14 @@ export default function mockApiPlugin() {
         }
 
         if (p === "/api/cards") {
-          let list = CATALOG.map((c, i) => ({ ...c, nsfw_image: i % 17 === 3 }));
-          if (q("q")) { const nq = norm(q("q")); list = list.filter((c) => norm(c.wikipedia_title + " " + c.category).includes(nq)); }
-          const rarities = url.searchParams.getAll("rarity");
-          if (rarities.length) list = list.filter((c) => rarities.includes(c.rarity));
+          let list = filterCards(CATALOG.map((c, i) => ({ ...c, nsfw_image: i % 17 === 3 })), url);
           if (q("wishlist") === "1") list = [];
-          const by = { name: (a, b) => a.wikipedia_title.localeCompare(b.wikipedia_title, "fr"), atk: (a, b) => b.atk - a.atk, def: (a, b) => b.def - a.def };
+          const by = { name: byTitle, atk: (a, b) => b.atk - a.atk, def: (a, b) => b.def - a.def };
           list.sort(by[q("sort")] || ((a, b) => RANK[b.rarity] - RANK[a.rarity]));
-          const rarityCounts = Object.fromEntries(Object.keys(RANK).map((r) => [r, byRarity[r]?.length || 0]));
+          // like the live route (checked by test:prod): every tier unfiltered, only the asked tiers
+          // under a rarity filter, none under a search
+          const tiers = q("q") ? [] : url.searchParams.getAll("rarity").length ? url.searchParams.getAll("rarity") : Object.keys(RANK);
+          const rarityCounts = Object.fromEntries(tiers.map((r) => [r, byRarity[r]?.length || 0]));
           return send(res, 200, {
             cards: list.slice(page * PAGE, page * PAGE + PAGE),
             total: q("q") ? null : list.length,
@@ -279,10 +294,7 @@ export default function mockApiPlugin() {
             });
           }
           const pg = Math.max(1, page) - 1; // 1-based like the real server, page=0 aliases page 1
-          let src = CATALOG.slice();
-          if (q("q")) { const nq = norm(q("q")); src = src.filter((c) => norm(c.wikipedia_title + " " + c.category).includes(nq)); }
-          const rarities = url.searchParams.getAll("rarity");
-          if (rarities.length) src = src.filter((c) => rarities.includes(c.rarity));
+          const src = filterCards(CATALOG, url);
           const all = src.flatMap((c) => Array.from({ length: copies(c) }, (_, k) => synthAuction(c, k)));
           const by = { price_asc: (a, b) => a.effective_bid - b.effective_bid, price_desc: (a, b) => b.effective_bid - a.effective_bid, ending_soon: (a, b) => a.end_at.localeCompare(b.end_at) };
           if (by[q("sort")]) all.sort(by[q("sort")]);
@@ -336,7 +348,7 @@ export default function mockApiPlugin() {
         if ((id = match(p, /^\/api\/marketplace\/([^/]+)\/settle$/)?.[0]) && m === "POST") {
           const a = state.listings.get(id);
           if (!a || Date.parse(a.end_at) > Date.now()) return send(res, 409, { error: "Enchère pas encore terminée." });
-          Object.assign(a, { status: a.current_bid ? "sold" : "unsold", settled_at: iso(), final_price: a.current_bid });
+          Object.assign(a, { status: a.current_bid ? "settled_sold" : "settled_unsold", settled_at: iso(), final_price: a.current_bid });
           if (!a.current_bid) state.collection.set(a.user_card.id, a.user_card);
           return send(res, 200, { status: a.status });
         }
@@ -389,8 +401,11 @@ export default function mockApiPlugin() {
         if ((id = match(p, /^\/api\/profile\/([^/]+)\/collection$/)?.[0])) {
           const f = FRIENDS.find((x) => x.username === decodeURIComponent(id));
           if (!f) return send(res, 404, { error: "Profil introuvable." });
-          const all = friendCards.get(f.id);
-          return send(res, 200, { collection: all.slice(page * PAGE, page * PAGE + PAGE), total: null, rarityCounts: {}, tagOptions: [], profileId: f.id, pendingTradeCardIds: pendingCopies(f.id) });
+          // like the live route (checked by test:prod): filtered by q and rarity, rarity order (L first)
+          // unless sort=name (any other sort value also gives name order), total only with a search
+          const all = filterCards(friendCards.get(f.id), url, (r) => r.card)
+            .sort(q("sort") ? (a, b) => byTitle(a.card, b.card) : (a, b) => RANK[b.card.rarity] - RANK[a.card.rarity] || byTitle(a.card, b.card));
+          return send(res, 200, { collection: all.slice(page * PAGE, page * PAGE + PAGE), total: q("q") ? all.length : null, rarityCounts: {}, tagOptions: [], profileId: f.id, pendingTradeCardIds: pendingCopies(f.id) });
         }
         if ((id = match(p, /^\/api\/chat\/([^/]+)$/)?.[0])) {
           const list = state.chats.get(id);
@@ -462,9 +477,13 @@ export default function mockApiPlugin() {
 }
 
 const ago = (ms) => iso(Date.now() - ms);
+// Shaped like the live rows (types, titles and data keys recorded by test:prod, see
+// docs/api-shapes.json): every row carries its own data.title and data.message.
 const NOTIFS = [
-  { id: "n0", type: "marketplace_wishlist_listed", data: { message: "Une carte de votre liste de souhaits vient d'être mise en vente.", auction_id: "auc_card_1" }, read: false, created_at: ago(2 * 60000) },
-  { id: "n1", type: "battle_invite", data: { title: "Défi reçu", message: "Kaze vous défie en duel." }, read: false, created_at: ago(5 * 60000) },
-  { id: "n2", type: "custom", data: { title: "Échange accepté", message: "Votre échange a été accepté." }, read: false, created_at: ago(3 * 3600000) },
-  { id: "n3", type: "marketplace_auction_sold", data: { title: "Enchère remportée", message: "Vous avez remporté Georges Seurat pour 210." }, read: true, created_at: ago(26 * 3600000) },
+  { id: "n0", type: "trade_offer", data: { title: "🔄 Nouvelle offre d'échange !", message: "doobii vous propose un échange.", trade_id: "tr_doobii", initiator_id: "u_doobii", initiator_username: "doobii" }, read: false, created_at: ago(2 * 60000) },
+  { id: "n1", type: "marketplace_outbid", data: { title: "📉 Vous avez été surenchéri", message: "Quelqu'un a surenchéri sur Albert Einstein.", auction_id: "auc_card_1", card_id: "card_1", card_title: "Albert Einstein", new_bid: 640, previous_bid: 600 }, read: false, created_at: ago(5 * 60000) },
+  { id: "n2", type: "battle_invite", data: { title: "Nouveau défi !", message: "K4rma vous défie en duel.", battle_id: "b1", challenger_id: "u_k4rma", challenger_username: "K4rma" }, read: false, created_at: ago(40 * 60000) },
+  { id: "n3", type: "trade_accepted", data: { title: "✅ Offre acceptée !", message: "Marchandise a accepté votre offre.", trade_id: "tr_march", recipient_id: "u_march", recipient_username: "Marchandise" }, read: true, created_at: ago(3 * 3600000) },
+  { id: "n4", type: "marketplace_auction_sold", data: { title: "💰 Carte vendue !", message: "Marie Curie s'est vendue 210 WikiBidous.", auction_id: "auc_card_2", card_id: "card_2", card_title: "Marie Curie", final_price: 210 }, read: true, created_at: ago(26 * 3600000) },
+  { id: "n5", type: "marketplace_auction_unsold", data: { title: "Enchère terminée sans acheteur", message: "Votre vente de Léonard de Vinci s'est terminée sans enchère.", auction_id: "auc_card_3", card_id: "card_3", card_title: "Léonard de Vinci" }, read: true, created_at: ago(30 * 3600000) },
 ];

@@ -6,8 +6,8 @@
   import SearchBox from "./SearchBox.svelte";
   import Pager from "./Pager.svelte";
   import { data, RNAME, RARITIES_DESC } from "../wm/index.js";
-  import { nf } from "./format.js";
-  import { PagedList } from "./paged.svelte.js";
+  import { nf, compact } from "./format.js";
+  import { PagedList, debouncedSearch } from "./paged.svelte.js";
   import { lazyValues } from "./lazyValues.js";
   import { settings, toggleHideStats, toggleHideSensitive } from "./settings.svelte.js";
 
@@ -21,21 +21,19 @@
   let wishOnly = $state(prefs.wishOnly);
   $effect(() => Object.assign(prefs, { sort, rarity, wishOnly }));
   let selected = $state(null);
-  let rarityCounts = $state(null); // global tier totals, kept across searches
+  // global tier totals: the server sends them whole only for an unfiltered page (a rarity filter
+  // narrows them, a search empties them), so they are taken from those pages and kept
+  let rarityCounts = $state(null);
 
   // The catalog is ~2.77M cards: everything is filtered and paged server-side.
   const list = new PagedList(async (page) => {
     const d = await data.catalog({ page, sort, q: query, rarity, wishlist: wishOnly });
-    if (d.rarityCounts) rarityCounts = d.rarityCounts;
+    if (d.rarityCounts && !query && !rarity && !wishOnly) rarityCounts = d.rarityCounts;
     return d;
   });
   list.go(0);
 
-  $effect(() => {
-    const q = search.trim();
-    const t = setTimeout(() => { if (q !== query) { query = q; list.go(0); } }, 350);
-    return () => clearTimeout(t);
-  });
+  debouncedSearch(() => search, (q) => { if (q !== query) { query = q; list.go(0); } });
 
   let values = $state({});
   const lazy = lazyValues((id, v) => (values[id] = v), { concurrency: 4 });
@@ -43,8 +41,7 @@
 
   const refilter = (change) => { change(); list.go(0); };
   const cards = $derived(list.data?.cards);
-  // Browsing has a total; a search only says whether more pages exist.
-  const hasNext = $derived(query || list.data?.total == null ? !!list.data?.hasMore : (list.page + 1) * 50 < list.data.total);
+  const hasNext = $derived(!!list.data?.hasMore);
   const catalogTotal = $derived(rarityCounts ? Object.values(rarityCounts).reduce((a, b) => a + b, 0) : null);
 </script>
 
@@ -57,7 +54,7 @@
     </div>
   </div>
   <div class="coll-tools">
-    <SearchBox bind:value={search} loading={search.trim() !== query || list.loading} placeholder="Rechercher dans 2,7 M de cartes..." />
+    <SearchBox bind:value={search} loading={search.trim() !== query || list.loading} placeholder={catalogTotal ? `Rechercher une carte parmi ${compact(catalogTotal)}` : "Rechercher une carte..."} />
     <div class="tool-actions">
       <div class="isel" title="Trier">
         <Icon name="sort" />

@@ -33,3 +33,9 @@ export function createLane({ concurrency = 2, gapMs = 450 } = {}) {
     get state() { return state; },
   };
 }
+
+/**
+ * The one lane for background reads (market values, the rest of the collection): the game reads
+ * bursts as automation, so they share a single pace, and a rate limit pauses all of them.
+ */
+export const backgroundLane = createLane({ concurrency: 2, gapMs: 450 });

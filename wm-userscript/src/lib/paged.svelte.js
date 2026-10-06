@@ -30,3 +30,18 @@ export class PagedList {
     }
   }
 }
+
+/** How long typing must pause before a server-side search runs. */
+export const SEARCH_DELAY_MS = 350;
+
+/**
+ * Debounced search for a server-filtered list: once `read()` (trimmed) has been stable for
+ * SEARCH_DELAY_MS, `apply(q)` runs. Call during component init.
+ */
+export function debouncedSearch(read, apply) {
+  $effect(() => {
+    const q = read().trim();
+    const t = setTimeout(() => apply(q), SEARCH_DELAY_MS);
+    return () => clearTimeout(t);
+  });
+}

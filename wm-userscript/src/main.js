@@ -1,3 +1,4 @@
+import { isOurs } from "./wm/routes.js";
 import { mount, unmount } from "svelte";
 import App from "./App.svelte";
 import appCss from "./app.css?inline";
@@ -13,10 +14,8 @@ wm.initCapture();
 // Test hook for scripts/prod-test.mjs: exposes the domain layer only when opted in.
 try { if (localStorage.getItem("wm-debug")) window.__wm = wm; } catch {}
 
-// We only take over the core routes; every other route falls back to the real app.
-// /marketplace/<id> is an auction (market notifications link there): we open it in our market.
-const CORE = /^\/(pulls|collection|global-collection|trades|marketplace(\/[^/]+)?)?\/?$/;
-const isCore = () => CORE.test(location.pathname);
+// We only take over our routes (wm/routes.js); every other route falls back to the real app.
+const isCore = () => isOurs(location.pathname);
 
 let instance = null;
 let host = null;       // shadow host in the page

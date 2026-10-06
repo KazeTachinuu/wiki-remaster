@@ -3,6 +3,7 @@
  * Every call here is verified against the live site (docs/API_REFERENCE.md).
  */
 
+import { backgroundLane } from "../lane.js";
 import { api, getProfile, patchProfile, bumpEpoch, getUserId, refreshProfile } from "../api.js";
 import { nCard, nAuction, nBid, nNotification, nTrade, nMessage, normSearch, countsFrom, validateCards } from "../schema.js";
 import { whoAmI, chatMe, otherOf, needMe } from "../trades.js";
@@ -90,20 +91,23 @@ export const RealData = {
     const add = (list) => { for (const it of mapCollection(list || [])) rows.set(it.id, it); };
     add(first.collection);
     const items = () => [...rows.values()];
-    const total = first.total ?? rows.size;
+    // every copy is its own row (count is always 1, checked by test:prod): `total` counts copies,
+    // distinct cards are counted from the rows
+    const copies = first.total ?? rows.size;
     const stats = (loading) => ({
-      unique: total,
-      total: items().reduce((n, it) => n + it.count, 0),
+      copies,
+      unique: new Set(items().map((it) => it.card.id)).size,
       counts: first.rarityCounts || countsFrom(items()),
       loading,
     });
-    const pages = Math.ceil(total / PAGE);
+    const pages = Math.ceil(copies / PAGE);
     if (pages > 1) {
       onPartial?.({ items: items(), stats: stats(true) });
       await Promise.all(
         Array.from({ length: pages - 1 }, (_, i) =>
-          // the remaining pages have their own "Mise à jour" pill: no global loader
-          api(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`, { quiet: true }).then((d) => {
+          // the remaining pages have their own "Mise à jour" pill (no global loader), paced with
+          // every other background read rather than sent all at once
+          backgroundLane.run(() => api(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`, { quiet: true })).then((d) => {
             add(d.collection);
             onPartial?.({ items: items(), stats: stats(true) });
           })
@@ -121,7 +125,9 @@ export const RealData = {
     const wished = new Set(d.wishlistCardIds);
     const cards = (d.cards || []).map((c) => ({ ...nCard(c), owned: owned.has(c.id), wishlisted: wished.has(c.id) }));
     validateCards("catalog", cards);
-    return { cards, total: d.total ?? null, hasMore: !!d.searchHasMore, rarityCounts: d.rarityCounts || null };
+    // browsing has a total; a search (total null) only says whether more pages exist
+    const total = d.total ?? null;
+    return { cards, total, hasMore: total != null ? (page + 1) * PAGE < total : !!d.searchHasMore, rarityCounts: d.rarityCounts || null };
   },
 
   /** Market browse. Pages are 1-based on the server (page=0 aliases page 1); ours are 0-based. */
@@ -206,9 +212,13 @@ export const RealData = {
     return list.map((f) => otherOf(f, me));
   },
 
-  /** A friend's collection page (50 per page), and the copies already locked in a pending trade. */
-  async profileCollection(username, page = 0) {
-    const d = await api(`/api/profile/${encodeURIComponent(username)}/collection?page=${page}`);
+  /**
+   * A friend's collection page (50 per page), filtered and sorted by the server: `q` searches the
+   * titles, `rarity` keeps one tier, `sort` is "name" (A to Z) or anything else for the rarity
+   * order. Also the copies already locked in a pending trade.
+   */
+  async profileCollection(username, { page = 0, q, rarity, sort } = {}) {
+    const d = await api(`/api/profile/${encodeURIComponent(username)}/collection?${qs({ page, q, rarity, sort: sort === "name" ? "name" : null })}`);
     const rows = d.collection || [];
     return { items: mapCollection(rows), pending: new Set(d.pendingTradeCardIds || []), hasMore: rows.length === PAGE };
   },

@@ -45,11 +45,7 @@
 
   const secsLeft = $derived(secondsUntil(a.endAt, now) ?? 0);
   // live -> closing (time is up, not settled yet) -> sold | unsold | cancelled
-  const phase = $derived(
-    a.status === "cancelled" ? "cancelled"
-    : a.status !== "active" ? (a.finalPrice != null || a.winner ? "sold" : "unsold")
-    : secsLeft > 0 ? "live" : "closing"
-  );
+  const phase = $derived(a.status !== "active" ? a.status : secsLeft > 0 ? "live" : "closing");
   const urgency = $derived(secsLeft < 60 ? "crit" : secsLeft < 300 ? "warn" : "ok");
   // Verified: the first bid may equal the base; later bids must beat the current one.
   const minBid = $derived(a.bid != null ? a.bid + 1 : a.base ?? 1);

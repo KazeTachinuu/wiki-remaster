@@ -1,6 +1,5 @@
 <script>
   import Reveal from "./Reveal.svelte";
-  import SoundToggle from "./SoundToggle.svelte";
   import { play } from "./sound.js";
   import { data, session, recordPull, forgetCollection } from "../wm/index.js";
   import { useOriginalSite } from "./settings.svelte.js";
@@ -100,7 +99,6 @@
 }} />
 
 <div class="pulls">
-<SoundToggle />
 {#if phase === "revealing"}
   <Reveal {cards} packs={batch} ondone={done} />
 {:else}

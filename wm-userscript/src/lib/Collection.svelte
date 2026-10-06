@@ -6,7 +6,7 @@
   import CardModal from "./CardModal.svelte";
   import Icon from "./Icon.svelte";
   import SearchBox from "./SearchBox.svelte";
-  import { data, RNAME, RARITIES_DESC, normSearch, loadCollection, forgetCollection, valueLane } from "../wm/index.js";
+  import { data, RNAME, RARITIES_DESC, normSearch, loadCollection, forgetCollection, backgroundLane } from "../wm/index.js";
   import { settings, toggleHideStats } from "./settings.svelte.js";
   import { lazyValues } from "./lazyValues.js";
 
@@ -30,7 +30,7 @@
   let values = $state({});
   // the value lane pauses when the game limits requests: say so instead of looking stuck
   let lanePaused = $state(false);
-  $effect(() => valueLane.subscribe((st) => (lanePaused = st === "paused")));
+  $effect(() => backgroundLane.subscribe((st) => (lanePaused = st === "paused")));
   let loaded = $state(0);
   let tick = $state(0);
   const sortVals = new Map();
@@ -134,7 +134,7 @@
   <div class="coll-head">
     <div>
       <h1>Ma collection</h1>
-      <div class="meta">{plural(stats.unique, "carte")} · {stats.total} exemplaires{#if stats.loading}<span class="sync"><span class="spin"></span>Mise à jour {items.length} / {stats.unique}</span>{/if}</div>
+      <div class="meta">{plural(stats.unique, "carte")}{#if stats.copies !== stats.unique} · {stats.copies} exemplaires{/if}{#if stats.loading}<span class="sync"><span class="spin"></span>Mise à jour {items.length} / {stats.copies}</span>{/if}</div>
     </div>
     <div class="coll-tools">
       <SearchBox bind:value={search} placeholder="Rechercher une carte..." />
@@ -174,7 +174,7 @@
   {/if}
   {#if bulkMsg}<div class="sort-hint">{bulkMsg}</div>{/if}
 
-  {#if stats.unique > 0}
+  {#if stats.copies > 0}
     <div class="rarity-panel">
       <div class="rarity-meter" role="img" aria-label="Répartition par rareté">
         {#each RARITIES_DESC as r}
@@ -198,7 +198,7 @@
           </button>
         {/if}
       {/snippet}
-      <RarityChips value={filter === "ALL" ? "" : filter} counts={stats.counts} total={stats.unique}
+      <RarityChips value={filter === "ALL" ? "" : filter} counts={stats.counts} total={stats.copies}
         onchange={(r) => (filter = r || "ALL")} children={starredCount || shinyCount ? extras : undefined} />
     </div>
   {/if}

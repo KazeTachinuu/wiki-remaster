@@ -27,6 +27,7 @@ tags[], user_id`.
 
 **Auction**: `id, seller_id, card_id, base_amount, listing_base_amount, base_repriced_at,
 current_bid, current_bidder_id, current_bidder{username}, effective_bid, final_price, status
+(`active`, `cancelled`, `settled_sold`, `settled_unsold`)
 (active, cancelled, ...), end_at, created_at, settled_at, winner_id, winner{username},
 snapshot_rarity/atk/def, is_shiny, seller{username}, card{...}, owned`.
 
@@ -35,8 +36,8 @@ snapshot_rarity/atk/def, is_shiny, seller{username}, card{...}, owned`.
 ### Collection and catalog
 | Call | Notes |
 |---|---|
-| `GET /api/my-collection?sort&page&stats` | `{ collection[], total, rarityCounts, tagOptions, pendingTradeCardIds }`. 50 per page, 0-based, `limit` ignored. The rarity order has no tiebreak: rows shift between pages if the collection changes mid-load, so merge pages by id. |
-| `GET /api/cards?page&sort&q&rarity&wishlist=1` | `{ cards[], total, searchHasMore, rarityCounts, ownedCardIds, wishlistCardIds, friendOwners }`. 0-based. Sorts: `rarity name atk def`. `rarity` may repeat. `total` is null when `q` is set. |
+| `GET /api/my-collection?sort&page&stats` | `{ collection[], total, rarityCounts, tagOptions, pendingTradeCardIds }`. 50 per page, 0-based, `limit` ignored. Every copy is its own row (`count` is 1): `total` counts copies, distinct cards are counted from the rows. The rarity order has no tiebreak: rows shift between pages if the collection changes mid-load, so merge pages by id. |
+| `GET /api/cards?page&sort&q&rarity&wishlist=1` | `{ cards[], total, searchHasMore, rarityCounts, ownedCardIds, wishlistCardIds, friendOwners }`. 0-based. Sorts: `rarity name atk def`. `rarity` may repeat. `total` is null when `q` is set. `rarityCounts` holds every tier only on an unfiltered page: a rarity filter narrows it to those tiers, a search empties it. |
 | `POST /api/user-cards/{userCardId}/discard` | No body. `{ balance }` (+1 WikiBidou). |
 | `POST /api/user-cards/bulk-discard` | `{ card_ids: [userCardId] }` -> `{ discarded_count, failed[] }`. |
 
@@ -66,7 +67,7 @@ snapshot_rarity/atk/def, is_shiny, seller{username}, card{...}, owned`.
 ### Notifications
 | Call | Notes |
 |---|---|
-| `GET /api/notifications` | `{ notifications: [{ id, type, data{title, message, auction_id, ...}, read, created_at }] }`, up to 50. Types include `marketplace_outbid`, `marketplace_auction_sold`, `marketplace_auction_unsold`, `marketplace_wishlist_listed`, `auction_midpoint_nudge`, `battle_invite`, `friend_request`, `guild_invite`, `custom`. |
+| `GET /api/notifications` | `{ notifications: [{ id, type, data{title, message, auction_id, ...}, read, created_at }] }`, up to 50. Every row carries its own `data.title` and `data.message`. Types seen: `marketplace_outbid`, `marketplace_auction_won`, `marketplace_auction_sold`, `marketplace_auction_unsold` (data: `auction_id`, `card_id`, `card_title`, `final_price` / `new_bid`), `trade_offer`, `trade_countered`, `trade_accepted` (data: `trade_id` and the other party), `battle_invite`, `friend_request`, `guild_invite`. |
 | `PATCH /api/notifications` | `{ ids: [...] }` marks those read, `{}` marks all. `{ success: true }`. |
 
 ### Trades
@@ -82,7 +83,7 @@ Shapes captured live (reads); the writes are read from the native client (`/trad
 | `GET /api/chat/{friendId}` | `{ messages[], trades[] }`: the conversation with one friend and your trades with them. Messages are `chat_messages` rows (`id, sender_id, recipient_id, content, created_at`, read flag). The native client also listens on Supabase realtime (`chat_messages`, `trades`). |
 | `POST /api/chat/{friendId}` | `{ content }`. |
 | `GET /api/friends` | `{ friendships: [{ id, status, requester{id,username,avatar_url}, addressee{...} }], counts }`. The friend is whichever side is not me; trade with `accepted` ones. |
-| `GET /api/profile/{username}/collection?page` | Same rows as `/api/my-collection` (`id` = their user card id, `card`, `count`, `is_shiny`, `owned_by_viewer`), 50 per page, plus `profileId` and `pendingTradeCardIds`. |
+| `GET /api/profile/{username}/collection?page&q&rarity&sort` | Same rows as `/api/my-collection` (`id` = their user card id, `card`, `count`, `is_shiny`, `owned_by_viewer`), 50 per page, plus `profileId` and `pendingTradeCardIds` (the same on every page). Filtered by the server: `q` searches titles and descriptions (then `total` is the match count, else null), `rarity` may repeat (`rarity=PC&rarity=C`; a comma list returns nothing), `sort=name` is A to Z (any other value too); no `sort` is rarity order, L first. |
 
 ## Other endpoints in the native client (not used yet)
 
@@ -106,3 +107,11 @@ There is **no** card-level wishlist write: `wishlistCardIds` and `wishlist=1` ar
 Rarity art `/{commun,peu_commun,rare,super_rare,ultra_rare,legendaire}.png`, shiny Legendary
 `/shiny/onyx-art.webp`, sounds `/audio/{pack-rip,card-flip,legendary-reveal}.mp3`.
 Rarity palette: `C #b8f2d5 · PC #b1cff2 · R #c6a7f2 · SR #ed6fa3 · UR #fa9931 · L #ffe144`.
+
+## Contract
+
+`docs/api-shapes.json` is the recorded shape of every endpoint the app reads: each field path
+with the types seen there, recorded from the live site by `bun run test:prod --only=contract`.
+Each run diffs the live shapes against it and fails when a field disappears or changes type;
+`--update-shapes` accepts the live shapes after a review. Neither the routes nor Supabase publish
+a schema to read instead (no OpenAPI route; Supabase answers 401 for its own).

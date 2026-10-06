@@ -34,9 +34,9 @@ const CATALOG = [
   card("Albert Einstein", "physicien théoricien (1879-1955)", "L", 9840, 8120,
     W + "d/d3/Albert_Einstein_Head.jpg/330px-Albert_Einstein_Head.jpg"),
   card("Marie Curie", "physicienne et chimiste (1867-1934)", "L", 9610, 8480,
-    W + "7/7e/Marie_Curie_c._1920s.jpg/330px-Marie_Curie_c._1920s.jpg"),
+    W + "7/7e/Marie_Curie_c1920.jpg/330px-Marie_Curie_c1920.jpg"),
   card("Léonard de Vinci", "artiste et savant de la Renaissance", "L", 9720, 8890,
-    W + "e/ec/Leonardo_self.jpg/330px-Leonardo_self.jpg"),
+    W + "c/cb/Francesco_Melzi_-_Portrait_of_Leonardo.png/330px-Francesco_Melzi_-_Portrait_of_Leonardo.png"),
 
   // ---- Ultra rare ----
   card("Albert Uderzo", "dessinateur français de bande dessinée (1927-2020)", "UR", 8731, 7942,

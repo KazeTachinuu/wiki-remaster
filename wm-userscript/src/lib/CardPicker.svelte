@@ -8,6 +8,8 @@
   import Icon from "./Icon.svelte";
   import SearchBox from "./SearchBox.svelte";
   import { untrack } from "svelte";
+  import { debouncedSearch } from "./paged.svelte.js";
+  import { inView } from "./inView.js";
   import { pickList, allValued, PICK_SORTS } from "./pickList.js";
   import RarityChips from "./RarityChips.svelte";
   import PickMark from "./PickMark.svelte";
@@ -16,8 +18,12 @@
   // above stay and "Réessayer" asks the same page again.
   // values + watch + load: a valueMap; each card's value loads once it scrolls into view, all of
   // them when sorting by value.
+  // onquery: the list is filtered by its server (a friend's cards, paged). The search, rarity and
+  // sort go to onquery({ q, rarity, sort }) instead of filtering here; the estimated value is ours,
+  // not the server's, so that sort first loads the remaining pages, one at a time.
+  // more: loads the next page, called as the end of the grid comes near.
   let { items = [], picked, locked = new Set(), loading = false, error = false, onretry, onpick,
-        more = null, loadingMore = false, moreError = false, values, watch, load, lead } = $props();
+        more = null, loadingMore = false, moreError = false, values, watch, load, lead, onquery = null } = $props();
   let q = $state("");
   let rarity = $state("");
   let sort = $state("rarity");
@@ -32,19 +38,25 @@
     void settled;
     ranked = untrack(() => new Map(values));
   });
-  const shown = $derived(pickList(items, { q, rarity, sort, values: ranked, isLocked }));
+  const remote = !!onquery;
+  const shown = $derived(pickList(items, remote ? { sort, values: ranked, isLocked } : { q, rarity, sort, values: ranked, isLocked }));
 
-  // A paged list (a friend's cards) arrives in rarity order, and a filter only sees the pages loaded
-  // so far: while it matches less than a screenful, the next page loads by itself, one at a time
-  // and a short pause apart (the game reads bursts as automation), until the list ends.
-  const ENOUGH = 12, PAUSE_MS = 400;
-  const filtering = $derived(!!(q.trim() || rarity));
-  const seeking = $derived(filtering && !!more && !moreError && shown.length < ENOUGH);
-  $effect(() => {
-    if (!seeking || loadingMore || loading) return;
-    const t = setTimeout(() => untrack(() => more()), PAUSE_MS);
-    return () => clearTimeout(t);
-  });
+  // server-filtered: ask again on each change (the search once typing pauses), never on mount
+  let asked = { q: "", rarity: "", sort: "rarity" };
+  const ask = (change) => {
+    const next = { ...asked, ...change };
+    if (next.q === asked.q && next.rarity === asked.rarity && next.sort === asked.sort) return;
+    asked = next;
+    onquery(next);
+  };
+  if (remote) {
+    debouncedSearch(() => q, (text) => ask({ q: text }));
+    // a rarity or sort change carries the search as typed, so it costs one request, not two
+    $effect(() => ask({ rarity, sort: sort === "name" ? "name" : "rarity", q: untrack(() => q).trim() }));
+  }
+  // (the owner of `more` paces those requests)
+  const filling = $derived(remote && sort === "value" && !!more && !moreError);
+  $effect(() => { if (filling && !loadingMore) untrack(() => more()); });
 </script>
 
 <div class="picker">
@@ -69,13 +81,14 @@
         </button>
       {:else}
         {#if error && !loading}<div class="empty"><b>Impossible de charger ces cartes.</b><button class="btn" onclick={onretry}>Réessayer</button></div>
-        {:else}<div class="empty"><b>{loading ? "Chargement..." : seeking ? "Recherche dans la suite de la collection..." : items.length ? "Aucune carte ne correspond" : "Aucune carte"}</b></div>{/if}
+        {:else}<div class="empty"><b>{loading ? "Chargement..." : items.length || q || rarity ? "Aucune carte ne correspond" : "Aucune carte"}</b></div>{/if}
       {/each}
     </div>
     {#if more}
-      <div class="picker-more">
-        {#if moreError && !loadingMore}<span class="modal-msg">Impossible de charger la suite.</span>{/if}
-        <button class="btn" disabled={loadingMore || seeking} onclick={more}>{loadingMore || seeking ? "Chargement..." : moreError ? "Réessayer" : "Charger plus"}</button>
+      <!-- the next page loads as the end comes near; a failed page waits for "Réessayer" -->
+      <div class="picker-more" use:inView={{ key: `${items.length}:${loadingMore}`, onEnter: () => { if (!loadingMore && !moreError) more(); } }}>
+        {#if moreError && !loadingMore}<span class="modal-msg">Impossible de charger la suite.</span><button class="btn" onclick={more}>Réessayer</button>
+        {:else}<span class="loading-more"><span class="spin"></span></span>{/if}
       </div>
     {/if}
   </div>

@@ -9,7 +9,7 @@
   import TradeComposer from "./TradeComposer.svelte";
   import Icon from "./Icon.svelte";
   import { valueMap } from "./lazyValues.js";
-  import { data, tradeTabs, sideValue, verdict, balanceBadge, balanceLabel, statusLabel, dealLine, stepIn, afterLeaving } from "../wm/index.js";
+  import { data, tradeTabs, chainOf, sideValue, verdict, balanceBadge, balanceLabel, statusLabel, dealLine, stepIn, afterLeaving } from "../wm/index.js";
   import { ago } from "./format.js";
   let { profile, onwallet } = $props();
 
@@ -117,12 +117,13 @@
         <div class="tr-rows" bind:this={rowsEl} onkeydown={onRowsKey}>
           {#each shown as t (t.id)}
             {@const b = balance(t)}
+            {@const rounds = chainOf(t, trades).length}
             <button class="tr-row" class:on={selected?.id === t.id} data-id={t.id} aria-current={selected?.id === t.id ? "true" : undefined}
               onclick={() => select(t)} aria-label="Échange avec {t.other.username}, {dealLine(t.give.length, t.giveCoins, t.get.length, t.getCoins)}, {balanceLabel(b)}">
               <Avatar user={t.other} size={40} />
               <span class="tr-row-main">
                 <span class="tr-row-top"><b>{t.other.username}</b><span class="tr-row-when nowrap">{ago(t.updatedAt)}</span></span>
-                <span class="tr-row-line">{dealLine(t.give.length, t.giveCoins, t.get.length, t.getCoins)}</span>
+                <span class="tr-row-line">{dealLine(t.give.length, t.giveCoins, t.get.length, t.getCoins)}{#if rounds > 1}<span class="tr-row-rounds">· {rounds} offres</span>{/if}</span>
               </span>
               <!-- settled: the outcome matters more than the balance -->
               {#if tab === "history"}<span class="trade-status" data-s={t.status}>{statusLabel(t.status)}</span>

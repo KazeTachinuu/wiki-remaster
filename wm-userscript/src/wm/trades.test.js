@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { nTrade, nMessage } from "./schema.js";
-import { whoAmI, chatMe, tradeTabs, sideValue, verdict, balanceLabel, verdictTitle, chainOf, STATUS, SIDE, otherOf, NO_ME, offerSummary, dealLine, balanceBadge, stepIn, afterLeaving } from "./trades.js";
+import { whoAmI, chatMe, tradeTabs, sideValue, verdict, balanceLabel, verdictTitle, chainOf, timeline, STATUS, SIDE, otherOf, NO_ME, offerSummary, dealLine, balanceBadge, stepIn, afterLeaving } from "./trades.js";
 
 const card = (id, rarity = "C") => ({ id, rarity, atk: 1, def: 2, wikipedia_title: "T" + id });
 const raw = (o) => ({
@@ -71,6 +71,29 @@ describe("tradeTabs", () => {
     expect(tabs.incoming.map((x) => x.id)).toEqual(["a"]);
     expect(tabs.outgoing.map((x) => x.id)).toEqual(["b"]);
     expect(tabs.history.map((x) => x.id)).toEqual(["d", "c"]);
+  });
+  it("shows a negotiation once, by its latest offer", () => {
+    const root = { id: "r", status: "countered", incoming: true, updatedAt: "1", parentId: null };
+    const counter = { id: "c", status: "pending", incoming: false, updatedAt: "2", parentId: "r" };
+    const tabs = tradeTabs([root, counter]);
+    expect(tabs.outgoing.map((x) => x.id)).toEqual(["c"]);
+    expect(tabs.history).toEqual([]);
+    expect(tradeTabs([root, { ...counter, status: "accepted" }]).history.map((x) => x.id)).toEqual(["c"]);
+  });
+});
+
+describe("timeline", () => {
+  const other = { username: "doobii" };
+  const offer = { id: "r", incoming: true, other, createdAt: "t1", updatedAt: "t2", status: "countered" };
+  const counter = { id: "c", incoming: false, other, createdAt: "t2", updatedAt: "t3" };
+  const line = (steps) => steps.map((s) => `${s.text} ${s.by} @${s.at}`);
+  it("tells each offer, then who answered the last one", () => {
+    expect(line(timeline([offer, { ...counter, status: "accepted" }]))).toEqual(["Offre de doobii @t1", "Contre-offre de vous @t2", "Acceptée par doobii @t3"]);
+    expect(line(timeline([{ ...offer, status: "declined" }]))).toEqual(["Offre de doobii @t1", "Refusée par vous @t2"]);
+  });
+  it("names the sender when an offer is withdrawn, and waits without a date", () => {
+    expect(line(timeline([offer, { ...counter, status: "cancelled" }])).at(-1)).toBe("Annulée par vous @t3");
+    expect(line(timeline([offer, { ...counter, status: "pending" }])).at(-1)).toBe("En attente de doobii @null");
   });
 });
 

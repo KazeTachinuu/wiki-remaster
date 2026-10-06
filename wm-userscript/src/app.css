@@ -158,16 +158,10 @@
 /* pulls ready */
 /* The speaker sits in the top-right corner of the screen; the banner that can open the ready view
    keeps clear of that corner so the button never covers its text. */
-.pulls{position:relative;--sound-btn:40px;--sound-clear:calc(var(--sound-btn) + var(--s3))}
-.sound-toggle{position:absolute;top:0;right:0;z-index:2;display:grid;place-items:center;width:var(--sound-btn);height:var(--sound-btn);border-radius:50%;background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);cursor:pointer;transition:color .15s,border-color .15s}
-.sound-toggle:hover{color:var(--fg);border-color:var(--line2)}
-.sound-toggle.off{color:var(--fg-faint)}
-.sound-toggle svg{width:19px;height:19px}
+.pulls{position:relative}
 .pull-ready{min-height:64vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s5);text-align:center}
 .pull-ready h1{font-family:var(--display);font-size:clamp(26px,3vw,36px);font-weight:700;letter-spacing:-.02em}
 .special-note{background:color-mix(in oklab,var(--r-l) 12%,var(--elev));border:1px solid color-mix(in oklab,var(--r-l) 32%,var(--line));color:var(--fg);border-radius:12px;padding:10px 16px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
-.pull-ready > .special-note:first-child{max-width:calc(100% - 2 * var(--sound-clear))}
-@media (max-width:560px){.pull-ready > .special-note:first-child{align-self:stretch;max-width:none;margin-inline-end:var(--sound-clear)}}
 .link-btn{background:none;border:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .pull-ready .sub{color:var(--fg-soft);margin-top:calc(-1 * var(--s3));font-size:15px}
 
@@ -908,12 +902,33 @@
 .tp .stacked .tm-verdict svg{padding:8px;transform:rotate(90deg)}
 .tp-chain{width:100%;max-width:720px;margin-inline:auto}
 .tp-chain h3{font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-soft);margin-bottom:var(--s2)}
-.tp-chain ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
-.tp-chain li{display:flex;align-items:center;gap:var(--s3);padding:10px var(--s4);font-size:13.5px;color:var(--fg-soft)}
-.tp-chain li + li{border-top:1px solid var(--line)}
-.tp-chain li.here{background:var(--elev);color:var(--fg)}
+/* a negotiation as a timeline: a dot per step on one rail, the last step (where it stands) in colour */
+.tp-chain ol{--dot:9px;list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.tp-chain li{position:relative;display:flex;align-items:center;gap:var(--s3);min-height:34px;padding-left:calc(var(--dot) + var(--s3));font-size:13.5px;color:var(--fg-soft)}
+.tp-chain li::before{content:"";position:absolute;left:0;top:50%;width:var(--dot);height:var(--dot);margin-top:calc(var(--dot) / -2);border-radius:50%;background:var(--line2);z-index:1}
+/* the rail: each step draws its own stretch, so steps of any height join up, from the first dot to the last */
+.tp-chain li::after{content:"";position:absolute;left:calc(var(--dot) / 2 - 1px);top:0;bottom:0;width:2px;background:var(--line)}
+.tp-chain li:first-child::after{top:50%}
+.tp-chain li:last-child::after{bottom:50%}
+.tp-chain li:only-child::after{display:none}
+.tp-chain li.now{color:var(--fg)}
+.tp-chain li.now::before{background:var(--fg-soft)}
+.tp-chain li[data-k="accepted"]::before{background:var(--accent)}
+.tp-chain li[data-k="accepted"] b{color:var(--accent)}
+.tp-chain li[data-k="declined"]::before{background:var(--bad)}
+.tp-chain li[data-k="declined"] b{color:var(--bad)}
+.tp-chain li[data-k="pending"]::before{background:var(--r-l)}
+/* an offer step is a button: its deal under the line, its cards above once picked */
+.tp-step{display:flex;align-items:center;gap:var(--s3);flex:1;min-width:0;padding:6px var(--s2);margin-inline-start:calc(-1 * var(--s2));border:0;border-radius:calc(var(--radius) / 1.618);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.tp-step:hover{background:var(--elev)}
+.tp-step.on{background:var(--elev);color:var(--fg)}
+.tp-step-deal{display:block;font-size:12.5px;color:var(--fg-faint)}
+.tp-earlier{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s2) var(--s3);width:100%;max-width:720px;margin-inline:auto;padding:6px 6px 6px var(--s4);border-radius:var(--radius);background:color-mix(in oklab,var(--r-l) 10%,var(--surface));border:1px solid color-mix(in oklab,var(--r-l) 30%,var(--line));font-size:13.5px;color:var(--fg-soft)}
+.tp-earlier b{color:var(--fg)}
+.tp-earlier .btn{padding:5px 12px;font-size:12.5px}
+.tr-row-rounds{color:var(--fg-faint);white-space:nowrap;margin-left:.35em}
 .tp-chain-what{flex:1;min-width:0}
-.tp-chain-when{font-size:12.5px;color:var(--fg-faint);min-width:76px;text-align:right}
+.tp-chain-when{font-size:12.5px;color:var(--fg-faint);font-variant-numeric:tabular-nums}
 .tp-foot{flex:none;display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:var(--s3);padding:var(--s3) var(--s5);border-top:1px solid var(--line);background:var(--elev)}
 .tp-actions{display:flex;gap:var(--s2);margin-left:auto}
 .tp-actions .btn{padding:11px 22px}
@@ -1073,8 +1088,8 @@
 .oside-cat{min-width:0;font-size:11.5px;color:var(--fg-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .oside-val{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:700;color:var(--r-l);font-variant-numeric:tabular-nums;white-space:nowrap}
 .oside-val::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--coin)}
-.oside-val.none{color:var(--fg-faint)}
-.oside-val.none::before{background:var(--fg-faint)}
+.oside-val.none{color:var(--fg-faint);font-weight:500}
+.oside-val.none::before{display:none}
 .oside-x{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border:0;border-radius:8px;background:none;color:var(--fg-faint);cursor:pointer;opacity:.7;transition:.15s}
 .oside-row:hover .oside-x,.oside-x:focus-visible{opacity:1}
 .oside-x:hover{background:var(--line);color:var(--fg)}

@@ -9,7 +9,7 @@
   import Pager from "./Pager.svelte";
   import { data } from "../wm/index.js";
   import { nf, countdown, secondsUntil } from "./format.js";
-  import { PagedList } from "./paged.svelte.js";
+  import { PagedList, debouncedSearch } from "./paged.svelte.js";
   import { settings } from "./settings.svelte.js";
 
   let { profile, onwallet, openId = null } = $props();
@@ -28,11 +28,7 @@
   const list = new PagedList((page) => data.marketplace({ page, sort, q: query, rarity }));
   list.go(0);
 
-  $effect(() => {
-    const q = search.trim();
-    const t = setTimeout(() => { if (q !== query) { query = q; list.go(0); } }, 350);
-    return () => clearTimeout(t);
-  });
+  debouncedSearch(() => search, (q) => { if (q !== query) { query = q; list.go(0); } });
 
   // My listings, bids, wins and history (one call).
   let mine = $state(null);
@@ -60,9 +56,8 @@
 
   function statusLabel(a) {
     if (a.status === "active") return countdown(secondsUntil(a.endAt, now));
-    if (a.status === "cancelled") return "Annulée";
-    if (a.finalPrice != null) return `Vendue ${nf(a.finalPrice)}`;
-    return "Invendue";
+    if (a.status === "sold") return a.finalPrice != null ? `Vendue ${nf(a.finalPrice)}` : "Vendue";
+    return a.status === "cancelled" ? "Annulée" : "Invendue";
   }
 
   const tabs = $derived([

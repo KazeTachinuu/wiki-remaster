@@ -10,7 +10,10 @@
 // --attach instead attaches to your running Brave (remote debugging on).
 // WM_BROWSER overrides the browser binary (default: brave, then chromium/chrome on PATH).
 //
-// Features (--only):  routing profile collection catalog market estimate notifs trades ui
+// Features (--only):  routing profile collection catalog market estimate notifs trades assumptions contract ui
+// contract: records the shape of every endpoint the app reads into
+// docs/api-shapes.json and fails when a field disappears or changes type; --update-shapes
+// accepts the live shapes after a review.
 // Writes (--write), against your real account, kept small:
 //   pack      open one pack (spends a pack)
 //   discard   discard one common (+1 WikiBidou)
@@ -76,9 +79,14 @@ const results = [];
 function assert(ok, msg) { if (!ok) throw new Error(msg); }
 async function check(name, fn) {
   if (SHOW) console.log("  ..", name); // live progress while you watch
+  const run = fn();
   const limit = Bun.sleep(60000).then(() => { throw new Error("timed out after 60 s"); });
-  try { results.push(["PASS", name, (await Promise.race([fn(), limit])) ?? ""]); }
-  catch (e) { results.push(["FAIL", name, String(e.message).split("\n")[0]]); }
+  try { results.push(["PASS", name, (await Promise.race([run, limit])) ?? ""]); }
+  catch (e) {
+    results.push(["FAIL", name, String(e.message)]);
+    // a timed-out check may still hold the page (one evaluate at a time): let it finish first
+    await Promise.race([run.catch(() => {}), Bun.sleep(30000)]);
+  }
 }
 // Run a self-contained page-side function with one JSON argument.
 const ev = (fn, arg) => view.evaluate(`(${fn})(${JSON.stringify(arg ?? null)})`);
@@ -161,11 +169,11 @@ if (on("collection") || on("estimate") || WRITES.size) {
     const sum = Object.values(stats.counts).reduce((a, b) => a + b, 0);
     assert(items.length > 0, "empty collection");
     // The server's order can shift while paging (cards gained mid-load), so allow a small gap.
-    assert(Math.abs(items.length - stats.unique) <= 5, `loaded ${items.length} rows but total=${stats.unique} (a page failed silently)`);
+    assert(Math.abs(items.length - stats.copies) <= 5, `loaded ${items.length} rows but total=${stats.copies} (a page failed silently)`);
     assert(new Set(items.map((i) => i.id)).size === items.length, "duplicate rows across pages");
     assert(items.every((i) => i.cardId && i.rarity && i.title), "row missing id/rarity/title");
-    assert(sum === stats.unique, `rarityCounts sum ${sum} != unique ${stats.unique}`);
-    return `${items.length} unique, ${stats.total} copies`;
+    assert(sum === stats.copies, `rarityCounts sum ${sum} != copies ${stats.copies}`);
+    return `${stats.unique} cards, ${stats.copies} copies`;
   });
 }
 
@@ -230,7 +238,13 @@ if (on("market")) {
     // A few repeats are live listings shifting between the two requests; a 1-based/0-based
     // mix-up would repeat the whole page.
     const overlap = b.auctions.filter((x) => ids.has(x.id)).length;
-    assert(overlap < a.auctions.length / 2, `page 1 repeats ${overlap}/${a.auctions.length} of page 0`);
+    if (overlap >= a.auctions.length / 2) {
+      // say what the server does with page numbers, to tell a paging change from churn
+      const pages = [];
+      for (const n of [0, 1, 2, 3]) { pages.push((await raw(`/api/marketplace?page=${n}&limit=50`)).body); await Bun.sleep(600); }
+      const same = (x, y) => (y?.auctions || []).filter((a) => new Set((x?.auctions || []).map((z) => z.id)).has(a.id)).length;
+      throw new Error(`page 1 repeats ${overlap}/${a.auctions.length} of page 0; raw server pages ${pages.map((p, i) => `?page=${i} -> echo ${p?.page} (${p?.auctions?.length} rows, shares ${i ? same(pages[i - 1], p) : "-"} with the previous)`).join("; ")}`);
+    }
     return overlap ? `${overlap} shifted by new listings` : "";
   });
   for (const [sort, dir] of [["price_asc", 1], ["price_desc", -1]]) {
@@ -260,19 +274,16 @@ if (on("market")) {
 if (on("estimate")) {
   await check("market estimate: per-card, not per-rarity", async () => {
     assert(coll, "collection did not load");
-    const sample = ["C", "PC", "R", "SR", "UR", "L"].flatMap((r) => coll.items.filter((i) => i.rarity === r).slice(0, 2)); // 12 cards, paced: fits the check's 60 s
-    // one card at a time, 600 ms apart: the game flags bursts as automation
+    // from the pack screen, so the collection grid's own value loads do not queue ahead in the
+    // shared lane; one card per tier, through the app's own paced marketValueFor
+    await go("/pulls");
+    const sample = ["C", "PC", "R", "SR", "UR", "L"].flatMap((r) => coll.items.filter((i) => i.rarity === r).slice(0, 2));
     const rows = await ev(async (cards) => {
       const out = [];
-      for (const c of cards) {
-        const raw = await fetch(`/api/marketplace/cards/${c.cardId}/sales?scope=summary`).then((r) => r.json()).catch(() => null);
-        const v = await window.__wm.marketValueFor({ id: c.cardId, rarity: c.rarity });
-        out.push({ ...c, v, raw: JSON.stringify(raw?.summary ?? raw).slice(0, 90) });
-        await new Promise((r) => setTimeout(r, 600));
-      }
+      for (const c of cards) out.push({ ...c, v: await window.__wm.marketValueFor({ id: c.cardId, rarity: c.rarity }) });
       return out;
     }, sample);
-    for (const r of rows) console.log(`    ${r.rarity.padEnd(2)} ${String(r.v).padStart(8)}  ${r.title.slice(0, 28).padEnd(28)} ${r.raw}`);
+    for (const r of rows) console.log(`    ${r.rarity.padEnd(2)} ${String(r.v).padStart(8)}  ${r.title.slice(0, 28)}`);
     const byTier = {};
     for (const r of rows) if (typeof r.v === "number") (byTier[r.rarity] ||= []).push(r.v);
     const flat = Object.entries(byTier).filter(([, vs]) => vs.length > 1 && new Set(vs).size === 1).map(([r]) => r);
@@ -332,6 +343,23 @@ if (on("trades")) {
     assert(Array.isArray(body.pendingTradeCardIds ?? []), "pendingTradeCardIds is not a list");
     return `${rows.length} rows, profileId ${body.profileId ? "present" : "missing"}`;
   });
+  await check("trades: friend collection is searched, filtered and sorted by the server", async () => {
+    // the trade picker sends these instead of filtering loaded pages (CardPicker onquery)
+    if (!friend) return "no friend to read";
+    const base = `/api/profile/${encodeURIComponent(friend.username)}/collection?page=0`;
+    const get = async (q) => { const r = await raw(base + q); await Bun.sleep(600); assert(r.status === 200, `${q}: status ${r.status}`); return r.body.collection; };
+    const all = await get("");
+    const word = all[0]?.card?.wikipedia_title?.split(/\s+/)[0];
+    const pc = await get("&rarity=PC");
+    assert(pc.every((r) => r.card.rarity === "PC"), "rarity=PC returned other rarities");
+    const two = await get("&rarity=PC&rarity=C");
+    assert(two.every((r) => ["PC", "C"].includes(r.card.rarity)), "repeated rarity not honoured");
+    const found = word ? await get(`&q=${encodeURIComponent(word)}`) : [];
+    assert(!word || found.some((r) => r.card.wikipedia_title.includes(word)), `q=${word} did not find its own card`);
+    const named = await get("&sort=name");
+    assert(named.length && named.map((r) => r.card.id).join() !== all.map((r) => r.card.id).join(), "sort=name kept the rarity order");
+    return `rarity=PC ${pc.length}, PC+C ${two.length}, q=${word} ${found.length}, sort=name first ${named[0]?.card.wikipedia_title}`;
+  });
   await check("trades: GET /api/chat/<friend id> shape", async () => {
     if (!friend) return "no friend to read";
     const { status, body } = await raw(`/api/chat/${friend.id}`);
@@ -340,6 +368,158 @@ if (on("trades")) {
     assert(!bad.length, `${bad.length} messages missing id/sender_id/content/created_at`);
     return `${body.messages.length} messages, ${body.trades.length} trades`;
   });
+}
+
+// --- assumptions: every behaviour of the API the app relies on, read-only and paced ----------
+// Each check reports what the server actually does; an assert marks what the code depends on.
+if (on("assumptions")) {
+  const get = async (path) => { const r = await raw(path); await Bun.sleep(600); assert(r.status === 200, `${path}: status ${r.status}`); return r.body; };
+  const uniq = (xs) => [...new Set(xs)].sort().join(",");
+  let me = null, friends = [], friend = null;
+  await check("assume: friendship statuses", async () => {
+    me = await view.evaluate("window.__wm.data.userId");
+    friends = (await get("/api/friends")).friendships;
+    friend = friends.filter((f) => f.status === "accepted").map((f) => (f.requester.id === me ? f.addressee : f.requester))[0];
+    return `statuses ${uniq(friends.map((f) => f.status))}, ${friends.length} rows`;
+  });
+
+  await check("assume: friend collection paging, pending ids, filters", async () => {
+    if (!friend) return "no friend";
+    const base = `/api/profile/${encodeURIComponent(friend.username)}/collection?`;
+    const p0 = await get(base + "page=0"), p1 = await get(base + "page=1");
+    const same = JSON.stringify([...(p0.pendingTradeCardIds || [])].sort()) === JSON.stringify([...(p1.pendingTradeCardIds || [])].sort());
+    assert(same, "pendingTradeCardIds differ between pages: the app would lose locks from earlier pages");
+    const L = await get(base + "page=0&rarity=L");
+    assert(L.collection.every((r) => r.card.rarity === "L"), "rarity=L not honoured");
+    const name = await get(base + "page=0&sort=name");
+    const titles = name.collection.map((r) => r.card.wikipedia_title);
+    return `page0 ${p0.collection.length} rows total=${p0.total}, page1 ${p1.collection.length}, pending ids same on both pages (${(p0.pendingTradeCardIds || []).length}), rarity=L ${L.collection.length} rows, name order first ${titles.slice(0, 2).join(" | ")}`;
+  });
+
+  await check("assume: pending trade ids are copy ids (user_card_id), not card ids", async () => {
+    const mine = await get("/api/my-collection?sort=rarity&page=0&stats=1");
+    const trades = (await get("/api/trades")).trades.filter((t) => t.status === "pending");
+    const items = trades.flatMap((t) => t.items).filter((i) => i.offered_by === me);
+    const ids = new Set(mine.pendingTradeCardIds || []);
+    if (!items.length) return `no pending item of mine to compare (${ids.size} pending ids)`;
+    const asCopy = items.filter((i) => ids.has(i.user_card_id)).length, asCard = items.filter((i) => ids.has(i.card_id)).length;
+    return `${items.length} of my pending items: ${asCopy} match user_card_id, ${asCard} match card_id`;
+  });
+
+  await check("assume: my collection, stats keys, copies, server filters", async () => {
+    const a = await get("/api/my-collection?sort=rarity&page=0&stats=1"), b = await get("/api/my-collection?sort=rarity&page=1&stats=0");
+    const L = await get("/api/my-collection?sort=rarity&page=0&rarity=L"), q = await get("/api/my-collection?sort=rarity&page=0&q=a");
+    const multi = a.collection.filter((r) => (r.count ?? 1) > 1).length;
+    return `stats=1 keys ${Object.keys(a).sort()}, stats=0 keys ${Object.keys(b).sort()}, rows with count>1: ${multi}, rarity=L honoured: ${L.collection.every((r) => r.card.rarity === "L")} (${L.collection.length}), q honoured: total=${q.total} rows=${q.collection.length}`;
+  });
+
+  await check("assume: catalog totals, rarityCounts and sorts", async () => {
+    const all = await get("/api/cards?page=0"), L = await get("/api/cards?page=0&rarity=L"), q = await get("/api/cards?page=0&q=Paris");
+    const q1 = await get("/api/cards?page=1&q=Paris"), r = await get("/api/cards?page=0&sort=rarity");
+    const sum = (c) => Object.values(c || {}).reduce((a, b) => a + b, 0);
+    return [
+      `rarityCounts keys ${Object.keys(all.rarityCounts || {}).join(",")}`,
+      `total ${all.total} vs sum ${sum(all.rarityCounts)}`,
+      `global counts ${JSON.stringify(all.rarityCounts)}`,
+      `rarity=L total ${L.total}, counts under rarity=L ${JSON.stringify(L.rarityCounts)}`,
+      `counts under q=Paris ${JSON.stringify(q.rarityCounts)}`,
+      `q=Paris total ${q.total} searchHasMore ${q.searchHasMore} rows ${q.cards.length}, page1 rows ${q1.cards.length}`,
+      `sort=rarity same as default: ${r.cards.map((c) => c.id).join() === all.cards.map((c) => c.id).join()}`,
+    ].join("; ");
+  });
+
+  await check("assume: market search, sorts, my lists and statuses", async () => {
+    const q = await get("/api/marketplace?page=1&limit=50&q=Paris"), qr = await get("/api/marketplace?page=1&limit=50&q=Paris&rarity=C");
+    const end = await get("/api/marketplace?page=1&limit=50&sort=ending_soon"), rec = await get("/api/marketplace?page=1&limit=50&sort=recent");
+    const mine = await get("/api/marketplace?page=1&limit=1&mine=1");
+    const t = (a) => a.card?.wikipedia_title || "";
+    const asc = (xs) => xs.every((x, i) => !i || xs[i - 1] <= x);
+    const lists = ["selling", "bidding", "won", "history"].map((k) => `${k} ${mine[k]?.length ?? "-"}`).join(" ");
+    const hist = [...(mine.history || []), ...(mine.won || [])];
+    return [
+      `q=Paris ${q.auctions.length} rows, titles with "paris" ${q.auctions.filter((a) => /paris/i.test(t(a))).length}`,
+      `q+rarity=C ${qr.auctions.length} rows, all C ${qr.auctions.every((a) => (a.card?.rarity ?? a.snapshot_rarity) === "C")}`,
+      `ending_soon ascending end_at ${asc(end.auctions.map((a) => a.end_at))}`,
+      `recent descending created_at ${asc(rec.auctions.map((a) => a.created_at).reverse())}`,
+      `mine: ${lists}, statuses ${uniq(hist.map((a) => a.status))}, history rows without card ${hist.filter((a) => !a.card).length}`,
+    ].join("; ");
+  });
+
+  await check("assume: trades statuses, sides, paging", async () => {
+    const body = await get("/api/trades");
+    const tr = body.trades;
+    const badSide = tr.flatMap((t) => t.items.filter((i) => i.offered_by !== t.initiator_id && i.offered_by !== t.recipient_id)).length;
+    assert(!badSide, `${badSide} items offered by neither party`);
+    return `${tr.length} trades, statuses ${uniq(tr.map((t) => t.status))}, keys ${Object.keys(body).join(",")}, chains ${tr.filter((t) => t.parent_trade_id).length} with a parent`;
+  });
+
+  await check("assume: chat carries full trade cards", async () => {
+    if (!friend) return "no friend";
+    const c = await get(`/api/chat/${friend.id}`);
+    const items = c.trades.flatMap((t) => t.items);
+    return `${c.messages.length} messages, ${c.trades.length} trades, items with card ${items.filter((i) => i.card?.id).length}/${items.length}`;
+  });
+
+  await check("assume: notification types", async () => {
+    const n = await get("/api/notifications");
+    const list = n.notifications || n;
+    const byType = Object.groupBy(list, (x) => x.type);
+    return `${list.length} notifications\n` + Object.entries(byType).map(([t, xs]) => `  ${t} x${xs.length}: data keys ${uniq(xs.flatMap((x) => Object.keys(x.data || {})))}; title "${xs[0].data?.title ?? xs[0].title ?? ""}" body "${String(xs[0].data?.body ?? xs[0].body ?? xs[0].message ?? "").slice(0, 60)}"; top keys ${Object.keys(xs[0]).join(",")}`).join("\n");
+  });
+}
+
+// --- contract: the recorded shape of every endpoint the app reads ----------------------------
+if (on("contract")) {
+  const { shapeOf, diffShapes } = await import("../src/wm/contract.js");
+  const FILE = new URL("../../docs/api-shapes.json", import.meta.url).pathname;
+  const saved = (await Bun.file(FILE).exists()) ? await Bun.file(FILE).json() : null;
+  const update = process.argv.includes("--update-shapes") || !saved;
+  const get = async (path) => { const r = await raw(path); await Bun.sleep(600); assert(r.status === 200, `${path}: status ${r.status}`); return r.body; };
+  const live = {};
+
+  // the ids the per-endpoint reads need: a friend, an auction and its card
+  let friends = null, market = null, friend = null, auction = null;
+  await check("contract: ids to read with", async () => {
+    const me = await view.evaluate("window.__wm.data.userId");
+    friends = await get("/api/friends");
+    const f = friends.friendships.find((x) => x.status === "accepted");
+    friend = f && (f.requester.id === me ? f.addressee : f.requester);
+    market = await get("/api/marketplace?page=1&limit=50");
+    auction = market.auctions[0];
+    return `friend ${friend?.username ?? "none"}, auction ${auction?.id ?? "none"}`;
+  });
+  const reads = {
+    friends: friends,
+    marketplace: market,
+    wikibidous: "/api/wikibidous",
+    "my-collection": "/api/my-collection?sort=rarity&page=0&stats=1",
+    "my-collection (more pages)": "/api/my-collection?sort=rarity&page=1&stats=0",
+    cards: "/api/cards?page=0",
+    "cards (search)": "/api/cards?page=0&q=Paris",
+    "marketplace (mine)": "/api/marketplace?page=1&limit=1&mine=1",
+    "marketplace/{id}": auction && `/api/marketplace/${auction.id}`,
+    "marketplace/cards/{id}/sales summary": auction && `/api/marketplace/cards/${auction.card_id}/sales?scope=summary`,
+    trades: "/api/trades",
+    "profile/{u}/collection": friend && `/api/profile/${encodeURIComponent(friend.username)}/collection?page=0`,
+    "chat/{id}": friend && `/api/chat/${friend.id}`,
+    notifications: "/api/notifications",
+    "packs/special": "/api/packs/special",
+  };
+  // one check per endpoint: its own time limit, its own line when it changes
+  for (const [key, src] of Object.entries(reads)) {
+    if (!src) continue;
+    await check(`contract: ${key}`, async () => {
+      live[key] = shapeOf(typeof src === "string" ? await get(src) : src);
+      if (!saved?.[key]) return `${Object.keys(live[key]).length} fields, new in the contract`;
+      const d = diffShapes(saved[key], live[key]);
+      const lost = [...d.removed.map((p) => `- ${p}`), ...d.changed.map((c) => `~ ${c}`)];
+      if (lost.length && !update) throw new Error(`changed: ${lost.join(", ")} (review, then --update-shapes accepts it)`);
+      return [`${Object.keys(live[key]).length} fields`, lost.length && `accepted ${lost.join(", ")}`, d.added.length && `new: ${d.added.join(", ")}`].filter(Boolean).join("; ");
+    });
+  }
+  await Bun.write(`${OUT}api-shapes.live.json`, JSON.stringify(live, null, 1) + "\n"); // this run's, to inspect a diff
+  // accepting writes exactly what is live: an endpoint not read this run keeps its old entry
+  if (update) await Bun.write(FILE, JSON.stringify({ ...saved, ...live }, null, 1) + "\n");
 }
 
 // --- UI smoke (inside the shadow root) ----------------------------------------------------

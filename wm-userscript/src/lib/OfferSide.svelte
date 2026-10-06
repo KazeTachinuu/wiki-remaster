@@ -25,7 +25,7 @@
           <CardThumb card={it.card} shiny={it.is_shiny} />
           <!-- the value under the name, not beside it: the name keeps the row's width -->
           <span class="oside-txt" title={it.card.category ? `${it.card.title}, ${it.card.category}` : it.card.title}><b>{it.card.title}</b>
-            <span class="oside-sub"><span class="oside-val" class:none={v == null}>{v == null ? "-" : nf(v)}</span>{#if it.card.category}<span class="oside-cat">{it.card.category}</span>{/if}</span></span>
+            <span class="oside-sub">{#if v !== undefined}<span class="oside-val" class:none={v === null}>{v === null ? "Non estimé" : nf(v)}</span>{/if}{#if it.card.category}<span class="oside-cat">{it.card.category}</span>{/if}</span></span>
           <button class="oside-x" onclick={() => onremove(it)} aria-label="Retirer {it.card.title}" title="Retirer"><Icon name="close" width={2} /></button>
         </li>
       {/each}

@@ -14,24 +14,12 @@ export const RARITIES = ["C", "PC", "R", "SR", "UR", "L"];
 /** Rarity codes, rarest first (filters, composition bar). */
 export const RARITIES_DESC = [...RARITIES].reverse();
 
-/** Notification titles for rows without data.title, matching the native client. */
-export const NTYPE = {
-  marketplace_wishlist_listed: "Liste de souhaits",
-  marketplace_auction_sold: "Carte vendue",
-  marketplace_auction_unsold: "Enchère non vendue",
-  marketplace_outbid: "Enchère dépassée",
-  auction_midpoint_nudge: "Enchère sans mise",
-  battle_invite: "Nouveau défi",
-  friend_request: "Demande d'ami",
-  guild_invite: "Invitation de guilde",
-  custom: "Message",
-};
-
 /** Where a notification leads when clicked (same routes as the native client). */
 export function notifHref(n) {
   const d = n.data || {};
   const auctionId = d.auction_id || n.auction_id;
   if (/^marketplace_/.test(n.type) && auctionId) return `/marketplace/${auctionId}`;
+  if (/^trade_/.test(n.type)) return "/trades";
   if (n.type === "battle_invite" && d.battle_id) return "/battle";
   if (n.type === "friend_request") return "/friends";
   if (n.type === "guild_invite") return "/guild";
@@ -66,6 +54,11 @@ export function nCard(c) {
  * The API's `owned` means "you own a copy of this card" (as in the catalog), NOT "your sale":
  * whether the sale is yours comes from `seller_id`, compared with your user id `me`.
  */
+// Live statuses (checked by test:prod): active, cancelled, settled_sold, settled_unsold.
+const AUCTION_STATUS = { active: "active", cancelled: "cancelled", settled_sold: "sold", settled_unsold: "unsold" };
+/** An auction's state: active, sold, unsold or cancelled (an unknown ended status is read from its price). */
+const auctionStatus = (a) => AUCTION_STATUS[a.status ?? "active"] ?? (a.final_price != null || a.winner_id ? "sold" : "unsold");
+
 export function nAuction(a, me = null) {
   const card = a.card
     ? nCard(a.card)
@@ -78,7 +71,7 @@ export function nAuction(a, me = null) {
     bid: a.current_bid ?? null,
     price: a.effective_bid ?? a.current_bid ?? a.base_amount ?? null,
     finalPrice: a.final_price ?? null,
-    status: a.status || "active",
+    status: auctionStatus(a),
     endAt: a.end_at || null,
     createdAt: a.created_at || null,
     settledAt: a.settled_at || null,
@@ -103,7 +96,7 @@ export function nBid(b) {
 export function nNotification(n) {
   return {
     id: n.id,
-    title: n.data?.title || NTYPE[n.type] || "Notification",
+    title: n.data?.title || "Notification", // every live type carries its own title (checked by test:prod)
     message: n.data?.message || "",
     read: !!n.read,
     at: n.created_at || null,

@@ -34,6 +34,15 @@ describe("nCard", () => {
 });
 
 describe("nAuction", () => {
+  it("reads the live statuses, and an unknown ended one from its price", () => {
+    const st = (a) => nAuction({ id: 1, card: { id: 2 }, ...a }).status;
+    expect(st({})).toBe("active");
+    expect(st({ status: "settled_sold", final_price: 40 })).toBe("sold");
+    expect(st({ status: "settled_unsold" })).toBe("unsold");
+    expect(st({ status: "cancelled" })).toBe("cancelled");
+    expect(st({ status: "ended_somehow", final_price: 12 })).toBe("sold");
+    expect(st({ status: "ended_somehow" })).toBe("unsold");
+  });
   it("derives price from effective_bid, then current_bid, then base_amount", () => {
     expect(nAuction({ id: 1, card: { id: 2 }, effective_bid: 30, current_bid: 20, base_amount: 10 }).price).toBe(30);
     expect(nAuction({ id: 1, card: { id: 2 }, current_bid: 20, base_amount: 10 }).price).toBe(20);
@@ -74,6 +83,7 @@ describe("notifHref", () => {
     expect(notifHref({ type: "friend_request", data: {} })).toBe("/friends");
     expect(notifHref({ type: "guild_invite", data: {} })).toBe("/guild");
     expect(notifHref({ type: "custom", data: {} })).toBe(null);
+    for (const type of ["trade_offer", "trade_countered", "trade_accepted"]) expect(notifHref({ type, data: { trade_id: 7 } })).toBe("/trades");
   });
 });
 

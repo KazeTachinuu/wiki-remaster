@@ -54,13 +54,19 @@ export function chatMe(friendId, trades, messages, userId) {
 
 const newest = (a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt));
 
-/** Reçues = pending sent to me, Envoyées = pending I sent, Historique = everything settled. */
+/**
+ * One row per negotiation: an offer and its counter-offers are one deal, shown by its latest
+ * offer (the one no counter-offer answers). Reçues = latest offer pending and sent to me,
+ * Envoyées = pending and sent by me, Historique = settled.
+ */
 export function tradeTabs(trades) {
-  const pending = trades.filter((t) => t.status === "pending");
+  const answered = new Set(trades.map((t) => t.parentId).filter(Boolean));
+  const latest = trades.filter((t) => !answered.has(t.id));
+  const pending = latest.filter((t) => t.status === "pending");
   return {
     incoming: pending.filter((t) => t.incoming).sort(newest),
     outgoing: pending.filter((t) => !t.incoming).sort(newest),
-    history: trades.filter((t) => t.status !== "pending").sort(newest),
+    history: latest.filter((t) => t.status !== "pending").sort(newest),
   };
 }
 
@@ -147,6 +153,33 @@ export function chainOf(trade, all) {
     cur = next;
   }
   return chain;
+}
+
+const who = (mine, other) => (mine ? "vous" : other);
+// how a negotiation ended, and which party did it: the recipient of the latest offer answers it,
+// its sender can only withdraw it
+const OUTCOME = {
+  pending: { text: "En attente de", by: "recipient" },
+  accepted: { text: "Acceptée par", by: "recipient" },
+  declined: { text: "Refusée par", by: "recipient" },
+  cancelled: { text: "Annulée par", by: "initiator" },
+};
+
+/**
+ * A negotiation as a timeline, oldest first: each offer and counter-offer, then where it stands
+ * (waiting for an answer, accepted, refused or withdrawn). `at` is null while still waiting.
+ * Steps: { kind: "offer" | "counter" | status, text, by, at, offer } (`offer`: the trade a step
+ * proposed, on offer steps only).
+ */
+export function timeline(chain) {
+  const steps = chain.map((c, i) => ({ kind: i ? "counter" : "offer", text: i ? "Contre-offre de" : "Offre de", by: who(!c.incoming, c.other.username), at: c.createdAt, offer: c }));
+  const last = chain.at(-1), end = last && OUTCOME[last.status];
+  if (end) {
+    // "recipient" of the latest offer is me when it came to me
+    const mine = end.by === "recipient" ? last.incoming : !last.incoming;
+    steps.push({ kind: last.status, text: end.text, by: who(mine, last.other.username), at: last.status === "pending" ? null : last.updatedAt });
+  }
+  return steps;
 }
 
 /** The friend in a friendship (whichever side is not me). */

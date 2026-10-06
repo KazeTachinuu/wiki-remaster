@@ -3,6 +3,9 @@
 /** 12345 -> "12 345"; null -> "-". */
 export const nf = (n) => (n == null ? "-" : Number(n).toLocaleString("fr"));
 
+/** 2776179 -> "2,8 M", 12118 -> "12 k": a large count at a glance. */
+export const compact = (n) => new Intl.NumberFormat("fr", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+
 /** Time since an ISO date: "à l'instant", "il y a 5 min", "il y a 3 h", "il y a 2 j". */
 export function ago(iso, now = Date.now()) {
   const t = Date.parse(iso || "");

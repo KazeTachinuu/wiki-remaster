@@ -1,5 +1,6 @@
 <script>
   import { data, health } from "./wm/index.js";
+  import { isOurs } from "./wm/routes.js";
   import Icon from "./lib/Icon.svelte";
   import Pulls from "./lib/Pulls.svelte";
   import Collection from "./lib/Collection.svelte";
@@ -128,8 +129,8 @@
   }
   function openNotif(n, e) {
     if (!n.read) markRead([n.id]);
-    // our own screens (an auction) open in place; other pages (duels, friends) stay native links
-    if (n.href?.startsWith("/marketplace/")) { e?.preventDefault(); history.pushState({}, "", n.href); }
+    // our own screens (an auction, the trades) open in place; other pages (duels, friends) stay native links
+    if (isOurs(n.href)) { e?.preventDefault(); history.pushState({}, "", n.href); }
     notifOpen = false;
     toasts = toasts.filter((t) => t.id !== n.id);
   }

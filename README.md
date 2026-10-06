@@ -44,7 +44,7 @@ Browse every auction with sorts and rarity filters, bid live, and follow your sa
 
 ### Échanges
 
-**Reçues**, **Envoyées** and **Historique** with your friends. Every trade shows what you give and what you receive as real cards, coins included, with an estimated value per side and a clear verdict (équilibré, à votre avantage, à votre désavantage). Accept, refuse or cancel with a confirmation, answer with a counter-offer pre-filled from the trade, propose a new trade from your cards and your friend's, and chat with them without leaving the screen.
+**Reçues**, **Envoyées** and **Historique** with your friends. Every trade shows what you give and what you receive as real cards, coins included, with an estimated value per side and a clear verdict (équilibré, à votre avantage, à votre désavantage). An offer and its counter-offers are one negotiation, shown once in the list and as a timeline in the trade: who offered what and when, how it ended, and a click on any step shows that offer's cards. Accept, refuse or cancel with a confirmation, answer with a counter-offer pre-filled from the trade, propose a new trade from your cards and your friend's (searched, filtered and sorted by the game's server, loading more as you scroll), and chat with them without leaving the screen.
 
 ![A trade in detail](docs/screenshots/trade.png)
 
@@ -83,6 +83,8 @@ bun run test:prod           # run the local build on the real site, read-only by
 ```
 
 The mock (`plugins/vite-mock-api.js`) serves the same routes and shapes as the live site, so dev runs the real adapter. `POST /api/__fault` makes it misbehave on purpose (`{ "status": 525, "count": 2, "match": "/api/cards" }`, `{ "delay": 7000 }`, `{ "human": true }`; `{}` clears it), to test retries, slow servers and the human check.
+
+`test:prod` also checks every assumption the app makes about the game's API, and diffs each endpoint's shape against the recorded contract in `docs/api-shapes.json`: a field that disappears or changes type fails the run (`--update-shapes` accepts it after a review).
 
 `test:prod` uses its own browser profile in `.prod-profile/` (Brave, else Chromium or Chrome; `WM_BROWSER` overrides it). `--only=estimate,market` picks features, `--write=discard,sell,bid,notif` opts into small real-account writes (see `scripts/prod-test.mjs`).
 

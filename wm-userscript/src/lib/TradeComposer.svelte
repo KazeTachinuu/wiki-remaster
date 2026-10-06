@@ -18,7 +18,7 @@
   import { valueMap } from "./lazyValues.js";
   import { nf } from "./format.js";
   import { scrollFade } from "./scrollFade.js";
-  import { data, SIDE, loadCollection, sideValue, verdict, balanceLabel, offerSummary } from "../wm/index.js";
+  import { data, SIDE, backgroundLane, loadCollection, sideValue, verdict, balanceLabel, offerSummary } from "../wm/index.js";
   // balance: my WikiBidous (null while unknown), the coins I add cannot exceed it
   // onsent(ok): the offer went through (true), or the server answered with an error (false: it may exist anyway)
   let { counter = null, balance = null, onclose, onsent } = $props();
@@ -47,12 +47,17 @@
   }
   loadMine();
 
-  // their collection, a page at a time ("Charger plus"); a failed page is asked again, not skipped
-  const theirs = new PagedList((page) => data.profileCollection(friend.username, page));
+  // their collection, a page at a time ("Charger plus"), searched, filtered and sorted by the
+  // server (the picker's onquery); a failed page is asked again, not skipped
+  let theirQuery = {};
+  // the first page answers the user; the next ones (scrolling, the value sort) share the paced lane
+  const theirPage = (page) => data.profileCollection(friend.username, { page, ...theirQuery });
+  const theirs = new PagedList((page) => (page ? backgroundLane.run(() => theirPage(page)) : theirPage(page)));
+  const queryTheirs = (query) => { theirQuery = query; theirs.go(0); };
+  const theirsFirst = $derived(theirs.loading && theirs.page === 0); // a new query, or the first load
   let theirPages = $state(NO_PAGES);
   $effect(() => { if (friend) untrack(() => theirs.go(0)); });
   $effect(() => { const d = theirs.data; if (d) untrack(() => (theirPages = addPage(theirPages, theirs.loaded, d))); });
-  const theirsStarted = $derived(theirPages.loaded >= 0);
 
   const asItem = (row) => ({ userCardId: row.id, card: row.card, is_shiny: row.is_shiny });
   // svelte-ignore state_referenced_locally
@@ -141,8 +146,8 @@
           <CardPicker lead={tabs} items={mine} picked={give} locked={myLocked} loading={mineLoading} error={mineError} onretry={loadMine} onpick={(row) => (give = toggle(give, row))} {values} watch={cardValues.watch} load={cardValues.load} />
         </div>
         <div class="composer-tab" role="tabpanel" hidden={tab !== "theirs"}>
-          <CardPicker lead={tabs} items={theirPages.items} picked={get} locked={theirLocked} loading={!theirsStarted && !theirs.error} error={theirs.error && !theirsStarted} onretry={() => theirs.go(0)} onpick={(row) => (get = toggle(get, row))} {values} watch={cardValues.watch} load={cardValues.load}
-            more={theirPages.hasMore ? () => theirs.go(nextPage(theirPages)) : null} loadingMore={theirs.loading && theirsStarted} moreError={theirs.error && theirsStarted} />
+          <CardPicker lead={tabs} items={theirPages.items} picked={get} locked={theirLocked} loading={theirsFirst} error={theirs.error && theirs.page === 0} onretry={() => theirs.go(0)} onpick={(row) => (get = toggle(get, row))} {values} watch={cardValues.watch} load={cardValues.load}
+            more={theirPages.hasMore ? () => theirs.go(nextPage(theirPages)) : null} loadingMore={theirs.loading && theirs.page > 0} moreError={theirs.error && theirs.page > 0} onquery={queryTheirs} />
         </div>
       </div>
       <aside class="offer" class:open={sheet} aria-label="Votre offre">
