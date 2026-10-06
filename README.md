@@ -17,22 +17,41 @@ An unofficial redesign of [wiki-masters.com](https://www.wiki-masters.com), in y
 
 Updates are automatic. **Site original** (or the phone menu) goes back to the original site.
 
-## Features
+## Screens
 
-- **Packs**: tear-open reveal, rarity sounds, next-pack countdown on every screen, Pro daily pack
-- **Collection**: search, sort, filters, bulk discard, cached between visits
-- **Catalogue**: all 2.8 M cards, server search, wishlist
-- **Card detail**: market price, last sale, best deal, quick-sale price, price chart
-- **Market**: live bids, your sales and wins, every listing of a card side by side
-- **Trades**: real cards with values and a verdict, counter-offer timeline, chat
-- **Phone**: app layout with a bottom tab bar
+### Packs
+Tear-open reveal with rarity sounds; the next-pack countdown and the Pro daily pack show from every screen.
 
-![Ma collection](docs/screenshots/collection.png)
+![Packs](docs/screenshots/packs.png)
 
-<p>
-  <img src="docs/screenshots/card.png" width="49%" alt="A card's detail">
-  <img src="docs/screenshots/market.png" width="49%" alt="The market">
-</p>
+### Collection
+Search, sort, rarity filters, bulk discard; cached between visits.
+
+![Collection](docs/screenshots/collection.png)
+
+### Card detail
+Market price, last sale, cheapest copy on sale, a quick-sale price, the price chart.
+
+![Card detail](docs/screenshots/card.png)
+
+### Catalogue
+All 2.8 M cards, searched by the game's server, with your wishlist.
+
+![Catalogue](docs/screenshots/catalog.png)
+
+### Market
+Live bids, your sales and wins, every listing of a card side by side.
+
+![Market](docs/screenshots/market.png)
+
+### Trades
+Both sides as real cards with their value and a verdict; counter-offers as one timeline.
+
+![Trade](docs/screenshots/trade.png)
+
+### Phone
+App layout with a bottom tab bar.
+
 <p>
   <img src="docs/screenshots/phone-packs.png" width="32%" alt="Packs on a phone">
   <img src="docs/screenshots/phone-collection.png" width="32%" alt="Collection on a phone">

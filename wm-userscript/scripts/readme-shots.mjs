@@ -93,10 +93,12 @@ const after = [];
 for (const c of picks) {
   if (at !== c.page) { await go(c.page); await Bun.sleep(2500); at = c.page; }
   await ev((t) => { const i = document.querySelector("#wm-host").shadowRoot.querySelector(".coll-tools input"); i.value = t; i.dispatchEvent(new Event("input", { bubbles: true })); }, c.title);
-  await Bun.sleep(900);
-  await waitFor(`document.querySelector("#wm-host").shadowRoot.querySelector(".grid .card-btn")`);
+  // the card with exactly this title, once the (server) search has answered: never the first
+  // card of results still showing from before
+  const card = `[...document.querySelector("#wm-host").shadowRoot.querySelectorAll(".grid .card-btn")].find((b) => b.querySelector(".wc-name")?.textContent.trim() === ${JSON.stringify(c.title)})`;
+  await waitFor(card, 30000);
   await Bun.sleep(1500); // the photo fades in
-  const rect = await ev(() => { const r = document.querySelector("#wm-host").shadowRoot.querySelector(".grid .card-btn").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });
+  const rect = await view.evaluate(`(() => { const b = ${card}; b.scrollIntoView({ block: "center" }); const r = b.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
   after.push(await crop(rect));
 }
 
@@ -124,8 +126,48 @@ await view.navigate("https://www.wiki-masters.com/pulls");
 await view.evaluate(`localStorage.removeItem("wm-off")`);
 // shoot once `sel` shows, no skeleton is left and the loading bar is gone (then images settle)
 const ROOT = `document.querySelector("#wm-host").shadowRoot`;
+// every username this account can see (friends, trade partners, market sellers and bidders, me)
+const NAMES = await ev(async () => {
+  const j = (u) => fetch(u).then((r) => r.json()).catch(() => ({}));
+  const [f, t, m, me] = await Promise.all([j("/api/friends"), j("/api/trades"), j("/api/marketplace?page=1&limit=50"), Promise.resolve(window.__wm.getProfile()?.username)]);
+  const names = [me, ...(f.friendships || []).flatMap((x) => [x.requester?.username, x.addressee?.username]),
+    ...(t.trades || []).flatMap((x) => [x.initiator?.username, x.recipient?.username]),
+    ...(m.auctions || []).flatMap((a) => [a.seller?.username, a.current_bidder?.username])];
+  return [...new Set(names.filter((n) => n && n.length > 1))].sort((a, b) => b.length - a.length);
+});
+// redact those names wherever they are written, and every avatar, before a shot: destructive
+// (the text itself is replaced by a fixed placeholder, so nothing of a name, not even its length,
+// reaches the picture; a CSS blur alone can be reversed)
+function blurInPage(names) {
+  const root = document.querySelector("#wm-host").shadowRoot;
+  if (!root.querySelector("#wm-blur")) root.append(Object.assign(document.createElement("style"), { id: "wm-blur", textContent: ".bn{display:inline-block;color:transparent;background:#3a403a;border-radius:4px;line-height:1;vertical-align:middle}.avatar{background:#3a403a !important;color:transparent !important}" }));
+  for (const a of root.querySelectorAll(".avatar")) a.replaceChildren();
+  for (const el of root.querySelectorAll(".cmp-who")) if (!/^(Celle-ci|Votre vente)$/.test(el.textContent.trim())) el.replaceChildren(Object.assign(document.createElement("span"), { className: "bn", textContent: "xxxxxxxx" }));
+  // seller lines name whoever listed it, including players who listed after the names were read
+  for (const el of root.querySelectorAll(".auc-seller, .auc-by")) {
+    const m = /^(Vendu par )(.+)$/.exec(el.textContent.trim());
+    if (m && !el.querySelector(".bn")) el.replaceChildren(m[1], Object.assign(document.createElement("span"), { className: "bn", textContent: "xxxxxxxx" }));
+  }
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [];
+  while (walk.nextNode()) if (!walk.currentNode.parentElement.closest(".bn, style")) nodes.push(walk.currentNode);
+  for (const node of nodes) {
+    let text = node.data, out = null;
+    // the earliest name in the rest of the text, longest first on a tie
+    for (;;) {
+      let at = -1, hit = "";
+      for (const n of names) { const i = text.indexOf(n); if (i >= 0 && (at < 0 || i < at || (i === at && n.length > hit.length))) { at = i; hit = n; } }
+      if (at < 0) break;
+      out ??= document.createDocumentFragment();
+      out.append(text.slice(0, at), Object.assign(document.createElement("span"), { className: "bn", textContent: "xxxxxxxx" }));
+      text = text.slice(at + hit.length);
+    }
+    if (out) { out.append(text); node.replaceWith(out); }
+  }
+}
+const blurNames = (site) => site.view.evaluate(`(${blurInPage})(${JSON.stringify(NAMES)})`);
 const loaded = (site, sel) => site.waitFor(`${ROOT}.querySelector(${JSON.stringify(sel)}) && !${ROOT}.querySelector(".skeleton, .loadbar.on")`, 30000).then(() => Bun.sleep(1500));
-const screen = async (name, sel) => { await loaded(site, sel); await Bun.write(`${OUT}${name}.png`, await view.screenshot()); };
+const screen = async (name, sel) => { await loaded(site, sel); await blurNames(site); await Bun.sleep(200); await Bun.write(`${OUT}${name}.png`, await view.screenshot()); };
+await go("/pulls"); await screen("packs", ".booster");
 await go("/collection"); await screen("collection", ".grid .card-btn");
 // the card detail on its market tab: price, last sale, chart
 await ev(() => document.querySelector("#wm-host").shadowRoot.querySelector(".grid .card-btn").click());
@@ -134,7 +176,26 @@ await ev(() => [...document.querySelector("#wm-host").shadowRoot.querySelectorAl
 // loaded: its numbers (or "no sale"), and the live listings no longer placeholders
 await site.waitFor(`(${ROOT}.querySelector(".modal .mk-kpis") || /Aucune vente/.test(${ROOT}.querySelector(".modal-panel")?.textContent)) && !${ROOT}.querySelector(".modal .sk")`, 60000);
 await screen("card", ".modal .mk-kpis, .modal .cmp");
+// the catalogue on a search (its default order opens on odd cards: disambiguation pages, domains)
+await go("/global-collection");
+await loaded(site, ".grid .card-btn");
+await ev(() => { const i = document.querySelector("#wm-host").shadowRoot.querySelector(".coll-tools input"); i.value = "château"; i.dispatchEvent(new Event("input", { bubbles: true })); });
+await site.waitFor(`[...${ROOT}.querySelectorAll(".grid .wc-name")].slice(0, 4).every((n) => /ch[aâ]teau/i.test(n.textContent))`, 30000).catch(() => {});
+await screen("catalog", ".grid .card-btn");
 await go("/marketplace"); await screen("market", ".auc-item");
+// a trade, open: the deal, the values, the verdict
+// (values keep loading in the background here, so wait for the rows and the deal, not an idle page)
+await go("/trades");
+// the first tab holding a trade (an account with no pending offer only has history)
+for (const tab of ["Reçues", "Envoyées", "Historique"]) {
+  await ev((t) => [...document.querySelector("#wm-host").shadowRoot.querySelectorAll(".tr-tabs [role=tab], [role=tab]")].find((b) => b.textContent.includes(t))?.click(), tab);
+  if (await site.waitFor(`${ROOT}.querySelector(".tr-row:not(.sk)")`, 8000).then(() => true, () => false)) break;
+}
+await ev(() => document.querySelector("#wm-host").shadowRoot.querySelector(".tr-row:not(.sk)").click());
+await site.waitFor(`${ROOT}.querySelector(".tp-sides .card-btn img")`, 30000);
+await Bun.sleep(2500);
+await blurNames(site); await Bun.sleep(200);
+await Bun.write(`${OUT}trade.png`, await view.screenshot());
 await view.evaluate(prevOff ? `localStorage.setItem("wm-off", ${JSON.stringify(prevOff)})` : `localStorage.removeItem("wm-off")`);
 await view.evaluate(`localStorage.removeItem("wm-debug")`);
 await close();
@@ -143,9 +204,9 @@ const phone = await realSite({ width: 390, height: 844 });
 // a fresh browser on the same profile: make sure the remaster is on before the shots
 await phone.go("/pulls"); await phone.view.evaluate(`localStorage.removeItem("wm-off")`);
 for (const [path, name, sel] of [["/collection", "phone-collection", ".grid .card-btn"], ["/marketplace", "phone-market", ".auc-item"], ["/pulls", "phone-packs", ".booster"]]) {
-  await phone.go(path); await loaded(phone, sel);
+  await phone.go(path); await loaded(phone, sel); await blurNames(phone); await Bun.sleep(200);
   await Bun.write(`${OUT}${name}.png`, await phone.view.screenshot());
 }
 await phone.view.evaluate(`localStorage.removeItem("wm-debug")`);
 await phone.close();
-console.log(`${OUT}cards-before-after.png`, before.filter(Boolean).length, "/", picks.length, "originals found", errors.length ? `errors: ${errors.slice(0, 2).join(" / ")}` : "");
+console.log(`${OUT}cards-before-after.png`, before.filter(Boolean).length, "/", picks.length, "originals found", errors.length ? `errors: ${errors.join(" | ")}` : "");
