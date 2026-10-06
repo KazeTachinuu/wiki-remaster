@@ -18,6 +18,10 @@
   import { scrollFade } from "./lib/scrollFade.js";
 
   // Rebuilt screens. Order matters for matching: "/global-collection" contains "collection".
+  // the running version (vite.config.js) and where it comes from
+  const VERSION = __APP_VERSION__;
+  const REPO = "https://github.com/KazeTachinuu/wiki-remaster";
+
   const VIEWS = [
     { id: "pulls", path: "/pulls", label: "Ouvrir des paquets", short: "Paquets", icon: "pulls" },
     { id: "collection", path: "/collection", label: "Ma collection", short: "Collection", icon: "collection" },
@@ -215,7 +219,8 @@
     <div class="side-foot">
       {#if data.canReset}<button class="ghost" onclick={reset}>Réinitialiser</button>{/if}
       <button class="foot-link" onclick={() => (help = true)} title="Raccourcis clavier"><span class="kbd">?</span><span class="foot-txt">Raccourcis clavier</span></button>
-      <div class="hintline">{data.isReal ? "Connecté à WikiMasters" : "Serveur de test local"}</div>
+      <div class="hintline">{data.isReal ? "Connecté à WikiMasters" : "Serveur de test local"}
+        <a class="app-version" href={REPO} target="_blank" rel="noopener noreferrer" title="Wiki Remaster {VERSION}, le code source">v{VERSION}</a></div>
     </div>
   </aside>
 
@@ -308,6 +313,7 @@
       </section>
       <button class="btn sheet-reset" onclick={() => useOriginalSite()}>Revenir au site original</button>
       {#if data.canReset}<button class="btn sheet-reset" onclick={() => { menuOpen = false; reset(); }}>Réinitialiser (test)</button>{/if}
+      <a class="app-version sheet-version" href={REPO} target="_blank" rel="noopener noreferrer">Wiki Remaster v{VERSION}</a>
     </div>
   {/if}
 

@@ -14,6 +14,8 @@ const icon = "data:image/png;base64," + readFileSync(fileURLToPath(new URL("./ex
 //   mounted on /api by a plugin (no second process). Open http://localhost:5173.
 // Build (`npm run build`): adds vite-plugin-monkey to emit the userscript.
 export default defineConfig(({ command }) => ({
+  // the version, shown in the app (sidebar, menu), from package.json at build time
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   plugins: [
     svelte(),
     ...(command === "serve" ? [mockApi()] : []),

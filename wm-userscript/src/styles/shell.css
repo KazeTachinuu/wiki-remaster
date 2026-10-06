@@ -187,3 +187,8 @@ button.pk-chip:hover{border-color:var(--line2)}
   .app.rail .side-foot{align-items:center;padding-inline:0}
 }
 @media(prefers-reduced-motion:reduce){.app{transition:none}}
+/* the version, at the end of the sidebar's last line (and of the phone menu) */
+.app-version{margin-left:auto;font-size:11px;color:var(--fg-faint);font-variant-numeric:tabular-nums;text-decoration:none}
+.app-version:hover{color:var(--fg-soft);text-decoration:underline}
+.sheet-version{display:block;margin:var(--s3) auto 0;text-align:center;width:max-content}
+@media(min-width:901px){.app.rail .app-version{display:none}}
