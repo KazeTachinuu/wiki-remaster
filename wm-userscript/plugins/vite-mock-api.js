@@ -7,6 +7,7 @@
 
 import { CATALOG, RARITY_WEIGHTS, SNAPSHOT_PRICES } from "../mock/catalog.js";
 import { buildWorld, advanceMarket } from "../mock/world.js";
+import { pastSales, SALES_CAP } from "../mock/history.js";
 
 const PAGE = 50;
 const PACK_SIZE = 5;
@@ -23,6 +24,14 @@ const RANK = { L: 5, UR: 4, SR: 3, R: 2, PC: 1, C: 0 };
 const norm = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const iso = (t = Date.now()) => new Date(t).toISOString();
 const byTitle = (a, b) => a.wikipedia_title.localeCompare(b.wikipedia_title, "fr");
+// a collection's orders, as the live routes take them (checked by test:prod): rarity (default),
+// name, added (newest first), starred (favourites first)
+const byAdded = (a, b) => Date.parse(b.obtained_at || 0) - Date.parse(a.obtained_at || 0);
+const collectionOrder = (sort) => ({
+  name: (a, b) => byTitle(a.card, b.card),
+  added: byAdded,
+  starred: (a, b) => b.starred - a.starred || byAdded(a, b),
+})[sort] ?? ((a, b) => RANK[b.card.rarity] - RANK[a.card.rarity] || byTitle(a.card, b.card));
 // The filters the real card routes share: `q` searches title and category, `rarity` may repeat
 // (rarity=PC&rarity=C). `cardOf` reads the card out of a row (a catalog card is its own card).
 function filterCards(rows, url, cardOf = (c) => c) {
@@ -52,7 +61,8 @@ export default function mockApiPlugin() {
         profile: { username: "Toi", packs_remaining: PACK_CAP, packs_last_regen_at: Date.now(), wikibidous_balance: START_BALANCE, pity_counter: 0, is_pro: true, is_vip: false, special_packs: false },
         proDaily: null, // the calendar day the Pro daily pack was claimed
         specialAt: 0, // when the next special pack can be opened
-        collection: new Map(), // user card id -> { id, card, count, is_shiny, starred, obtained_at }
+        collection: new Map(), // user card id -> { id, card, count, is_shiny, starred, obtained_at, tags }
+        tags: [], // my tags: { id, name, color } (the game keeps them in its database, see /api/__sb)
         read: new Set(), // read notification ids
       };
 
@@ -67,6 +77,10 @@ export default function mockApiPlugin() {
       const SPEED = Number(process.env.WM_MOCK_MARKET_SPEED) || 1; // simulated market minutes per minute
       // A big collection for load tests: WM_MOCK_CARDS=1000 (and WM_MOCK_SHINY=1 for all shiny,
       // WM_MOCK_NOIMG=1 for none with a picture) adds that many copies of the catalogue's cards.
+      // A power user for load tests: WM_MOCK_FRIENDS=300 more friends, WM_MOCK_TRADES=600 more
+      // trades with all of them, WM_MOCK_CHAIN=150 offers back and forth in one negotiation (with
+      // as many chat messages).
+      const LOAD = { trades: Number(process.env.WM_MOCK_TRADES) || 0, chain: Number(process.env.WM_MOCK_CHAIN) || 0, friends: Number(process.env.WM_MOCK_FRIENDS) || 0 };
       const SEED = { cards: Number(process.env.WM_MOCK_CARDS) || 0, shiny: Number(process.env.WM_MOCK_SHINY ?? SHINY_CHANCE), noImg: process.env.WM_MOCK_NOIMG === "1" };
       let world, FRIENDS = [];
       const ME = { id: "me", username: state.profile.username, avatar_url: null };
@@ -74,8 +88,9 @@ export default function mockApiPlugin() {
       // cards the world gives me (won auctions, unsold listings coming back) join my collection
       const drainMine = () => { for (const u of world.collections.get("me").splice(0)) state.collection.set(u.id, { ...u, count: 1 }); };
       function seedWorld() {
-        world = buildWorld(CATALOG, priceOf);
+        world = buildWorld(CATALOG, priceOf, Date.now(), LOAD);
         state.collection = new Map();
+        state.tags = [];
         drainMine();
         for (let i = 0; i < SEED.cards; i++) {
           const base = CATALOG[i % CATALOG.length];
@@ -143,7 +158,15 @@ export default function mockApiPlugin() {
       const findAuction = (id) => world.auctions.find((a) => a.id === id) ?? null;
       // an auction as the API sends it (its bids apart, `owned` = I own a copy, like the real API)
       const view = ({ bids, user_card_id, user_card, ...a }) => ({ ...a, owned: ownsCard(a.card.id) });
-      const salesOf = (card) => world.auctions.filter((a) => a.status === "settled_sold" && a.card.id === card.id);
+      // a card's sales, oldest first: the rest of the game's market (seeded, mock/history.js), then
+      // the six players' own auctions as they settle
+      const history = new Map();
+      const salesOf = (card) => {
+        if (!history.has(card.id)) history.set(card.id, pastSales(card, priceOf(card)));
+        const own = world.auctions.filter((a) => a.status === "settled_sold" && a.card.id === card.id)
+          .map((a) => ({ id: a.id, rarity: a.card.rarity, final_price: a.final_price, settled_at: a.settled_at }));
+        return [...history.get(card.id), ...own].sort((a, b) => Date.parse(a.settled_at) - Date.parse(b.settled_at));
+      };
       // a card's sold average at its rarity: from the market's history, else the snapshot's figure
       const summary = (card) => {
         const sold = salesOf(card).map((a) => a.final_price);
@@ -253,10 +276,44 @@ export default function mockApiPlugin() {
         // dev only: switch the account's Pro / V.I.P. status (and the sample special packs) to see every variant
         if (p === "/api/__profile" && m === "POST") { Object.assign(p_, await readBody(req)); return send(res, 200, { ok: true }); }
 
+        // favourites and tags: the live game writes them to its database (Supabase) from its client;
+        // here, the same operations (the mock adapter calls them, see adapters/mock.js)
+        if (p === "/api/__sb/star" && m === "PATCH") {
+          const { id: ucId, starred } = await readBody(req);
+          const row = state.collection.get(ucId);
+          if (!row) return send(res, 404, { message: "Carte introuvable." });
+          row.starred = !!starred;
+          return send(res, 200, [{ id: ucId, starred: row.starred }]);
+        }
+        if (p === "/api/__sb/tags") {
+          if (m === "GET") return send(res, 200, [...state.tags].sort((a, b) => a.name.localeCompare(b.name, "fr")));
+          const { name, color } = await readBody(req);
+          if (state.tags.some((t) => t.name === name)) return send(res, 409, { code: "23505", message: "duplicate key value" });
+          const tag = { id: "tag_" + ++seq, name, color };
+          state.tags.push(tag);
+          return send(res, 201, [tag]);
+        }
+        if (p === "/api/__sb/card-tags") {
+          const b = m === "DELETE" ? { user_card_id: q("user_card_id"), tag_id: q("tag_id") } : await readBody(req);
+          const row = state.collection.get(b.user_card_id), tag = state.tags.find((t) => t.id === b.tag_id);
+          if (!row || !tag) return send(res, 404, { message: "Introuvable." });
+          row.tags = (row.tags ?? []).filter((t) => t.id !== tag.id);
+          if (m === "POST") row.tags.push(tag);
+          return send(res, m === "POST" ? 201 : 200, []);
+        }
+
         if (p === "/api/my-collection") {
-          const all = [...state.collection.values()].sort((a, b) => RANK[b.card.rarity] - RANK[a.card.rarity]);
-          const rarityCounts = Object.fromEntries(Object.keys(RANK).map((r) => [r, all.filter((u) => u.card.rarity === r).length]));
-          return send(res, 200, { collection: all.slice(page * PAGE, page * PAGE + PAGE), total: all.length, rarityCounts, tagOptions: [], pendingTradeCardIds: pendingCopies("me") });
+          // like the live route (checked by test:prod): `q` searches titles and descriptions,
+          // `rarity` may repeat, `sort` as collectionOrder;
+          // `stats=1` adds the match count and the per-rarity counts of the search (not of the
+          // rarity filter); 50 a page whatever `limit` says
+          const mine = [...state.collection.values()];
+          const searched = filterCards(mine, new URL(url.pathname + "?" + new URLSearchParams(q("q") ? { q: q("q") } : {}), url), (r) => r.card);
+          const tagged = (r) => (q("untagged") === "1" ? !r.tags?.length : !q("tag_id") || r.tags?.some((t) => t.id === q("tag_id")));
+          const all = filterCards(mine, url, (r) => r.card).filter(tagged).sort(collectionOrder(q("sort"))).map((r) => ({ ...r, tags: r.tags ?? [] }));
+          const stats = q("stats") === "1";
+          const rarityCounts = Object.fromEntries(Object.keys(RANK).map((r) => [r, searched.filter((u) => u.card.rarity === r).length]).filter(([, n]) => n));
+          return send(res, 200, { collection: all.slice(page * PAGE, page * PAGE + PAGE), total: stats ? all.length : null, rarityCounts: stats ? rarityCounts : {}, tagOptions: [], pendingTradeCardIds: pendingCopies("me") });
         }
 
         if ((id = match(p, /^\/api\/user-cards\/([^/]+)\/discard$/)?.[0]) && m === "POST") {
@@ -380,8 +437,8 @@ export default function mockApiPlugin() {
           if (!card) return send(res, 404, { error: "Carte introuvable." });
           advance();
           if (q("scope") === "summary") return send(res, 200, { wikipedia_title: card.wikipedia_title, summary: summary(card), isPro: p_.is_pro });
-          const sales = salesOf(card).map((a) => ({ id: a.id, rarity: a.card.rarity, final_price: a.final_price, settled_at: a.settled_at }));
-          return send(res, 200, { sales });
+          // the latest SALES_CAP, newest first (the live order)
+          return send(res, 200, { sales: salesOf(card).slice(-SALES_CAP).reverse() });
         }
 
         if (p === "/api/notifications") {
@@ -408,12 +465,13 @@ export default function mockApiPlugin() {
           return send(res, 200, { friendships: [...accepted, ...incoming], counts: { accepted: accepted.length, incoming: incoming.length, outgoing: 0 } });
         }
         if ((id = match(p, /^\/api\/profile\/([^/]+)\/collection$/)?.[0])) {
-          const f = world.players.find((x) => x.id !== "me" && x.username === decodeURIComponent(id));
+          // a friend's, or my own (the live route serves mine too: the pack reveal finds a copy by it)
+          const f = world.players.find((x) => x.username === decodeURIComponent(id));
           if (!f) return send(res, 404, { error: "Profil introuvable." });
-          // like the live route (checked by test:prod): filtered by q and rarity, rarity order (L first)
-          // unless sort=name (any other sort value also gives name order), total only with a search
-          const all = filterCards(friendCards.get(f.id), url, (r) => r.card)
-            .sort(q("sort") ? (a, b) => byTitle(a.card, b.card) : (a, b) => RANK[b.card.rarity] - RANK[a.card.rarity] || byTitle(a.card, b.card));
+          const rows = f.id === "me" ? [...state.collection.values()] : friendCards.get(f.id);
+          // like the live route (checked by test:prod): filtered by q and rarity, ordered as
+          // collectionOrder, total only with a search
+          const all = filterCards(rows, url, (r) => r.card).sort(collectionOrder(q("sort")));
           return send(res, 200, { collection: all.slice(page * PAGE, page * PAGE + PAGE), total: q("q") ? all.length : null, rarityCounts: {}, tagOptions: [], profileId: f.id, pendingTradeCardIds: pendingCopies(f.id) });
         }
         if ((id = match(p, /^\/api\/chat\/([^/]+)$/)?.[0])) {

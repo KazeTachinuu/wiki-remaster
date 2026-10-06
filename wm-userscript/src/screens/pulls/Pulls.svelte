@@ -1,7 +1,7 @@
 <script>
   import Reveal from "./Reveal.svelte";
   import { play } from "../../sound/sound.js";
-  import { data, session, recordPull, collectionAdd, forgetCollection } from "../../wm/index.js";
+  import { data, session, recordPull, collectionAdd } from "../../wm/index.js";
   import { useOriginalSite } from "../../lib/settings.svelte.js";
   import { withHumanCheck, needsHuman } from "../../lib/humanCheck.js";
   import { countdown, secondsUntil } from "../../lib/format.js";
@@ -13,6 +13,7 @@
   let { profile, onchanged, onprofile } = $props();
   let phase = $state("ready");
   let cards = $state([]);
+  let copies = $state(null); // my copies of the pack's cards, when the pack sent them
   let busy = $state(false);
   let opening = $state(false); // playing the tear-open animation
   let error = $state("");
@@ -38,9 +39,9 @@
       const [d] = await Promise.all([withHumanCheck(opener), new Promise((r) => setTimeout(r, 900))]);
       if (!d?.cards?.length) throw new Error("Aucune carte reçue. Réessayez dans un instant.");
       recordPull(d.cards);
-      // the new copies join the saved collection (a response without them: reload it later)
-      d.copies ? collectionAdd(d.copies) : forgetCollection();
+      collectionAdd();
       cards = d.cards;
+      copies = d.copies;
       phase = "revealing";
       onchanged?.();
     } catch (e) {
@@ -119,7 +120,7 @@
 
 <div class="pulls">
 {#if phase === "revealing"}
-  <Reveal {cards} ondone={done} />
+  <Reveal {cards} {copies} ondone={done} onaction={(kind) => kind === "discard" && onprofile?.()} />
 {:else}
   <div class="pull-ready" class:has-tabs={kinds.length > 1} data-kind={kind}>
     {#if kinds.length > 1}

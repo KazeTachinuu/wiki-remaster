@@ -14,7 +14,7 @@ An unofficial redesign of [wiki-masters.com](https://www.wiki-masters.com), in y
 | Firefox (computer and Android) | Firefox Add-ons (in review), or Tampermonkey then the button |
 | Safari (iPhone, iPad, Mac) | [Userscripts](https://apps.apple.com/app/userscripts/id1463298887) (Settings, Safari, Extensions), then the button |
 
-Updates are automatic. **Site original** (or the phone menu) goes back to the original site.
+Updates are automatic, and the sidebar (or the phone menu) says when a new version is out. **Site original** goes back to the original site.
 
 ## Screens
 
@@ -24,14 +24,21 @@ Tear-open reveal with rarity sounds; the next-pack countdown and the Pro daily p
 ![Packs](docs/screenshots/packs.png)
 
 ### Collection
-Search, sort, rarity filters, bulk discard; cached between visits.
+Searched, filtered and sorted by the game's server one page at a time, like its own collection page: 20 000 cards open as fast as 50. By rarity, date added or name, favourites first; bulk discard.
 
 ![Collection](docs/screenshots/collection.png)
 
 ### Card detail
-Market price, last sale, cheapest copy on sale, a quick-sale price, the price chart.
+Market price, last sale, cheapest copy on sale, a quick-sale price, the price trend.
 
 ![Card detail](docs/screenshots/card.png)
+
+### Market analysis (Pro)
+Every sale of a card on one screen: a period (7 days, 30 days, all), the key figures, the trend with each sale and the daily volume, the sales beside it (click a day to list its own), and what is on sale now.
+
+![Market analysis](docs/screenshots/analysis.png)
+
+<sub>From the test server: the sale history is Pro only, and the screenshots' account is not Pro.</sub>
 
 ### Catalogue
 All 2.8 M cards, searched by the game's server, with your wishlist.
@@ -46,7 +53,7 @@ Live bids, your sales and wins, every listing of a card side by side.
 ![An auction](docs/screenshots/auction.png)
 
 ### Trades
-Both sides as real cards with their value and a verdict; counter-offers as one timeline.
+Both sides as real cards with their value and a verdict; counter-offers as one timeline. Built for busy traders: find a trade by friend or card, hundreds of cards in a trade as mini cards, long negotiations folded.
 
 ![Trade](docs/screenshots/trade.png)
 
@@ -77,7 +84,8 @@ scripts/check-live.sh --install # daily live check: desktop alert + GitHub issue
 
 - Mock world: 6 players, 2 friend groups, a running market, trades and chats, from real cards (`mock/world.js`, `mock/snapshot.json`; refresh with `bun scripts/snapshot-prod.mjs`)
 - Faster market: `WM_MOCK_MARKET_SPEED=60 bun run dev` (an hour a minute)
-- Big mock collection: `WM_MOCK_CARDS=1000 bun run dev` (`WM_MOCK_SHINY=1` all shiny, `WM_MOCK_NOIMG=1` no pictures)
+- Big mock collection: `WM_MOCK_CARDS=20000 bun run dev` (`WM_MOCK_SHINY=1` all shiny, `WM_MOCK_NOIMG=1` no pictures)
+- Power user: `WM_MOCK_FRIENDS=300 WM_MOCK_TRADES=900 WM_MOCK_CHAIN=150 bun run dev` (friends, trades, one negotiation of 150 offers)
 - Mock faults: `POST /api/__fault` (`{ "status": 525, "count": 2 }`, `{ "delay": 7000 }`, `{ "human": true }`); Pro / V.I.P.: `POST /api/__profile`
 - `test:prod` diffs API shapes against `docs/api-shapes.json` (`--update-shapes`, `--only=market,trades`, `--write=discard,sell,bid,notif`)
 - API reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)

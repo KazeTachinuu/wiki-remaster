@@ -174,3 +174,35 @@
 /* the composer's header (its own layout below) */
 .tm-head{display:flex;align-items:center;gap:var(--s3);padding-right:var(--s6)}
 .tm-head h2{font:700 20px/1.2 var(--display)}
+
+/* A big trade (TradeSide `compact`): each side sums itself up, then its mini cards in a panel that
+   scrolls on its own; the sides face each other, the verdict between them, or stack on a phone. */
+.tp-sides.compact{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:start;flex:none}
+.tp-sides.compact .tside{width:auto;flex:initial}
+.tp-sides.compact .tside > *{margin-block:0}
+.tp-sides.compact .tm-verdict{align-self:center}
+.tside-sum{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px var(--s2);font-size:13px;color:var(--fg-soft)}
+.tside-sum b{color:var(--fg)}
+.tside-rar{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+.tside-rar span{padding:1px 7px;border-radius:999px;font:700 11px/1.6 var(--body);color:var(--rc);background:color-mix(in oklab,var(--rc) 14%,transparent);font-variant-numeric:tabular-nums}
+.tside-minis{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:var(--s3) var(--s2);max-height:min(62dvh,640px);overflow-y:auto;overscroll-behavior:contain;padding:2px 4px 2px 0}
+.tmini{display:flex;flex-direction:column;gap:3px;min-width:0;padding:0;border:none;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.tmini .cthumb{width:100%;height:auto;aspect-ratio:5/6;border-radius:10px;transition:transform .15s,box-shadow .15s}
+.tmini:hover .cthumb{transform:translateY(-2px);box-shadow:0 8px 18px -10px #000}
+.tmini-t{font-size:12px;font-weight:600;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tmini-v{min-height:1.2em;font-size:11px;color:var(--r-l);font-variant-numeric:tabular-nums}
+.tmini-more{grid-column:1/-1;height:1px}
+@media(max-width:900px){
+  .tp-sides.compact{grid-template-columns:minmax(0,1fr)}
+  .tside-minis{grid-template-columns:repeat(4,minmax(0,1fr));max-height:none;overflow:visible}
+  .tmini-t{font-size:11px}
+}
+.tmini-all{width:100%;justify-content:center}
+.tr-more{height:1px}
+.tp-fold{padding:4px 0 4px 22px}.tp-fold .link-btn{font-size:12.5px;font-weight:600;color:var(--accent)}
+/* finding a trade in a long list: the search, then the friend and the order as menus */
+.tr-find{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3) var(--s3) var(--s2);border-bottom:1px solid var(--line)}
+.tr-find > .search-wrap{flex:none}
+.tr-find-row{display:flex;gap:var(--s2);min-width:0}
+.tr-find-row .tr-who{flex:1;min-width:0}
+.tr-who select{min-width:0;width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

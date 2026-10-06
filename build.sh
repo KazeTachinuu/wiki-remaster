@@ -48,10 +48,7 @@ quiet bun install --cwd wm-userscript
 step "dependencies"
 
 (cd wm-userscript && quiet bunx vite build) || exit 1
-# the old address too, for one release: installs from before still check it for updates, and the
-# copy they fetch points them to dist/ from then on
-mkdir -p wm-userscript/dist && cp dist/wikimasters-app.user.js wm-userscript/dist/wikimasters-app.user.js
-step "tampermonkey" "dist/wikimasters-app.user.js ($(size dist/wikimasters-app.user.js))"
+step "tampermonkey" "dist/wikimasters-app.user.js ($(size dist/wikimasters-app.user.js)), its header in .meta.js"
 
 quiet bun wm-userscript/scripts/extension.mjs
 step "chrome" "dist/wiki-remaster-chrome.zip ($(size dist/wiki-remaster-chrome.zip))"

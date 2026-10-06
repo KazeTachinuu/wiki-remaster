@@ -37,7 +37,7 @@
 @media (prefers-reduced-motion:reduce){.toast,.toast-wrap{animation:none}}
 
 /* human check dialog: a narrow single-column modal */
-.hc-backdrop{z-index:2147483601} /* above every other dialog, below the loadbar */
+.hc-backdrop{z-index:2147483602} /* above every other dialog (the market analysis included), below the loadbar */
 .modal.hc{max-width:420px;grid-template-columns:1fr;gap:var(--s3);text-align:center;justify-items:center}
 .hc-title{font-family:var(--display);font-size:20px}
 .hc-sub{color:var(--fg-soft);font-size:13.5px;display:inline-flex;gap:8px;align-items:center}

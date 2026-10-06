@@ -145,11 +145,14 @@ export function newInPack(cardIds, ownedCopies) {
   return new Set(cardIds.filter((id) => (owned.get(id) ?? 0) <= drawn.get(id)));
 }
 
-/** Owned items tallied by rarity. */
-export function countsFrom(items) {
-  const counts = Object.fromEntries(RARITIES.map((r) => [r, 0]));
-  for (const it of items) if (it.card.rarity in counts) counts[it.card.rarity] += 1;
-  return counts;
+/**
+ * The copy of `card` to act on among collection rows (to sell or discard a card just pulled): the
+ * same finish (shiny or not) first, then the newest. Null when none is mine.
+ */
+export function pickCopy(rows, card) {
+  const mine = (rows || []).filter((r) => r.card?.id === card.id);
+  const t = (r) => Date.parse(r.obtained_at || "") || 0;
+  return mine.sort((a, b) => (b.is_shiny === !!card.is_shiny) - (a.is_shiny === !!card.is_shiny) || t(b) - t(a))[0] ?? null;
 }
 
 /**

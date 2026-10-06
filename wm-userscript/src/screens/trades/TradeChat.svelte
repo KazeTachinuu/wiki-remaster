@@ -17,6 +17,10 @@
   $effect(() => { const t = setInterval(() => document.visibilityState === "visible" && load(), 5000); return () => clearInterval(t); });
   // messages and trades interleaved by time, newest at the bottom
   const feed = $derived(conv ? [...conv.messages.map((m) => ({ kind: "msg", at: m.at, m })), ...conv.trades.map((t) => ({ kind: "trade", at: t.createdAt, t }))].sort((a, b) => String(a.at).localeCompare(String(b.at))) : null);
+  // a long conversation draws its latest entries; older ones come on demand, a screenful at a time
+  const STEP = 80;
+  let back = $state(STEP);
+  const drawn = $derived(feed ? feed.slice(-back) : null);
   // follow new entries only while the reader is at the bottom (or just sent), so a poll never yanks them back down
   let stick = true;
   const onScroll = () => (stick = list.scrollHeight - list.scrollTop - list.clientHeight < 40);
@@ -38,7 +42,8 @@
     {:else if !feed}<div class="loading-more"><span class="spin"></span></div>
     {:else if !feed.length}<div class="empty"><b>Aucun message.</b><span>Écrivez à {friend.username} pour négocier.</span></div>
     {:else}
-      {#each feed as f (f.kind + (f.m?.id ?? f.t.id))}
+      {#if feed.length > back}<button class="link-btn chat-older" onclick={() => { stick = false; back += STEP; }}>Messages précédents ({feed.length - back})</button>{/if}
+      {#each drawn as f (f.kind + (f.m?.id ?? f.t.id))}
         {#if f.kind === "msg"}
           <div class="bubble" class:mine={f.m.mine}><span>{f.m.content}</span><time class="nowrap">{ago(f.m.at)}</time></div>
         {:else}

@@ -44,16 +44,23 @@ const SHINY = 0.003, BID_SHARE = 0.15;
 
 /**
  * Build the world from the catalogue. `price(card)` is a card's typical price (its snapshot
- * average, else its rarity's). Returns plain data:
+ * average, else its rarity's). `load` adds a power user's world for load tests: `friends` more
+ * friends, `trades` more trades with all of them, a negotiation of `chain` offers. Returns plain data:
  *   players, friendships, requests,
  *   collections: Map(playerId -> [{ id, card, is_shiny, starred, obtained_at }]),
  *   auctions: [{ ...live auction shape, bids: [...] }], trades: [...], chats: Map(friendId -> [...]),
  *   notifications: [...] (mine)
  */
-export function buildWorld(catalog, price, now = Date.now()) {
+export function buildWorld(catalog, price, now = Date.now(), load = {}) {
   const r = rng("wiki-remaster world");
   const at = (msAgo) => new Date(now - msAgo).toISOString();
-  const player = (id) => PLAYERS.find((p) => p.id === id);
+  // load tests: `friends` more friends of mine, with small collections, sharing the trades below
+  const extra = Array.from({ length: load.friends || 0 }, (_, i) => ({ id: `u_f${i}`, username: `Joueur${String(i + 1).padStart(3, "0")}` }));
+  const players = [...PLAYERS, ...extra];
+  const friendships = [...FRIENDSHIPS, ...extra.map((p) => [p.id, "me"])];
+  const group = { ...GROUP, ...Object.fromEntries(extra.map((p) => [p.id, "A"])) };
+  const size = { ...SIZE, ...Object.fromEntries(extra.map((p) => [p.id, 12])) };
+  const player = (id) => players.find((p) => p.id === id);
   const byRarity = Object.fromEntries(ODDS.map(([rr]) => [rr, catalog.filter((c) => c.rarity === rr)]));
 
   // each group draws mostly from its own half of the catalogue: friends share cards, the two
@@ -70,10 +77,10 @@ export function buildWorld(catalog, price, now = Date.now()) {
 
   let ucSeq = 0;
   const collections = new Map();
-  for (const p of PLAYERS) {
+  for (const p of players) {
     const rows = [], owned = new Set();
-    for (let i = 0; i < SIZE[p.id] * 3 && rows.length < SIZE[p.id]; i++) {
-      const list = pool(GROUP[p.id], pickRarity()).filter((c) => !owned.has(c.id)); // no duplicates
+    for (let i = 0; i < size[p.id] * 3 && rows.length < size[p.id]; i++) {
+      const list = pool(group[p.id], pickRarity()).filter((c) => !owned.has(c.id)); // no duplicates
       if (!list.length) continue;
       const card = list[Math.floor(r() * list.length)]; // the pool has the real share without a picture
       owned.add(card.id);
@@ -81,6 +88,14 @@ export function buildWorld(catalog, price, now = Date.now()) {
     }
     collections.set(p.id, rows);
   }
+  // Cards whose title says nothing of what they are (a spider named in Latin): searching
+  // "araignée" finds them only through their description, like the game's server does. One for
+  // me, one for Alix, so both sides of a trade can be searched that way.
+  const hidden = catalog.filter((c) => /araign/i.test(c.category || ""));
+  [["me", hidden[0]], ["u_alix", hidden[1]]].forEach(([pid, card]) => {
+    const rows = collections.get(pid);
+    if (card && !rows.some((x) => x.card.id === card.id)) rows.push({ id: `uc_${++ucSeq}`, card, is_shiny: false, starred: false, obtained_at: at(3 * DAY) });
+  });
 
   // --- the market: each player lists a few of their cards; others bid --------------------
   let aSeq = 0, bSeq = 0;
@@ -209,11 +224,34 @@ export function buildWorld(catalog, price, now = Date.now()) {
   trade("me", "u_alix", [card("me", 13, "C")], [card("u_alix", 0, "UR")], { status: "declined", recipient_wikibidous: 0, initiator_wikibidous: 120, ago: 6 * DAY, answered: 5.9 * DAY });
   trade("me", "u_basile", [card("me", 15, "C")], [card("u_basile", 6, "PC")], { status: "cancelled", ago: 9 * DAY, answered: 8.9 * DAY });
 
+  // load tests (the plugin's WM_MOCK_TRADES and WM_MOCK_CHAIN): a power user's history, hundreds
+  // of trades with every friend, and one negotiation of `chain` offers back and forth with Capucine
+  const FRIENDS_OF_ME = ["u_alix", "u_basile", "u_capucine", ...extra.map((p) => p.id)];
+  const ENDS = ["accepted", "declined", "cancelled", "pending"];
+  for (let i = 0; i < (load.trades || 0); i++) {
+    const f = FRIENDS_OF_ME[i % FRIENDS_OF_ME.length], mine = i % 2 === 0;
+    const give = Array.from({ length: 1 + (i % 4) }, (_, k) => card(mine ? "me" : f, i * 7 + k));
+    const get = Array.from({ length: 1 + ((i >> 2) % 3) }, (_, k) => card(mine ? f : "me", i * 5 + k));
+    const status = ENDS[i % 4];
+    trade(mine ? "me" : f, mine ? f : "me", give, get, { status, ago: (i + 10) * HOUR, answered: status === "pending" ? undefined : (i + 9) * HOUR, initiator_wikibidous: i % 5 ? 0 : 20 + i });
+  }
+  let prev = null;
+  const longChat = [];
+  for (let i = 0; i < (load.chain || 0); i++) {
+    const fromMe = i % 2 === 0, last = i === load.chain - 1;
+    const from = fromMe ? "me" : "u_capucine", to = fromMe ? "u_capucine" : "me";
+    prev = trade(from, to, [card(from, i), card(from, i + 1)], [card(to, i + 2)], {
+      status: last ? "pending" : "countered", parent_trade_id: prev?.id ?? null, initiator_wikibidous: i % 3 ? 0 : 10 + i,
+      ago: (load.chain - i) * 2 * HOUR, answered: last ? undefined : (load.chain - i - 1) * 2 * HOUR + MIN,
+    });
+    longChat.push({ id: `m_chain_${i}`, sender_id: from, recipient_id: to, content: fromMe ? `Nouvelle offre, la ${i + 1}e.` : `Pas encore, je contre (${i + 1}).`, created_at: at((load.chain - i) * 2 * HOUR - MIN), read: true });
+  }
+
   const msg = (from, to, content, msAgo) => ({ id: `m_${from}_${to}_${msAgo}`, sender_id: from, recipient_id: to, content, created_at: at(msAgo), read: true });
   const chats = new Map([
     ["u_alix", [msg("u_alix", "me", "Salut ! Ta carte Rare m'intéresse, je t'envoie une offre.", 30 * MIN), msg("me", "u_alix", "Ok, je regarde ça.", 27 * MIN)]],
     ["u_basile", [msg("me", "u_basile", "Ta Super Rare contre ma Rare ?", 2 * DAY), msg("u_basile", "me", "Ajoute un peu, je mets 40 WikiBidous de mon côté.", 1.8 * DAY), msg("me", "u_basile", "Je préfère ajouter une carte, regarde ma nouvelle offre.", 1.2 * DAY)]],
-    ["u_capucine", [msg("me", "u_capucine", "Merci pour l'échange !", 3.8 * DAY), msg("u_capucine", "me", "Avec plaisir. Dorian et Elsa cherchent aussi des Légendaires.", 3.7 * DAY)]],
+    ["u_capucine", [...longChat, msg("me", "u_capucine", "Merci pour l'échange !", 3.8 * DAY), msg("u_capucine", "me", "Avec plaisir. Dorian et Elsa cherchent aussi des Légendaires.", 3.7 * DAY)]],
   ]);
 
   // --- my notifications, from what happened above ----------------------------------------
@@ -229,7 +267,7 @@ export function buildWorld(catalog, price, now = Date.now()) {
   note("marketplace_auction_unsold", { title: "Enchère terminée sans acheteur", message: `Votre vente de ${unsold.card.wikipedia_title} s'est terminée sans enchère.`, auction_id: unsold.id, card_id: unsold.card.id, card_title: unsold.card.wikipedia_title }, 3 * DAY, true);
   note("trade_accepted", { title: "✅ Offre acceptée !", message: "Capucine a accepté votre offre.", trade_id: trades.find((t) => t.status === "accepted").id, recipient_id: "u_capucine", recipient_username: "Capucine" }, 3.8 * DAY, true);
 
-  return { players: PLAYERS, friendships: FRIENDSHIPS, requests: FRIEND_REQUESTS, collections, auctions, trades, chats, notifications: n };
+  return { players, friendships, requests: FRIEND_REQUESTS, collections, auctions, trades, chats, notifications: n };
 }
 
 // --- the running market -------------------------------------------------------------------

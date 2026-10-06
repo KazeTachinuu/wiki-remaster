@@ -1,4 +1,8 @@
 <script>
+  // My collection, whatever its size, asked of the game's server one page at a time as the grid
+  // scrolls, like the game's own collection page: searched (titles and descriptions), filtered by
+  // rarity or tag, ordered by rarity, date added or name, favourites first when asked. A 20 000-card
+  // collection opens like a 50-card one, and nothing is read that is not shown.
   import RarityChips from "../../components/RarityChips.svelte";
   import PickMark from "../../components/PickMark.svelte";
   import { pickSound } from "../../sound/sfx.js";
@@ -6,67 +10,71 @@
   import CardModal from "../../components/CardModal.svelte";
   import Icon from "../../components/Icon.svelte";
   import SearchBox from "../../components/SearchBox.svelte";
-  import { data, RNAME, RARITIES_DESC, normSearch, loadCollection, collectionRemove, forgetCollection, backgroundLane } from "../../wm/index.js";
+  import { untrack } from "svelte";
+  import { data, RNAME, RARITIES_DESC, myCardsPage, savedFirstPage, collectionRemove, forgetCollection } from "../../wm/index.js";
   import { settings } from "../../lib/settings.svelte.js";
   import { lazyValues } from "../../lib/lazyValues.js";
   import { inView } from "../../lib/inView.js";
+  import { PageStream, debouncedSearch } from "../../lib/paged.svelte.js";
+  import { tags } from "../../lib/tags.svelte.js";
 
   let { onwallet } = $props();
 
-  let items = $state(null);
-  let stats = $state(null);
-  let error = $state("");
-  // Sort and filters come back as you left them.
+  // The orders the game's server knows (its own collection page offers the same).
+  const SORTS = [["rarity", "Rareté"], ["recent", "Récentes"], ["name", "Nom"]];
+  // Sort and filters come back as you left them (an order no longer offered falls back to rarity).
   const prefs = settings.collection;
   let filter = $state(prefs.filter);
   let search = $state("");
-  let sort = $state(prefs.sort);
-  let favOnly = $state(prefs.favOnly);
-  let shinyOnly = $state(prefs.shinyOnly);
-  $effect(() => Object.assign(prefs, { filter, sort, favOnly, shinyOnly }));
+  let sort = $state(SORTS.some(([id]) => id === prefs.sort) ? prefs.sort : "rarity");
+  let favOnly = $state(!!prefs.favOnly);
+  let tagFilter = $state(""); // a tag id, "none" (untagged) or "" (all)
+  $effect(() => Object.assign(prefs, { filter, sort, favOnly }));
+  // my tags, for the filter (shown once I have some)
+  tags.load();
   let selected = $state(null);
 
-  // Market values, loaded as cards scroll into view. `sortVals` mirrors them for sorting and
-  // `tick` re-sorts at most every 200 ms, so a sweep of 900 values is not 900 re-sorts.
-  let values = $state({});
-  // the value lane pauses when the game limits requests: say so instead of looking stuck
-  let lanePaused = $state(false);
-  $effect(() => backgroundLane.subscribe((st) => (lanePaused = st === "paused")));
-  let loaded = $state(0);
-  let tick = $state(0);
-  const sortVals = new Map();
-  let tickTimer = null;
-  const lazy = lazyValues((id, v) => {
-    values[id] = v;
-    sortVals.set(id, v ?? -1);
-    loaded++;
-    tickTimer ??= setTimeout(() => { tickTimer = null; tick++; }, 200);
+  let query = $state(""); // the search once typing pauses
+  debouncedSearch(() => search, (q) => (query = q));
+  // favourites only: the server's favourites-first order, read until the first card that is not one
+  const serverSort = $derived(favOnly ? "starred" : sort);
+  const stream = new PageStream(async (page) => {
+    const d = await myCardsPage({ page, q: query || undefined, rarity: filter === "ALL" ? undefined : filter, sort: serverSort, tag: tagFilter || undefined });
+    if (serverSort !== "starred") return d;
+    const items = d.items.filter((it) => it.starred);
+    return { ...d, items, hasMore: d.hasMore && items.length === d.items.length };
   });
-  $effect(() => () => { lazy.destroy(); clearTimeout(tickTimer); });
+  // last time's first page, at once, when it is the view asked for; the fresh one replaces it
+  const first = savedFirstPage();
+  if (first && filter === "ALL" && sort === "rarity" && !favOnly && !tagFilter) stream.show(first);
+  // a new search, filter or order asks the server again
+  $effect(() => { void [query, filter, serverSort, tagFilter]; untrack(() => stream.reset()); });
+  // the rarity bar and the count follow the search, not the rarity filter (the server's counts)
+  const counts = $derived(stream.meta?.counts ?? {});
+  const total = $derived(Object.values(counts).reduce((a, b) => a + b, 0));
 
-  // Sorting by value needs every value: sweep the whole collection in the background.
-  $effect(() => { if (sort === "value" && items) for (const it of items) lazy.load(it.card); });
+  // market values, for the cards that scroll into view only (paced, see lazyValues)
+  let values = $state({});
+  const lazy = lazyValues((id, v) => (values[id] = v));
+  $effect(() => () => lazy.destroy());
 
-  // ATK/DEF hidden (the switch in the top bar): a sort by them falls back to rarity
-  $effect(() => { if (settings.hideStats && (sort === "atk" || sort === "def")) sort = "rarity"; });
-
-  // Shows the saved copy at once; a fresh one replaces it when the saved one was not recent.
-  async function load(force = false) {
-    error = "";
-    const show = (d, loading) => { items = d.items; stats = { ...d.stats, loading }; };
-    try {
-      show(await loadCollection({ force, onCached: (d) => show(d, true), onPartial: (d) => show(d, true) }), false);
-    } catch {
-      if (!items) error = "Impossible de charger la collection.";
-      else stats = { ...stats, loading: false };
+  // after our own change: the cards leave the grid at once (no reload)
+  function changed(gone = null) {
+    if (gone) {
+      collectionRemove(gone);
+      stream.drop(gone);
+    } else {
+      forgetCollection(); // unsure what went through: ask again rather than guess
+      stream.reset();
     }
   }
-  load();
-  // after our own change: a discard is replayed on the saved copy (no reload); anything else
-  // (a sale) reloads it from the game
-  function changed(discarded = null) {
-    discarded ? collectionRemove(discarded) : forgetCollection();
-    load();
+
+  // a favourite or a tag changed in the card window: the row follows; one that no longer matches
+  // the favourites or tag filter leaves it
+  function rowChanged(row) {
+    const fits = (!favOnly || row.starred) && (!tagFilter || (tagFilter === "none" ? !row.tags.length : row.tags.some((t) => t.id === tagFilter)));
+    fits ? stream.update(row) : stream.drop([row.id]);
+    collectionRemove(); // the saved first page is asked again
   }
 
   // Bulk discard.
@@ -89,81 +97,58 @@
     bulkConfirm = false;
   }
   async function bulkDiscard() {
+    if (bulkBusy) return; // one discard at a time: a second click never sends it twice
     bulkBusy = true;
     try {
       const r = await data.bulkDiscard([...picked]);
-      const failed = r.failed?.length || 0;
       const kept = new Set(r.failed || []);
       changed([...picked].filter((id) => !kept.has(id)));
-      bulkMsg = `${r.discarded_count} carte${r.discarded_count > 1 ? "s" : ""} défaussée${r.discarded_count > 1 ? "s" : ""}` + (failed ? `, ${failed} en échec` : "");
+      // the ones that failed are already gone (sold, traded or discarded elsewhere): out of the grid too
+      if (kept.size) changed([...kept]);
+      bulkMsg = `${r.discarded_count} carte${r.discarded_count > 1 ? "s" : ""} défaussée${r.discarded_count > 1 ? "s" : ""}` + (kept.size ? `, ${kept.size} déjà partie${kept.size > 1 ? "s" : ""} ailleurs` : "");
     } catch (e) {
       bulkMsg = e.message || "La défausse a échoué.";
-      changed(); // some may have gone through: reload rather than guess
+      changed(); // some may have gone through: ask again rather than guess
     }
     bulkBusy = false;
     toggleSelecting();
     onwallet?.();
   }
-
-  const RANK = Object.fromEntries(RARITIES_DESC.map((r, i) => [r, -i]));
-  const SORTS = {
-    rarity: (a, b) => RANK[b.card.rarity] - RANK[a.card.rarity] || b.count - a.count,
-    value: (a, b) => (sortVals.get(b.card.id) ?? -1) - (sortVals.get(a.card.id) ?? -1) || RANK[b.card.rarity] - RANK[a.card.rarity],
-    atk: (a, b) => b.card.atk - a.card.atk,
-    def: (a, b) => b.card.def - a.card.def,
-    name: (a, b) => a.card.title.localeCompare(b.card.title, "fr"),
-  };
-
-  let shown = $derived.by(() => {
-    if (!items) return [];
-    tick; // re-sort as values arrive
-    const q = normSearch(search);
-    return items
-      .filter((it) =>
-        (filter === "ALL" || it.card.rarity === filter) &&
-        (!favOnly || it.starred) &&
-        (!shinyOnly || it.is_shiny) &&
-        (!q || it._s.includes(q)))
-      .sort(SORTS[sort]);
-  });
-  // Built as you scroll: the first rows at once, more as the end comes near, so a 1000-card
-  // collection opens as fast as a small one. A new filter, sort or search starts from the top.
-  const STEP = 96;
-  let limit = $state(STEP);
-  $effect(() => { void [filter, favOnly, shinyOnly, sort, search]; limit = STEP; });
-  let starredCount = $derived(items?.filter((it) => it.starred).length ?? 0);
-  let shinyCount = $derived(items?.filter((it) => it.is_shiny).length ?? 0);
-  let allPicked = $derived(shown.length > 0 && shown.every((it) => picked.has(it.id)));
-  const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
+  const rows = $derived(stream.items);
+  const allPicked = $derived(rows.length > 0 && rows.every((it) => picked.has(it.id)));
+  const plural = (n, word) => `${n.toLocaleString("fr")} ${word}${n > 1 ? "s" : ""}`;
 </script>
 
-{#if error}
-  <div class="empty"><b>{error}</b><div>Vérifiez que vous êtes connecté, puis réessayez.</div><button class="btn" onclick={() => load(true)}>Réessayer</button></div>
-{:else if !items}
-  <div class="grid">{#each Array(10) as _}<div class="wc skeleton"></div>{/each}</div>
+{#if stream.error && !stream.started}
+  <div class="empty"><b>Impossible de charger la collection.</b><div>Vérifiez que vous êtes connecté, puis réessayez.</div><button class="btn" onclick={() => stream.reset()}>Réessayer</button></div>
 {:else}
   <div class="coll-head">
     <div>
       <h1>Ma collection</h1>
-      <div class="meta">{plural(stats.unique, "carte")}{#if stats.copies !== stats.unique} · {stats.copies} exemplaires{/if}{#if stats.loading}<span class="sync"><span class="spin"></span>Mise à jour {items.length} / {stats.copies}</span>{/if}</div>
+      <div class="meta">
+        {#if !stream.started}<span class="sync"><span class="spin"></span>Chargement de votre collection</span>
+        {:else}{plural(total, "carte") + (query ? ` pour « ${query} »` : "")}{/if}
+      </div>
     </div>
     <div class="coll-tools">
-      <SearchBox bind:value={search} placeholder="Rechercher une carte..." />
+      <SearchBox bind:value={search} loading={search.trim() !== query || (stream.loading && !stream.items.length)} placeholder="Rechercher une carte..." />
       <div class="tool-actions">
         <div class="isel" title="Trier les cartes">
           <Icon name="sort" />
-          <select bind:value={sort} aria-label="Trier">
-            <option value="rarity">Rareté</option>
-            <option value="value">Valeur estimée</option>
-            {#if !settings.hideStats}
-              <option value="atk">Attaque</option>
-              <option value="def">Défense</option>
-            {/if}
-            <option value="name">Nom</option>
-          </select>
+          <select bind:value={sort} aria-label="Trier">{#each SORTS as [id, label] (id)}<option value={id}>{label}</option>{/each}</select>
         </div>
+        {#if tags.list?.length}
+          <div class="isel" title="Étiquette">
+            <Icon name="tag" />
+            <select bind:value={tagFilter} aria-label="Étiquette">
+              <option value="">Étiquettes</option>
+              <option value="none">Sans étiquette</option>
+              {#each tags.list as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+            </select>
+          </div>
+        {/if}
         {#if selecting}
-          <button class="iconbtn" onclick={() => { pickSound(allPicked); picked = allPicked ? new Set() : new Set(shown.map((it) => it.id)); }}>
+          <button class="iconbtn" onclick={() => { pickSound(allPicked); picked = allPicked ? new Set() : new Set(rows.map((it) => it.id)); }}>
             {allPicked ? "Tout désélectionner" : "Tout sélectionner"}
           </button>
         {/if}
@@ -174,55 +159,42 @@
     </div>
   </div>
 
-  {#if sort === "value" && loaded < items.length}
-    <div class="sort-hint">
-      {#if lanePaused}Le jeu limite les requêtes : estimation en pause une minute, reprise automatique ({loaded} / {items.length}).
-      {:else}Estimation des valeurs... {loaded} / {items.length}. Le tri s'affine au fur et à mesure.{/if}
-    </div>
-  {/if}
   {#if bulkMsg}<div class="sort-hint">{bulkMsg}</div>{/if}
 
-  {#if stats.copies > 0}
+  {#if total > 0}
     <div class="rarity-panel">
       <div class="rarity-meter" role="img" aria-label="Répartition par rareté">
         {#each RARITIES_DESC as r}
-          {#if stats.counts[r]}
+          {#if counts[r]}
             <button class="rm-seg" class:sel={filter === r} class:dim={filter !== "ALL" && filter !== r}
-              style="--rc:var(--r-{r.toLowerCase()}); flex-grow:{stats.counts[r]}"
-              title="{RNAME[r]} : {stats.counts[r]}" aria-label="{RNAME[r]} : {stats.counts[r]}"
+              style="--rc:var(--r-{r.toLowerCase()}); flex-grow:{counts[r]}"
+              title="{RNAME[r]} : {counts[r]}" aria-label="{RNAME[r]} : {counts[r]}"
               onclick={() => (filter = filter === r ? "ALL" : r)}></button>
           {/if}
         {/each}
       </div>
       {#snippet extras()}
-        {#if starredCount}
-          <button class="rl special fav" class:on={favOnly} onclick={() => (favOnly = !favOnly)} title="Cartes favorites">
-            <Icon name="star" width={1.7} class="rl-ico" /><span class="rl-name">Favoris</span><span class="rl-n">{starredCount}</span>
-          </button>
-        {/if}
-        {#if shinyCount}
-          <button class="rl special shiny" class:on={shinyOnly} onclick={() => (shinyOnly = !shinyOnly)} title="Cartes brillantes">
-            <Icon name="sparkle" filled width={0} class="rl-ico" /><span class="rl-name">Brillantes</span><span class="rl-n">{shinyCount}</span>
-          </button>
-        {/if}
+        <button class="rl special fav" class:on={favOnly} onclick={() => (favOnly = !favOnly)} title="Cartes favorites">
+          <Icon name="star" width={1.7} class="rl-ico" /><span class="rl-name">Favoris</span>
+        </button>
       {/snippet}
-      <RarityChips value={filter === "ALL" ? "" : filter} counts={stats.counts} total={stats.copies}
-        onchange={(r) => (filter = r || "ALL")} children={starredCount || shinyCount ? extras : undefined} />
+      <RarityChips value={filter === "ALL" ? "" : filter} {counts} {total} onchange={(r) => (filter = r || "ALL")} children={extras} />
     </div>
   {/if}
 
-
-  {#if shown.length === 0}
+  {#if !stream.started}
+    <div class="grid">{#each Array(10) as _}<div class="wc skeleton"></div>{/each}</div>
+  {:else if !rows.length && !stream.loading}
     <div class="empty">
-      {#if search || filter !== "ALL"}
+      {#if query || filter !== "ALL" || favOnly || tagFilter}
         <b>Aucune carte ne correspond</b><div>Essayez un autre filtre ou une autre recherche.</div>
       {:else}
         <b>Rien ici pour l'instant</b><div>Ouvrez un paquet pour commencer votre collection.</div>
       {/if}
     </div>
   {:else}
-    <div class="grid">
-      {#each shown.slice(0, limit) as it (it.id)}
+    <div class="grid" class:dim={stream.loading && stream.first}>
+      {#each rows as it (it.id)}
         <button class="card-btn" class:picking={selecting} class:picked={selecting && picked.has(it.id)}
           onclick={() => onCardClick(it)} aria-label={it.card.title} use:lazy.watch={it.card}>
           <Card card={it.card} count={it.count} shiny={it.is_shiny} starred={it.starred} value={values[it.card.id]} />
@@ -232,7 +204,11 @@
         </button>
       {/each}
     </div>
-    {#if shown.length > limit}<div class="grid-more" aria-hidden="true" use:inView={{ onEnter: () => (limit += STEP), key: limit }}></div>{/if}
+    {#if stream.hasMore && !stream.error}
+      <div class="grid-more" aria-hidden="true" use:inView={{ onEnter: () => stream.more(), key: `${rows.length}:${stream.loading}` }}></div>
+    {:else if stream.error}
+      <div class="empty"><span class="modal-msg">Impossible de charger la suite.</span><button class="btn" onclick={() => stream.more()}>Réessayer</button></div>
+    {/if}
   {/if}
 {/if}
 
@@ -250,5 +226,5 @@
 {/if}
 
 {#if selected}
-  <CardModal item={selected} onclose={() => (selected = null)} onaction={(kind) => { changed(kind === "discard" ? [selected.id] : null); onwallet?.(); }} />
+  <CardModal item={selected} onclose={() => (selected = null)} onaction={(kind) => { changed(kind === "unsure" ? null : [selected.id]); onwallet?.(); }} onchange={rowChanged} />
 {/if}

@@ -143,16 +143,30 @@ export function afterLeaving(list, id) {
 /** The counter-offer chain this trade belongs to, oldest first. */
 export function chainOf(trade, all) {
   const byId = new Map(all.map((t) => [t.id, t]));
+  const childOf = new Map(all.filter((t) => t.parentId).map((t) => [t.parentId, t]));
   let root = trade;
   while (root.parentId && byId.has(root.parentId)) root = byId.get(root.parentId);
   const chain = [root];
-  for (let cur = root; ; ) {
-    const next = all.find((t) => t.parentId === cur.id);
-    if (!next) break;
-    chain.push(next);
-    cur = next;
-  }
+  for (let next = childOf.get(root.id); next; next = childOf.get(next.id)) chain.push(next);
   return chain;
+}
+
+/**
+ * How many offers each negotiation holds, keyed by every trade id of it: one pass over the
+ * trades, however many there are (the list shows "N offres" on each row).
+ */
+export function roundsOf(all) {
+  const byId = new Map(all.map((t) => [t.id, t]));
+  const rootOf = new Map();
+  const root = (t) => {
+    if (rootOf.has(t.id)) return rootOf.get(t.id);
+    const r = t.parentId && byId.has(t.parentId) ? root(byId.get(t.parentId)) : t.id;
+    rootOf.set(t.id, r);
+    return r;
+  };
+  const size = new Map();
+  for (const t of all) size.set(root(t), (size.get(root(t)) ?? 0) + 1);
+  return new Map(all.map((t) => [t.id, size.get(rootOf.get(t.id))]));
 }
 
 const who = (mine, other) => (mine ? "vous" : other);

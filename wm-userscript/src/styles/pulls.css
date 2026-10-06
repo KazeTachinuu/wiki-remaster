@@ -127,15 +127,22 @@
 .reveal-all-head{text-align:center;display:flex;flex-direction:column;gap:4px}
 .reveal-all-head h2{font-family:var(--display);font-weight:700;font-size:clamp(22px,2.4vw,28px);letter-spacing:-.02em}
 .reveal-all-head .sub{color:var(--fg-soft);font-size:14px}
-/* "Tout révéler": every card of the pack on one screen, in rows of 5 at most (a 15-card Pro pack
-   is 3 rows): each card as large as both the width and the height left after the heading and
-   button (~380px) allow; a narrow screen wraps them at a comfortable size. */
-.reveal-grid{--rg-w:clamp(110px,min(calc((100% - (var(--cols) - 1) * var(--s5)) / var(--cols)),calc((100dvh - 380px - (var(--rows) - 1) * var(--s5)) / var(--rows) * .714)),440px);
-  display:grid;grid-template-columns:repeat(auto-fit,var(--rg-w));gap:var(--s5);justify-content:center;width:100%}
+/* "Tout révéler": every card of the pack in rows of 5 at most (a 15-card Pro pack is 3 rows):
+   each card as large as both the width and the height left after the heading and button
+   (~380px) allow, and 170px at the least, so a big pack scrolls rather than shrinks; a narrow
+   screen wraps them at a comfortable size. */
+.reveal-grid{--rg-w:clamp(170px,min(calc((100% - (var(--cols) - 1) * var(--s5)) / var(--cols)),calc((100dvh - 380px - (var(--rows) - 1) * var(--s5)) / var(--rows) * .714)),440px);
+  display:grid;grid-template-columns:repeat(auto-fit,var(--rg-w));gap:var(--s5);justify-content:center;width:100%;
+  /* never more than --cols a row, and never a card too small to read: a big pack scrolls a little */
+  max-width:calc(var(--cols) * var(--rg-w) + (var(--cols) - 1) * var(--s5));margin-inline:auto}
 /* a phone: fitting every card on one screen makes them unreadable, so two columns fill the
    width and the page scrolls */
 @media (max-width:560px){.reveal-grid{--rg-w:calc((100% - var(--s3)) / 2);gap:var(--s3)}}
-.rg-card{position:relative;animation:rgin .5s both cubic-bezier(.2,.7,.3,1)}
+/* the cards already seen are there at once; the others are dealt in turn (--d): each flips in
+   and its glow blooms as it lands, in time with its sound */
+.rg-card{position:relative;perspective:900px}
+.rg-card.dealt .card-btn{animation:rgflip .5s var(--d) both cubic-bezier(.2,.8,.3,1)}
+.rg-card.dealt .rg-aura{animation:rgbloom .9s var(--d) both ease-out}
 .rg-aura{position:absolute;inset:-10% -8%;border-radius:50%;z-index:0;pointer-events:none;
   background:radial-gradient(closest-side,color-mix(in oklab,var(--rc) 55%,transparent),transparent 72%);filter:blur(26px);opacity:.3}
 .rg-aura[data-r="C"]{opacity:.16}
@@ -145,4 +152,6 @@
 .rg-aura[data-r="UR"]{opacity:.6}
 .rg-aura[data-r="L"]{opacity:.72}
 .rg-card .card-btn{position:relative;z-index:1}
-@keyframes rgin{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes rgflip{from{opacity:0;transform:translateY(18px) rotateY(-70deg) scale(.92)}60%{opacity:1}to{opacity:1;transform:none}}
+@keyframes rgbloom{0%{opacity:0;scale:.6}45%{opacity:var(--bloom,.9);scale:1.08}}
+@media (prefers-reduced-motion:reduce){.rg-card.dealt .card-btn,.rg-card.dealt .rg-aura{animation:none}}

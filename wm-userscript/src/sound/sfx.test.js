@@ -1,19 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { rarest, sounded, isTabSwitch } from "./sfx.js";
+import { sounded, isTabSwitch } from "./sfx.js";
 
 const rec = () => { const heard = []; const f = (n) => heard.push(n); f.heard = heard; return f; };
-
-describe("rarest", () => {
-  it("finds the rarest rarity of a haul", () => {
-    expect(rarest([{ rarity: "C" }, { rarity: "SR" }, { rarity: "R" }])).toBe("SR");
-    expect(rarest([{ rarity: "PC" }, { rarity: "L" }, { rarity: "UR" }])).toBe("L");
-    expect(rarest([{ rarity: "C" }])).toBe("C");
-  });
-  it("is null for nothing", () => {
-    expect(rarest([])).toBe(null);
-    expect(rarest(undefined)).toBe(null);
-  });
-});
 
 describe("sounded", () => {
   it("plays success and passes the result through", async () => {

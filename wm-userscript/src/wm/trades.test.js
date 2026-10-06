@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { nTrade, nMessage } from "./schema.js";
-import { whoAmI, chatMe, tradeTabs, sideValue, verdict, balanceLabel, verdictTitle, chainOf, timeline, otherOf, NO_ME, offerSummary, dealLine, balanceBadge, stepIn, afterLeaving } from "./trades.js";
+import { whoAmI, chatMe, tradeTabs, sideValue, verdict, balanceLabel, verdictTitle, chainOf, roundsOf, timeline, otherOf, NO_ME, offerSummary, dealLine, balanceBadge, stepIn, afterLeaving } from "./trades.js";
 
 const card = (id, rarity = "C") => ({ id, rarity, atk: 1, def: 2, wikipedia_title: "T" + id });
 const raw = (o) => ({
@@ -115,6 +115,24 @@ describe("sideValue / verdict", () => {
     // one unpriced Légendaire given for 5 WikiBidous is not "advantage"
     expect(verdict({ total: 0, unknown: 1 }, { total: 5, unknown: 0 })).toEqual({ kind: "unknown", diff: 5, unknown: 1 });
     expect(verdict({ total: 50, unknown: 0 }, { total: 0, unknown: 2 })).toEqual({ kind: "unknown", diff: -50, unknown: 2 });
+  });
+});
+
+describe("roundsOf", () => {
+  it("counts each negotiation's offers, for every trade of it", () => {
+    const all = [{ id: "a" }, { id: "b", parentId: "a" }, { id: "c", parentId: "b" }, { id: "x" }];
+    const r = roundsOf(all);
+    expect([r.get("a"), r.get("c"), r.get("x")]).toEqual([3, 3, 1]);
+  });
+  it("stays fast for a power user: 2000 trades, one of 500 offers", () => {
+    const all = Array.from({ length: 1500 }, (_, i) => ({ id: "t" + i }));
+    for (let i = 0; i < 500; i++) all.push({ id: "c" + i, parentId: i ? "c" + (i - 1) : undefined });
+    const t0 = performance.now();
+    const r = roundsOf(all);
+    const chain = chainOf(all.at(-1), all);
+    expect(performance.now() - t0).toBeLessThan(50);
+    expect(r.get("c499")).toBe(500);
+    expect(chain).toHaveLength(500);
   });
 });
 

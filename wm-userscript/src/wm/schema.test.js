@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { nNotification, plainText, newInPack, normSearch, nCard, nAuction, notifHref, countsFrom, validateCards, httpUrl } from "./schema.js";
+import { nNotification, plainText, newInPack, pickCopy, normSearch, nCard, nAuction, notifHref, validateCards, httpUrl } from "./schema.js";
 
 describe("normSearch", () => {
   it("strips accents, lowercases, and collapses whitespace", () => {
@@ -77,13 +77,6 @@ describe("notifHref", () => {
   });
 });
 
-describe("countsFrom", () => {
-  it("tallies items by rarity code", () => {
-    const items = [{ card: { rarity: "C" } }, { card: { rarity: "C" } }, { card: { rarity: "L" } }];
-    expect(countsFrom(items)).toEqual({ C: 2, PC: 0, R: 0, SR: 0, UR: 0, L: 1 });
-  });
-});
-
 describe("validateCards", () => {
   it("passes healthy and empty batches", () => {
     expect(validateCards("t", [])).toBe(true);
@@ -92,6 +85,19 @@ describe("validateCards", () => {
   it("flags a batch where most rows failed to normalize", () => {
     const broken = [{ id: null, rarity: undefined }, { id: null, rarity: undefined }, { id: 3, rarity: "C" }];
     expect(validateCards("t", broken)).toBe(false);
+  });
+});
+
+describe("pickCopy", () => {
+  const row = (id, cardId, is_shiny, obtained_at) => ({ id, card: { id: cardId }, is_shiny, obtained_at });
+  const rows = [row("old", "c1", false, "2026-09-01"), row("new", "c1", false, "2026-10-06"), row("shiny", "c1", true, "2026-10-01"), row("x", "c2", false, "2026-10-06")];
+  it("takes the same finish, then the newest copy", () => {
+    expect(pickCopy(rows, { id: "c1", is_shiny: false }).id).toBe("new");
+    expect(pickCopy(rows, { id: "c1", is_shiny: true }).id).toBe("shiny");
+  });
+  it("is null when no copy is mine", () => {
+    expect(pickCopy(rows, { id: "c9" })).toBe(null);
+    expect(pickCopy(null, { id: "c1" })).toBe(null);
   });
 });
 

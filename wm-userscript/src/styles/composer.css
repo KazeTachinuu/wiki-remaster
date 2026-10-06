@@ -141,7 +141,11 @@
   .offer-actions{padding-top:var(--s2)}
   .offer-actions .btn{padding:10px 14px}
 }
-.friend-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:var(--s3)}
+.friend-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:var(--s3);max-height:min(60dvh,560px);overflow-y:auto;overscroll-behavior:contain;padding:2px}
+/* the friend picker reads top down (title, search, friends); on a tall screen the list fills it */
+.modal.composer.pick-friend{justify-content:flex-start}
+.pick-friend > *{flex:none}
+.pick-friend .friend-list{flex:0 1 auto;min-height:0}
 .friend-list .empty,.friend-list .loading-more{grid-column:1/-1;min-height:120px}
 .friend{display:flex;flex-direction:column;align-items:center;gap:var(--s2);padding:var(--s4) var(--s2);border-radius:var(--radius);border:1px solid var(--line);background:var(--elev);color:var(--fg);font:inherit;cursor:pointer;transition:border-color .15s,background .15s}
 .friend b{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:13.5px}
@@ -206,3 +210,4 @@
 }
 .lbl-short{display:none}
 @media(max-width:560px){.lbl-short{display:inline}}
+@media(max-width:560px){.pick-friend .friend-list{flex:1 1 auto;max-height:none}}

@@ -3,9 +3,8 @@
  * Every call here is verified against the live site (docs/API_REFERENCE.md).
  */
 
-import { pageLane } from "../lane.js";
-import { api, getProfile, patchProfile, bumpEpoch, getUserId, refreshProfile } from "../api.js";
-import { newInPack, nCard, nAuction, nBid, nNotification, nTrade, nMessage, normSearch, countsFrom, validateCards } from "../schema.js";
+import { api, supabase, getProfile, patchProfile, bumpEpoch, getUserId, refreshProfile } from "../api.js";
+import { newInPack, pickCopy, nCard, nAuction, nBid, nNotification, nTrade, nMessage, validateCards } from "../schema.js";
 import { whoAmI, chatMe, otherOf, needMe } from "../trades.js";
 
 const PAGE = 50; // server page size; the market rejects limit > 50
@@ -16,11 +15,20 @@ const REGEN_MS = { base: 10 * 60e3, pro: 3 * 60e3 };
 let lastBalance = null;
 const SAME_CARD_MS = 60e3;
 const sameCards = new Map(); // card id -> { at, list: Promise }
+const marketMemo = new Map(); // card id -> { at, stats: Promise }: a card reopened within SAME_CARD_MS
 
 // Trade writes carry the viewer's time zone, like the native client.
 const tz = () => ({ "x-wiki-calendar-tz": Intl.DateTimeFormat().resolvedOptions().timeZone });
 const ACTION_LABEL = { accept: "Acceptation de l'échange", decline: "Refus de l'échange", cancel: "Annulation de l'offre" };
 
+
+// The orders the game's server knows for a collection (mine or a friend's), as its own client asks
+// them (checked by test:prod); rarity is the default and needs no parameter.
+// a tag as the game stores it ({ id, name, color }), from a row of `tags` or a card's `tags`
+// (sometimes wrapped as { tag: {...} })
+const nTag = (t) => { const x = t?.tag ?? t; return x?.id ? { id: x.id, name: x.name ?? "", color: x.color ?? null } : null; };
+
+const COLLECTION_SORT = { rarity: null, name: "name", recent: "added", starred: "starred" };
 
 const qs = (params) =>
   new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== "" && v !== false)).toString();
@@ -35,7 +43,7 @@ function mapCollection(rows) {
       is_shiny: !!it.is_shiny,
       starred: !!it.starred,
       obtained_at: it.obtained_at || null,
-      _s: normSearch(card.title + " " + card.category),
+      tags: (it.tags || []).map(nTag).filter(Boolean),
     };
   });
 }
@@ -118,42 +126,16 @@ export const RealData = {
   },
 
   /**
-   * Every page of the collection (50 per page, `limit` ignored). Page 0 streams first via
-   * onPartial. Pages are merged by id: the server's rarity order has no tiebreak, so a card
-   * gained mid-load shifts rows and the same row can land on two pages. `pending` lists my
-   * copies already locked in a pending trade (an array: the result is cached as JSON).
+   * One page of my collection, searched (`q`: titles and descriptions), filtered (`rarity`) and
+   * ordered (`sort`: see COLLECTION_SORT) by the server, 50 a page; `tag`: a tag id, or "none" for
+   * the copies without one. Page 0 also carries the match
+   * count and the per-rarity counts of the search (`stats=1`), and my copies locked in a pending
+   * trade.
    */
-  async collection({ onPartial } = {}) {
-    const first = await api("/api/my-collection?sort=rarity&page=0&stats=1");
-    const pending = first.pendingTradeCardIds || [];
-    const rows = new Map();
-    const add = (list) => { for (const it of mapCollection(list || [])) rows.set(it.id, it); };
-    add(first.collection);
-    const items = () => [...rows.values()];
-    // every copy is its own row (count is always 1, checked by test:prod): `total` counts copies,
-    // distinct cards are counted from the rows
-    const copies = first.total ?? rows.size;
-    const stats = (loading) => ({
-      copies,
-      unique: new Set(items().map((it) => it.card.id)).size,
-      counts: first.rarityCounts || countsFrom(items()),
-      loading,
-    });
-    const pages = Math.ceil(copies / PAGE);
-    if (pages > 1) {
-      onPartial?.({ items: items(), stats: stats(true) });
-      await Promise.all(
-        Array.from({ length: pages - 1 }, (_, i) =>
-          // the remaining pages have their own "Mise à jour" pill (no global loader), paced by the
-          // page lane rather than sent all at once
-          pageLane.run(() => api(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`, { quiet: true })).then((d) => {
-            add(d.collection);
-            onPartial?.({ items: items(), stats: stats(true) });
-          })
-        )
-      );
-    }
-    return { items: items(), stats: stats(false), pending };
+  async myCards({ page = 0, q, rarity, sort, tag } = {}) {
+    const d = await api(`/api/my-collection?${qs({ page, q, rarity, sort: COLLECTION_SORT[sort], tag_id: tag && tag !== "none" ? tag : null, untagged: tag === "none" ? 1 : null, stats: page ? null : 1 })}`, { quiet: page > 0 });
+    const rows = d.collection || [];
+    return { items: mapCollection(rows), hasMore: rows.length === PAGE, total: d.total ?? null, counts: d.rarityCounts || {}, pending: d.pendingTradeCardIds || [] };
   },
 
   /** The full catalog (~2.77M cards): always server-paged and searched. Pages are 0-based. */
@@ -198,8 +180,8 @@ export const RealData = {
   },
 
   /** My market: listings, active bids, wins, and finished history, in one call. */
-  async myMarket() {
-    const d = await api("/api/marketplace?page=1&limit=1&mine=1");
+  async myMarket({ quiet } = {}) {
+    const d = await api("/api/marketplace?page=1&limit=1&mine=1", { quiet });
     // selling and history are my own listings by definition, even before the user id is known
     const list = (k, mine) => (d[k] || []).map((a) => ({ ...nAuction(a, this.userId), ...(mine && { mine: true }) }));
     return { selling: list("selling", true), bidding: list("bidding"), won: list("won"), history: list("history", true), max: d.maxConcurrentAuctions ?? 5 };
@@ -260,14 +242,50 @@ export const RealData = {
 
   /**
    * A friend's collection page (50 per page), filtered and sorted by the server: `q` searches the
-   * titles, `rarity` keeps one tier, `sort` is "name" (A to Z) or anything else for the rarity
-   * order. Also the copies already locked in a pending trade.
+   * titles, `rarity` keeps one tier, `sort` as COLLECTION_SORT. Also the copies already locked in
+   * a pending trade.
    */
   async profileCollection(username, { page = 0, q, rarity, sort } = {}) {
-    const d = await api(`/api/profile/${encodeURIComponent(username)}/collection?${qs({ page, q, rarity, sort: sort === "name" ? "name" : null })}`);
+    const d = await api(`/api/profile/${encodeURIComponent(username)}/collection?${qs({ page, q, rarity, sort: COLLECTION_SORT[sort] })}`);
     const rows = d.collection || [];
     return { items: mapCollection(rows), pending: new Set(d.pendingTradeCardIds || []), hasMore: rows.length === PAGE };
   },
+
+  /**
+   * My copy of a card, found by the server's search of my collection (by its title, one page): a
+   * card from a pack that sent no copies (the Pro and special ones) can then be sold or discarded.
+   */
+  async myCopy(card) {
+    return pickCopy((await this.myCards({ q: card.title })).items, card);
+  },
+
+  // --- favourites and tags: written to the game's database as its own client does ---------------
+
+  /** Mark one copy as a favourite or not (the game's collection page does the same). */
+  setStarred: (userCardId, starred) => supabase(`user_cards?id=eq.${encodeURIComponent(userCardId)}`, { method: "PATCH", body: { starred }, label: starred ? "Ajout aux favoris" : "Retrait des favoris" }),
+
+  /** My tags, by name: [{ id, name, color }]. */
+  async myTags() {
+    const me = needMe(this.userId);
+    return ((await supabase(`tags?select=*&user_id=eq.${encodeURIComponent(me)}&order=name.asc`)) || []).map(nTag).filter(Boolean);
+  },
+
+  /** A new tag (or mine already named so: names are unique per player). */
+  async createTag(name, color) {
+    const me = needMe(this.userId);
+    try {
+      const [row] = await supabase("tags", { method: "POST", body: { user_id: me, name, color }, label: "Nouvelle étiquette" });
+      return nTag(row);
+    } catch (e) {
+      if (e.code !== "23505") throw e;
+      const [row] = await supabase(`tags?select=*&user_id=eq.${encodeURIComponent(me)}&name=eq.${encodeURIComponent(name)}`);
+      return nTag(row);
+    }
+  },
+
+  /** Put a tag on one copy, or take it off. */
+  tagCard: (userCardId, tagId) => supabase("user_card_tags", { method: "POST", body: { user_card_id: userCardId, tag_id: tagId }, label: "Étiquette" }),
+  untagCard: (userCardId, tagId) => supabase(`user_card_tags?user_card_id=eq.${encodeURIComponent(userCardId)}&tag_id=eq.${encodeURIComponent(tagId)}`, { method: "DELETE", label: "Étiquette" }),
 
   humanCheck: (token) => api("/api/human-check", { method: "POST", body: { token }, label: "Vérification" }),
 
@@ -294,8 +312,17 @@ export const RealData = {
   /**
    * The card detail's market, by rarity (see wm/market.js): every rarity's average (the summary,
    * any account), and for Pro accounts every sale with the rarity it sold at (a second request).
+   * A card reopened within a minute reuses the answer.
    */
-  async marketStats(card) {
+  marketStats(card) {
+    const hit = marketMemo.get(card.id);
+    if (hit && Date.now() - hit.at < SAME_CARD_MS) return hit.stats;
+    const stats = this.fetchMarketStats(card);
+    marketMemo.set(card.id, { at: Date.now(), stats });
+    stats.catch(() => marketMemo.delete(card.id)); // a failure is asked again next time
+    return stats;
+  },
+  async fetchMarketStats(card) {
     const d = await api(`/api/marketplace/cards/${card.id}/sales?scope=summary`, { quiet: true });
     const averages = Object.fromEntries(Object.entries(d.summary || {}).map(([r, v]) => [r, v?.average ?? null]));
     if (!d.isPro) return { averages, sales: [], isPro: false };

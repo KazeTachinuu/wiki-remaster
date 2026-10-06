@@ -33,8 +33,7 @@ async function step(label, fn, arg) {
 
 const resume = process.argv.find((a) => a.startsWith("--resume="))?.slice(9).split(",");
 const listing = resume ? { ok: true, v: { auction_id: resume[0], title: resume[1] } } : await step("bulk-discard 2 commons, then list a common at 40 for 1 h", async () => {
-  const { items } = await window.__wm.data.collection();
-  const commons = items.filter((i) => i.card.rarity === "C");
+  const commons = (await window.__wm.data.myCards({ rarity: "C" })).items;
   const bal0 = (await window.__wm.data.profile()).currency;
   const bulk = await window.__wm.data.bulkDiscard(commons.slice(0, 2).map((i) => i.id));
   const bal1 = (await window.__wm.data.profile()).currency;
@@ -63,7 +62,7 @@ await step("reprice 40 -> 30 past half time", async (id) => {
 if (process.argv.includes("--cancel")) {
   await step("cancel after the reprice", async ([id, title]) => {
     const r = await window.__wm.data.cancelAuction(id);
-    const back = (await window.__wm.data.collection()).items.some((i) => i.card.title === title);
+    const back = (await window.__wm.data.myCards({ q: title })).items.some((i) => i.card.title === title);
     return { ...r, cardBack: back };
   }, [auction_id, title]);
   process.exit(0);
@@ -73,7 +72,7 @@ await until(61.5);
 await step("the ended auction is settled (by the server or by us)", async ([id, title]) => {
   const r = await window.__wm.data.settle(id).catch((e) => ({ settleError: e.message }));
   const a = await window.__wm.data.auction(id);
-  const back = (await window.__wm.data.collection()).items.some((i) => i.card.title === title);
+  const back = (await window.__wm.data.myCards({ q: title })).items.some((i) => i.card.title === title);
   return { settle: r, status: a.status, finalPrice: a.finalPrice, winner: a.winner, cardBack: back };
 }, [auction_id, title]);
 process.exit(0);

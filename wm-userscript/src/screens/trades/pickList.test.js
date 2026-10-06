@@ -20,12 +20,12 @@ describe("pickList", () => {
   it("sorts by value, cards without a value last", () => {
     expect(ids(pickList(items, { sort: "value", values, isLocked: none }))).toEqual([1, 4, 2, 3]);
   });
+  it("keeps the newest copies first", () => {
+    const dated = items.map((it, k) => ({ ...it, obtained_at: `2026-10-0${k + 1}` }));
+    expect(ids(pickList(dated, { sort: "recent", values, isLocked: none }))).toEqual([4, 3, 2, 1]);
+  });
   it("sorts by name, accents ignored", () => {
     expect(ids(pickList(items, { sort: "name", values, isLocked: none }))).toEqual([3, 4, 2, 1]);
-  });
-  it("filters by rarity and by search, accents and case ignored", () => {
-    expect(ids(pickList(items, { rarity: "L", sort: "name", values, isLocked: none }))).toEqual([4, 2]);
-    expect(ids(pickList(items, { q: "ZEBRE", sort: "name", values, isLocked: none }))).toEqual([1]);
   });
   it("puts locked cards at the end, sorted among themselves", () => {
     const isLocked = (it) => it.id === 4 || it.id === 1;

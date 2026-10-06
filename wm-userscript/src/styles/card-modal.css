@@ -37,37 +37,8 @@
 .mk-sell b{color:var(--fg)}
 .mk-sell span{flex:1 1 200px}
 .mk-sell .btn{padding-block:8px;margin-left:auto}
-.mk-plot{position:relative;height:104px;margin-top:var(--s4)}
-.mk-plot svg{position:absolute;inset:0;width:100%;height:100%;display:block}
 /* the average as a dashed rule across the plot */
-.mk-avgline{position:absolute;left:0;right:0;border-top:1px dashed color-mix(in oklab,var(--r-l) 55%,transparent);pointer-events:none}
-.mk-avgline span{position:absolute;left:0;bottom:3px;padding:0 4px;border-radius:4px;background:var(--elev);font-size:10px;font-weight:600;color:color-mix(in oklab,var(--r-l) 80%,transparent)}
 /* each sale: a full-height slice to hover or focus, its dot drawn at the price */
-.mk-slice{position:absolute;top:0;bottom:0;translate:-50% 0;padding:0;border:none;background:none;cursor:crosshair}
-.mk-slice::before{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:1px solid var(--line2);opacity:0;transition:opacity .12s}
-.mk-slice::after{content:"";position:absolute;left:50%;top:var(--y);width:7px;height:7px;translate:-50% -50%;border-radius:50%;background:var(--surface);border:2px solid var(--accent);transition:scale .12s}
-.mk-slice.on::before{opacity:1}
-.mk-slice.on::after{scale:1.4;background:var(--accent)}
-#wm-app-root .mk-slice:focus-visible{outline:none}
-#wm-app-root .mk-slice:focus-visible::after{box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 40%,transparent)}
-.mk-tip{position:absolute;translate:-50% calc(-100% - 12px);display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 10px;border-radius:9px;
-  background:var(--elev2);border:1px solid var(--line2);box-shadow:0 10px 24px -12px #000;font-size:11px;color:var(--fg-soft);white-space:nowrap;pointer-events:none;z-index:1}
-.mk-tip b{display:inline-flex;align-items:center;gap:5px;font:700 14px/1.2 var(--display);color:var(--r-l);font-variant-numeric:tabular-nums}
-.mk-tip.flip{translate:calc(-100% + 16px) calc(-100% - 12px)}
-.mk-tip.flop{translate:-16px calc(-100% - 12px)}
-/* the full sale list, folded under its count */
-.mk-history{border-top:1px solid var(--line);padding-top:var(--s3)}
-.mk-history summary{list-style:none;display:flex;align-items:center;gap:var(--s2);cursor:pointer;font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint)}
-.mk-history summary::-webkit-details-marker{display:none}
-.mk-history summary span{letter-spacing:0;text-transform:none;font-weight:500;color:var(--fg-faint)}
-.mk-history summary::after{content:"";width:6px;height:6px;margin-left:auto;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;rotate:45deg;translate:0 -2px;transition:rotate .15s}
-.mk-history[open] summary::after{rotate:225deg;translate:0 2px}
-.mk-history summary:hover{color:var(--fg-soft)}
-.mk-list{list-style:none;margin:var(--s3) 0 0;padding:0}
-.mk-list li{display:flex;justify-content:space-between;align-items:center;padding:7px 2px;font-size:13px;color:var(--fg-soft);font-variant-numeric:tabular-nums}
-.mk-list li + li{border-top:1px solid var(--line)}
-.mk-list b{display:inline-flex;align-items:center;gap:6px;color:var(--r-l)}
-.mk-x{display:flex;justify-content:space-between;font-size:11px;color:var(--fg-faint);margin-top:var(--s1)}
 /* live listings sit flat in the modal, like the sales above them, not a box in a box */
 .modal .cmp{background:none;border:none;padding:0}
 .modal .cmp-head{margin-bottom:var(--s2);flex-direction:column;align-items:flex-start;gap:2px}
@@ -83,3 +54,32 @@
 .modal-wiki:hover{text-decoration:underline}
 .actions{border-top:1px solid var(--line);padding-top:var(--s4)}
 .modal-credit{font-size:11px;color:var(--fg-faint)}
+
+/* the chart's title row, with the way into the full analysis */
+.mk-price-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s3)}
+.mk-price-head .mk-h{margin:0}
+.mk-price-head .link-btn,.mk-all-go{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600;color:var(--accent)}
+.mk-price-head .link-btn svg,.mk-all-go svg{width:12px;height:12px}
+/* every sale, in the full analysis */
+.mk-all{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);width:100%;padding:12px var(--s4);border-radius:12px;border:1px solid var(--line);background:var(--elev);color:var(--fg-soft);font:500 13px var(--body);cursor:pointer;transition:border-color .15s,background .15s}
+.mk-all:hover{border-color:var(--line2);background:var(--elev2)}
+.mk-all b{color:var(--fg);font-variant-numeric:tabular-nums}
+/* the copy's favourite star, in its card's lower corner (the upper one is the window's close button
+   on a phone); the card column is sticky, so already positioned */
+.modal-star{position:absolute;z-index:3;bottom:10px;right:10px;width:38px;height:38px;display:grid;place-items:center;border-radius:12px;border:1px solid color-mix(in oklab,var(--fg) 18%,transparent);
+  background:color-mix(in oklab,var(--bg) 55%,transparent);backdrop-filter:blur(6px);color:var(--fg-soft);cursor:pointer;transition:color .15s,transform .15s,background .15s}
+.modal-star svg{width:20px;height:20px}
+.modal-star:hover{color:var(--fg);transform:scale(1.06)}
+.modal-star.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 50%,transparent)}
+/* its tags: chips in the tag's colour, an input to add one (suggestions from the player's tags) */
+.modal-tags{display:flex;flex-direction:column;gap:6px}
+.modal-tags .mk-h{margin:0}
+.tag-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.tag-chip{--tc:var(--accent);display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 10px;border-radius:999px;font:600 12.5px var(--body);
+  color:color-mix(in oklab,var(--tc) 70%,var(--fg));background:color-mix(in oklab,var(--tc) 16%,transparent);border:1px solid color-mix(in oklab,var(--tc) 40%,transparent)}
+.tag-chip button{display:grid;place-items:center;width:18px;height:18px;padding:0;border:none;border-radius:50%;background:none;color:inherit;cursor:pointer;opacity:.7}
+.tag-chip button:hover{opacity:1;background:color-mix(in oklab,var(--tc) 25%,transparent)}
+.tag-chip svg{width:10px;height:10px}
+.tag-add{flex:1 1 140px;min-width:120px}
+.tag-add input{width:100%;padding:6px 10px;border-radius:999px;border:1px dashed var(--line2);background:none;color:var(--fg);font:500 12.5px var(--body)}
+.tag-add input:focus{outline:none;border-style:solid;border-color:var(--accent)}

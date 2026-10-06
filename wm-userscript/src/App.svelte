@@ -16,11 +16,16 @@
   import { packTimer } from "./lib/packTimer.svelte.js";
   import { tabTicks } from "./sound/sfx.js";
   import { scrollFade } from "./lib/scrollFade.js";
+  import { availableUpdate, isUserscript } from "./wm/update.js";
 
   // Rebuilt screens. Order matters for matching: "/global-collection" contains "collection".
   // the running version (vite.config.js) and where it comes from
   const VERSION = __APP_VERSION__;
   const REPO = "https://github.com/KazeTachinuu/wiki-remaster";
+  // a newer version published (the Tampermonkey install only, see wm/update.js): the version label
+  // turns into a nudge that opens it, Tampermonkey then offers "Update"
+  let update = $state(null);
+  if (isUserscript()) availableUpdate(VERSION, { metaUrl: __META_URL__ }).then((v) => (update = v));
 
   const VIEWS = [
     { id: "pulls", path: "/pulls", label: "Ouvrir des paquets", short: "Paquets", icon: "pulls" },
@@ -220,7 +225,11 @@
       {#if data.canReset}<button class="ghost" onclick={reset}>Réinitialiser</button>{/if}
       <button class="foot-link" onclick={() => (help = true)} title="Raccourcis clavier"><span class="kbd">?</span><span class="foot-txt">Raccourcis clavier</span></button>
       <div class="hintline">{data.isReal ? "Connecté à WikiMasters" : "Serveur de test local"}
-        <a class="app-version" href={REPO} target="_blank" rel="noopener noreferrer" title="Wiki Remaster {VERSION}, le code source">v{VERSION}</a></div>
+        {#if update}
+          <a class="app-update" href={__DOWNLOAD_URL__} target="_blank" rel="noopener noreferrer" title="Wiki Remaster {update} est disponible (vous avez la {VERSION}) : Tampermonkey propose la mise à jour"><span class="upd-dot"></span>Mise à jour</a>
+        {:else}
+          <a class="app-version" href={REPO} target="_blank" rel="noopener noreferrer" title="Wiki Remaster {VERSION}, le code source">v{VERSION}</a>
+        {/if}</div>
     </div>
   </aside>
 
@@ -238,7 +247,7 @@
           aria-label={settings.hideStats ? "Afficher l'ATK et la DEF" : "Masquer l'ATK et la DEF"} title={settings.hideStats ? "Afficher l'ATK et la DEF" : "Masquer l'ATK et la DEF"}><span>ATK</span></button>
         <SoundControl />
         <!-- phones and tablets: sound, ATK/DEF and the original site's pages, in one sheet -->
-        <button class="bell menu-btn" aria-label="Menu" aria-expanded={menuOpen} onclick={() => (menuOpen = true)}><Icon name="menu" width={1.8} /></button>
+        <button class="bell menu-btn" aria-label={update ? "Menu, mise à jour disponible" : "Menu"} aria-expanded={menuOpen} onclick={() => (menuOpen = true)}><Icon name="menu" width={1.8} />{#if update}<span class="upd-dot on-icon"></span>{/if}</button>
         <div class="notif">
           <button class="bell" class:has={unread.length > 0} aria-label="Notifications"
             onclick={() => { notifOpen = !notifOpen; if (notifOpen) loadNotifs(); }}>
@@ -311,6 +320,9 @@
           {/each}
         </div>
       </section>
+      {#if update}
+        <a class="btn primary sheet-update" href={__DOWNLOAD_URL__} target="_blank" rel="noopener noreferrer"><span class="upd-dot"></span>Mettre à jour vers la {update}</a>
+      {/if}
       <button class="btn sheet-reset" onclick={() => useOriginalSite()}>Revenir au site original</button>
       {#if data.canReset}<button class="btn sheet-reset" onclick={() => { menuOpen = false; reset(); }}>Réinitialiser (test)</button>{/if}
       <a class="app-version sheet-version" href={REPO} target="_blank" rel="noopener noreferrer">Wiki Remaster v{VERSION}</a>

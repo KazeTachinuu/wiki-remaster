@@ -13,12 +13,12 @@
   import TradeVerdict from "./TradeVerdict.svelte";
   import { anchorCentered } from "../../lib/anchor.js";
   import { withHumanCheck } from "../../lib/humanCheck.js";
-  import { PagedList } from "../../lib/paged.svelte.js";
-  import { NO_PAGES, addPage, nextPage } from "./paging.js";
+  import { PageStream } from "../../lib/paged.svelte.js";
   import { valueMap } from "../../lib/lazyValues.js";
   import { nf } from "../../lib/format.js";
   import { scrollFade } from "../../lib/scrollFade.js";
-  import { data, SIDE, pageLane, loadCollection, sideValue, verdict, balanceLabel, offerSummary } from "../../wm/index.js";
+  import SearchBox from "../../components/SearchBox.svelte";
+  import { data, normSearch, SIDE, pageLane, myCardsPage, sideValue, verdict, balanceLabel, offerSummary } from "../../wm/index.js";
   // balance: my WikiBidous (null while unknown), the coins I add cannot exceed it
   // onsent(ok): the offer went through (true), or the server answered with an error (false: it may exist anyway)
   let { counter = null, balance = null, onclose, onsent } = $props();
@@ -33,30 +33,23 @@
     data.friends().then((f) => (friends = f), (e) => (friendsError = e.message || "Impossible de charger vos amis."));
   }
   $effect(() => { if (!friend) untrack(loadFriends); });
+  // many friends: by name, and a search once they no longer fit at a glance
+  const FRIEND_SEARCH_FROM = 8;
+  let who = $state("");
+  const pickable = $derived((friends ?? []).filter((f) => !who.trim() || normSearch(f.username).includes(normSearch(who))).sort((a, b) => a.username.localeCompare(b.username, "fr", { sensitivity: "base" })));
 
-  let mine = $state([]);
-  let myPending = $state([]); // my copies already locked in a pending trade
-  let mineLoading = $state(true);
-  let mineError = $state(false); // a failed load is not an empty collection
-  const setMine = (d) => { mine = d.items; myPending = d.pending ?? []; mineLoading = false; };
-  function loadMine() {
-    mineLoading = true; mineError = false;
-    // a cached copy already shown stays usable when the refresh fails
-    loadCollection({ onCached: setMine }).then(setMine, () => { mineLoading = false; mineError = !mine.length; });
+  // Each side a page at a time as its grid scrolls, searched, filtered and sorted by the server
+  // (the picker's onquery), whatever the size of the collection. The first page answers the
+  // player; the next ones (scrolling, the value sort) go through the page lane.
+  function side(fetchPage) {
+    let query = {};
+    const stream = new PageStream((page) => (page ? pageLane.run(() => fetchPage(page, query)) : fetchPage(page, query)));
+    return { stream, ask: (q) => { query = q; stream.reset(); } };
   }
-  loadMine();
-
-  // their collection, a page at a time ("Charger plus"), searched, filtered and sorted by the
-  // server (the picker's onquery); a failed page is asked again, not skipped
-  let theirQuery = {};
-  // the first page answers the user; the next ones (scrolling, the value sort) go through the page lane
-  const theirPage = (page) => data.profileCollection(friend.username, { page, ...theirQuery });
-  const theirs = new PagedList((page) => (page ? pageLane.run(() => theirPage(page)) : theirPage(page)));
-  const queryTheirs = (query) => { theirQuery = query; theirs.go(0); };
-  const theirsFirst = $derived(theirs.loading && theirs.page === 0); // a new query, or the first load
-  let theirPages = $state(NO_PAGES);
-  $effect(() => { if (friend) untrack(() => theirs.go(0)); });
-  $effect(() => { const d = theirs.data; if (d) untrack(() => (theirPages = addPage(theirPages, theirs.loaded, d))); });
+  const mine = side((page, q) => myCardsPage({ page, ...q }));
+  const theirs = side((page, q) => data.profileCollection(friend.username, { page, ...q }));
+  mine.stream.reset();
+  $effect(() => { if (friend) untrack(() => theirs.stream.reset()); });
 
   const asItem = (row) => ({ userCardId: row.id, card: row.card, is_shiny: row.is_shiny });
   let give = $derived(new Map((counter?.give ?? []).map((it) => [it.userCardId, it])));
@@ -71,8 +64,8 @@
   // the countered offer locks its own copies until it is answered: they stay pickable here
   const countered = $derived(new Set([...(counter?.give ?? []), ...(counter?.get ?? [])].map((it) => it.userCardId)));
   const lockedBut = (ids) => new Set([...ids].filter((id) => !countered.has(id)));
-  const myLocked = $derived(lockedBut(myPending));
-  const theirLocked = $derived(lockedBut(theirs.data?.pending ?? []));
+  const myLocked = $derived(lockedBut(mine.stream.meta?.pending ?? []));
+  const theirLocked = $derived(lockedBut(theirs.stream.meta?.pending ?? []));
   const toggle = (map, row) => { const m = new Map(map); m.has(row.id) ? m.delete(row.id) : m.set(row.id, asItem(row)); return m; };
   const without = (map, it) => { const m = new Map(map); m.delete(it.userCardId); return m; };
   const coins = (n) => Math.max(0, Math.floor(+n || 0));
@@ -121,10 +114,12 @@
     </header>
     {#if !friend}
       <p class="composer-sub">Avec qui voulez-vous échanger ?</p>
+      {#if (friends?.length ?? 0) > FRIEND_SEARCH_FROM}<SearchBox bind:value={who} placeholder="Chercher un ami..." />{/if}
       <div class="friend-list">
-        {#each friends ?? [] as f (f.id)}<button class="friend" onclick={() => (friend = f)}><Avatar user={f} size={52} /><b>{f.username}</b></button>{/each}
+        {#each pickable as f (f.id)}<button class="friend" onclick={() => (friend = f)}><Avatar user={f} size={52} /><b>{f.username}</b></button>{/each}
         {#if friendsError}<div class="empty"><b>{friendsError}</b><button class="btn" onclick={loadFriends}>Réessayer</button></div>
         {:else if friends && !friends.length}<div class="empty"><b>Aucun ami pour l'instant.</b></div>
+        {:else if friends && !pickable.length}<div class="empty"><b>Aucun ami ne s'appelle ainsi.</b></div>
         {:else if !friends}<div class="loading-more"><span class="spin"></span></div>{/if}
       </div>
     {:else}
@@ -136,12 +131,16 @@
             <button role="tab" aria-selected={tab === "theirs"} class:on={tab === "theirs"} onclick={() => showTab("theirs")}>Cartes de {friend.username}{#if get.size}<span class="tab-n">{get.size}</span>{/if}</button>
           </div>
         {/snippet}
+        {#snippet picker({ stream, ask }, picked, locked, onpick)}
+          <CardPicker lead={tabs} items={stream.items} {picked} {locked} {onpick} loading={stream.loading && stream.first} error={stream.error && !stream.started} onretry={() => stream.reset()}
+            {values} watch={cardValues.watch} load={cardValues.load} onquery={ask}
+            more={stream.hasMore ? () => stream.more() : null} loadingMore={stream.loading && !stream.first} moreError={stream.error && stream.started} />
+        {/snippet}
         <div class="composer-tab" role="tabpanel" hidden={tab !== "mine"}>
-          <CardPicker lead={tabs} items={mine} picked={give} locked={myLocked} loading={mineLoading} error={mineError} onretry={loadMine} onpick={(row) => (give = toggle(give, row))} {values} watch={cardValues.watch} load={cardValues.load} />
+          {@render picker(mine, give, myLocked, (row) => (give = toggle(give, row)))}
         </div>
         <div class="composer-tab" role="tabpanel" hidden={tab !== "theirs"}>
-          <CardPicker lead={tabs} items={theirPages.items} picked={get} locked={theirLocked} loading={theirsFirst} error={theirs.error && theirs.page === 0} onretry={() => theirs.go(0)} onpick={(row) => (get = toggle(get, row))} {values} watch={cardValues.watch} load={cardValues.load}
-            more={theirPages.hasMore ? () => theirs.go(nextPage(theirPages)) : null} loadingMore={theirs.loading && theirs.page > 0} moreError={theirs.error && theirs.page > 0} onquery={queryTheirs} />
+          {@render picker(theirs, get, theirLocked, (row) => (get = toggle(get, row)))}
         </div>
       </div>
       <aside class="offer" class:open={sheet} aria-label="Votre offre">

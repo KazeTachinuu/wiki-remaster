@@ -7,6 +7,11 @@ import mockApi from "./plugins/vite-mock-api.js";
 
 // Single source of truth for the version: package.json. Bump it there, nowhere else.
 const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"));
+// Where installs find their updates: the full script, and its header alone (`.meta.js`, a few KB)
+// that Tampermonkey and the app's own update check read to compare versions.
+const RAW = "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/";
+const DOWNLOAD_URL = RAW + "wikimasters-app.user.js";
+const META_URL = RAW + "wikimasters-app.meta.js";
 // Tampermonkey's icon, inline (no request)
 const icon = "data:image/png;base64," + readFileSync(fileURLToPath(new URL("./extension/icon-48.png", import.meta.url))).toString("base64");
 
@@ -15,7 +20,7 @@ const icon = "data:image/png;base64," + readFileSync(fileURLToPath(new URL("./ex
 // Build (`npm run build`): adds vite-plugin-monkey to emit the userscript.
 export default defineConfig(({ command }) => ({
   // the version, shown in the app (sidebar, menu), from package.json at build time
-  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  define: { __APP_VERSION__: JSON.stringify(pkg.version), __META_URL__: JSON.stringify(META_URL), __DOWNLOAD_URL__: JSON.stringify(DOWNLOAD_URL) },
   plugins: [
     svelte(),
     ...(command === "serve" ? [mockApi()] : []),
@@ -36,12 +41,11 @@ export default defineConfig(({ command }) => ({
               grant: "none",
               homepage: "https://github.com/KazeTachinuu/wiki-remaster",
               supportURL: "https://github.com/KazeTachinuu/wiki-remaster/issues",
-              // Tampermonkey checks these to auto-update. They resolve once the built file
-              // is reachable at a public raw URL (repo public, or a public release).
-              updateURL: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js",
-              downloadURL: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js",
+              // Tampermonkey compares @version in the small header file, then installs the full one
+              updateURL: META_URL,
+              downloadURL: DOWNLOAD_URL,
             },
-            build: { fileName: "wikimasters-app.user.js" },
+            build: { fileName: "wikimasters-app.user.js", metaFileName: true },
             server: { open: false },
           }),
         ]

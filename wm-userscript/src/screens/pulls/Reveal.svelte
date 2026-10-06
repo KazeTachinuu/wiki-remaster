@@ -2,22 +2,57 @@
   import Card from "../../components/Card.svelte";
   import CardModal from "../../components/CardModal.svelte";
   import Icon from "../../components/Icon.svelte";
-  import { RNAME } from "../../wm/index.js";
-  import { reveal } from "../../sound/sound.js";
-  import { rarest } from "../../sound/sfx.js";
-  let { cards, ondone } = $props();
+  import { RNAME, data, pickCopy, collectionRemove } from "../../wm/index.js";
+  import { untrack } from "svelte";
+  import { reveal, play } from "../../sound/sound.js";
+  // copies: my copies of the pack's cards (rows), when the pack sent them; onaction(kind) after a
+  // card was sold or discarded from its detail
+  let { cards, copies = null, ondone, onaction } = $props();
   let i = $state(0);
   let showAll = $state(false);
   let selected = $state(null);
-  // Every card that comes into view answers with its rarity; the grid answers once, with the
-  // rarest of the pack.
-  $effect(() => reveal(showAll ? rarest(cards) : cards[i].rarity));
+  // Every card that comes into view answers with its rarity. "Tout révéler" lays out the cards not
+  // seen yet one after another (`from` on), each with the swish, the rare ones also with their
+  // rarity's sting, at a pace that keeps a 15-card pack around two seconds.
+  const STING = new Set(["R", "SR", "UR", "L"]);
+  let from = $state(0); // the first card the grid deals in (the ones before were already seen)
+  const step = $derived(Math.round(Math.min(260, Math.max(130, 2200 / Math.max(1, cards.length - from)))));
+  $effect(() => {
+    if (!showAll) return reveal(cards[i].rarity);
+    untrack(() => cards.slice(from).forEach((c, k) => {
+      const t = (k * step) / 1000;
+      play("flip", t);
+      if (STING.has(c.rarity)) play(c.rarity, t + 0.1);
+    }));
+  });
+  function revealAll() {
+    from = i + 1;
+    showAll = true;
+    document.scrollingElement?.scrollTo({ top: 0 }); // the grid starts at its heading
+  }
   let last = $derived(i === cards.length - 1);
   let newCount = $derived(cards.filter((c) => c.is_new).length);
 
+  // A pulled card opens with its actions (sell, discard) once its copy is known: from the pack's
+  // own list, else found by its title (the Pro and special packs send none); until then, and if
+  // it is no longer mine, read-only.
+  let left = $state.raw(copies ?? []); // copies not yet sold or discarded from here
+  let gone = $state.raw(new Set()); // copies sold or discarded from here
   function openCard(c) {
-    // A freshly pulled card, shown read-only: info and market value, no actions mid-pull.
-    selected = { id: null, card: c, count: 0, is_shiny: c.is_shiny, starred: false, obtained_at: null, tags: [] };
+    const copy = pickCopy(left, c);
+    selected = copy ? { ...copy, count: 1 } : { id: null, card: c, count: 0, is_shiny: c.is_shiny, starred: false, obtained_at: null, tags: [] };
+    if (copy || copies) return;
+    data.myCopy(c).then((found) => {
+      if (found && !gone.has(found.id) && selected?.card === c && !selected.id) selected = { ...found, count: 1 };
+    }, () => {});
+  }
+  function acted(kind) {
+    if (kind === "unsure") return onaction?.(kind); // the copy may still be there: keep it
+    const id = selected.id;
+    gone = new Set([...gone, id]);
+    left = left.filter((r) => r.id !== id);
+    collectionRemove([id]);
+    onaction?.(kind);
   }
 
   function onKey(e) {
@@ -58,7 +93,7 @@
     </div>
     <div class="reveal-grid" style:--cols={Math.min(cards.length, 5)} style:--rows={Math.ceil(cards.length / Math.min(cards.length, 5))}>
       {#each cards as c, k (k)}
-        <div class="rg-card" style="animation-delay:{Math.min(k, 20) * 50}ms">
+        <div class="rg-card" class:dealt={k >= from} style:--d="{Math.max(0, k - from) * step}ms">
           <div class="rg-aura" data-r={c.rarity}></div>
           <button class="card-btn" onclick={() => openCard(c)} aria-label={c.title}>
             <Card card={c} isNew={c.is_new} shiny={c.is_shiny} />
@@ -98,10 +133,10 @@
         <Icon name="next" width={2} />
       </button>
     </div>
-    <button class="reveal-skip" onclick={() => (showAll = true)}>Tout révéler</button>
+    <button class="reveal-skip" onclick={revealAll}>Tout révéler</button>
   </div>
 {/if}
 
 {#if selected}
-  <CardModal item={selected} readonly onclose={() => (selected = null)} />
+  <CardModal item={selected} readonly={!selected.id} onclose={() => (selected = null)} onaction={acted} />
 {/if}

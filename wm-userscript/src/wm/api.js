@@ -161,6 +161,29 @@ export async function refreshProfile() {
   }
 }
 
+/**
+ * A row write or read on the game's own database (Supabase), as its client does for what has no
+ * /api route: favourites and tags. Uses the session the game's own traffic carries (captured);
+ * none yet: a clear error, never a guess. `path` is under /rest/v1/ ("user_cards?id=eq.<id>").
+ * PostgREST errors keep their `code` (23505: already exists).
+ */
+export async function supabase(path, { method = "GET", body, label } = {}) {
+  if (!sb?.headers) throw Object.assign(new Error("Session du jeu pas encore prête : réessayez dans un instant."), { status: 0 });
+  const tracked = label ? activity.start(label, 1) : null;
+  try {
+    const r = await origFetch.call(window, `${sb.base}/rest/v1/${path}`, {
+      method,
+      headers: { ...sb.headers, "content-type": "application/json", prefer: method === "GET" ? "" : "return=representation" },
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => null);
+    if (!r.ok) throw Object.assign(new Error(d?.message || "Enregistrement impossible pour le moment."), { status: r.status, code: d?.code });
+    return d;
+  } finally {
+    if (tracked) activity.end(tracked);
+  }
+}
+
 function header(init, name) {
   const h = init?.headers;
   if (!h) return null;

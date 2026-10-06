@@ -4,14 +4,18 @@
   import { anchorCentered } from "../lib/anchor.js";
   import Icon from "./Icon.svelte";
   import ListingCompare from "./ListingCompare.svelte";
+  import PriceChart from "./PriceChart.svelte";
+  import MarketAnalysis from "./MarketAnalysis.svelte";
   import { rarityMarket, marketVerdict } from "../wm/market.js";
   import { compareListings } from "../wm/compare.js";
   import { data, RNAME, marketValueFor } from "../wm/index.js";
+  import { tags } from "../lib/tags.svelte.js";
   import { settings } from "../lib/settings.svelte.js";
   import { nf } from "../lib/format.js";
 
   // `item` is an owned copy ({ id, card, count, ... }), or { card } when `readonly`.
-  let { item, onclose, onaction, readonly = false } = $props();
+  // onchange(row): the copy changed here (a favourite, a tag), for whoever shows it
+  let { item, onclose, onaction, onchange, readonly = false } = $props();
   const c = $derived(item.card);
 
   let tab = $state("details");
@@ -26,6 +30,42 @@
   let sellOpen = $state(false);
   let busy = $state(false);
   let done = $state(false);
+
+  // Favourite and tags of this copy (mine, not a card from the catalogue or a friend's): changed at
+  // once on screen, written to the game's database, put back if the write fails.
+  const owned = $derived(!readonly && !!item.id);
+  let starred = $state(!!item.starred);
+  let cardTags = $state.raw(item.tags ?? []);
+  let tagText = $state("");
+  const changedRow = () => onchange?.({ ...item, starred, tags: cardTags });
+  $effect(() => { if (owned) tags.load(); });
+  async function toggleStar() {
+    const was = starred;
+    starred = !was;
+    try { await data.setStarred(item.id, starred); changedRow(); }
+    catch (e) { starred = was; msgOk = false; msg = e.message; }
+  }
+  async function addTag() {
+    const name = tagText.trim();
+    if (!name || busy) return;
+    busy = true;
+    try {
+      const tag = await tags.named(name);
+      if (!cardTags.some((t) => t.id === tag.id)) {
+        await data.tagCard(item.id, tag.id);
+        cardTags = [...cardTags, tag];
+        changedRow();
+      }
+      tagText = "";
+    } catch (e) { msgOk = false; msg = e.message; }
+    busy = false;
+  }
+  async function removeTag(tag) {
+    const was = cardTags;
+    cardTags = cardTags.filter((t) => t.id !== tag.id);
+    try { await data.untagCard(item.id, tag.id); changedRow(); }
+    catch (e) { cardTags = was; msgOk = false; msg = e.message; }
+  }
   let msg = $state("");
   let msgOk = $state(false);
   let modalEl;
@@ -76,8 +116,12 @@
     if (!price && mval != null) price = String(mval);
   }
 
-  // kind: what happened to the card ("sell" | "discard"), for whoever holds the collection
+  // kind: what happened to the card ("sell" | "discard"), for whoever holds the collection; "unsure"
+  // when the answer was lost on the way (the write may have gone through: ask the list again).
+  // One action at a time: a second click never sends it twice; a copy already gone (sold, traded
+  // or discarded elsewhere) leaves the list instead of showing an error.
   async function act(kind, action, okMsg) {
+    if (busy) return;
     busy = true;
     msg = "";
     try {
@@ -88,7 +132,14 @@
       msg = okMsg;
     } catch (e) {
       msgOk = false;
-      msg = e.message;
+      if (e.status === 404) {
+        onaction?.(kind);
+        done = true;
+        msg = "Cette carte n'est déjà plus dans votre collection.";
+      } else {
+        msg = e.message;
+        if (e.uncertain) onaction?.("unsure");
+      }
     }
     busy = false;
   }
@@ -96,7 +147,8 @@
   const discard = () => act("discard", () => data.discard(item.id), "Carte défaussée. +1 point.");
 
   function onKey(e) {
-    if (e.key === "Escape") return onclose?.();
+    if (e.key === "Escape") return analysis ? (analysis = false) : onclose?.();
+    if (analysis) return; // the analysis has the screen and its own focus
     if (e.key !== "Tab" || !modalEl) return;
     // Keep focus inside the dialog.
     const f = [...modalEl.querySelectorAll('a[href],button:not([disabled]),input,[tabindex]:not([tabindex="-1"])')].filter((el) => el.offsetParent !== null);
@@ -117,25 +169,8 @@
   const v = $derived(marketVerdict(rm, deal?.price ?? null));
   const gap = (p) => (p == null ? "" : p === 0 ? "au prix du marché" : p < 0 ? `${-p} % sous le marché` : `${p} % au-dessus`);
   function sellNow() { tab = "details"; price = String(v.sellAt); openSell(); }
-  let hover = $state(null); // the chart point read out (pointer or keyboard)
-  const dtime = (t) => new Date(t).toLocaleString("fr", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-
-  // Sold price over time (Pro only), from at least two sales.
-  const chart = $derived.by(() => {
-    const s = rm.series;
-    if (!s || s.length < 2) return null;
-    const prices = s.map((p) => p.price);
-    const min = Math.min(...prices), max = Math.max(...prices), span = max - min || 1;
-    const W = 100, H = 40, pad = 3;
-    const pts = s.map((p, i) => [pad + (i / (s.length - 1)) * (W - 2 * pad), pad + (1 - (p.price - min) / span) * (H - 2 * pad)]);
-    const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-    const avgY = rm.avg == null ? null : Math.min(H, Math.max(0, pad + (1 - (rm.avg - min) / span) * (H - 2 * pad)));
-    return {
-      d, area: `${d} L${pts.at(-1)[0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`, first: dshort(s[0].at), last: dshort(s.at(-1).at),
-      avgY: avgY == null ? null : (avgY / H) * 100, // in % of the plot height, like each point's y
-      points: s.map((p, i) => ({ ...p, x: pts[i][0], y: (pts[i][1] / H) * 100 })),
-    };
-  });
+  // the full market (Pro, two sales or more): over the whole window, back returns here
+  let analysis = $state(false);
 
   $effect(() => {
     const html = document.documentElement;
@@ -161,7 +196,10 @@
 <div class="modal-backdrop" onclick={(e) => e.target === e.currentTarget && onclose?.()} role="presentation">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-modal-title" tabindex="-1" bind:this={modalEl} use:anchorCentered>
     <button class="modal-close" onclick={() => onclose?.()} aria-label="Fermer"><Icon name="close" width={2} class="x-ico" /></button>
-    <div class="modal-card"><Card card={c} big caption={false} count={item.count} shiny={item.is_shiny} starred={item.starred} /></div>
+    <div class="modal-card">
+      <Card card={c} big caption={false} count={item.count} shiny={item.is_shiny} starred={owned ? false : item.starred} />
+      {#if owned}<button class="modal-star" class:on={starred} onclick={toggleStar} aria-pressed={starred} aria-label={starred ? "Retirer des favoris" : "Ajouter aux favoris"} title={starred ? "Retirer des favoris" : "Ajouter aux favoris"}><Icon name="star" filled={starred} width={1.8} /></button>{/if}
+    </div>
     <div class="modal-info">
       <span class="modal-rar" data-r={c.rarity}>{RNAME[c.rarity] || c.rarity}</span>
       <h2 class="modal-name" id="wm-modal-title">{c.title}</h2>
@@ -189,6 +227,18 @@
             {/if}
           </div>
           {#if obtained}<div class="modal-obtained">Obtenue le {obtained}</div>{/if}
+          {#if owned}
+            <div class="modal-tags">
+              <span class="mk-h">Étiquettes</span>
+              <div class="tag-row">
+                {#each cardTags as t (t.id)}<span class="tag-chip" style:--tc={t.color}>{t.name}<button onclick={() => removeTag(t)} aria-label="Retirer l'étiquette {t.name}"><Icon name="close" width={2} /></button></span>{/each}
+                <form class="tag-add" onsubmit={(e) => { e.preventDefault(); addTag(); }}>
+                  <input bind:value={tagText} list="wm-tag-names" maxlength="48" placeholder={cardTags.length ? "Ajouter..." : "Ajouter une étiquette..."} aria-label="Ajouter une étiquette" />
+                  <datalist id="wm-tag-names">{#each (tags.list ?? []).filter((t) => !cardTags.some((x) => x.id === t.id)) as t (t.id)}<option value={t.name}></option>{/each}</datalist>
+                </form>
+              </div>
+            </div>
+          {/if}
           {#if c.wikipedia_url}
             <a class="modal-wiki" href={c.wikipedia_url} target="_blank" rel="noopener noreferrer">Voir l'article Wikipédia</a>
           {/if}
@@ -273,25 +323,13 @@
                   <button class="btn primary" onclick={sellNow}>Mettre en vente</button>
                 </div>
               {/if}
-              {#if chart}
-                {@const pt = hover != null ? chart.points[hover] : null}
+              {#if rm.count > 1}
                 <section class="mk-price">
-                  <h3 class="mk-h">Évolution des prix</h3>
-                  <div class="mk-plot">
-                    <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
-                      <path d={chart.area} fill="var(--accent)" fill-opacity="0.12" />
-                      <path d={chart.d} fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
-                    </svg>
-                    {#if chart.avgY != null}<div class="mk-avgline" style:top="{chart.avgY}%"><span>marché</span></div>{/if}
-                    <!-- one slice per sale, as wide as its share of the plot: easy to hit, each a focusable readout -->
-                    {#each chart.points as p, i (p.id ?? p.at)}
-                      <button class="mk-slice" class:on={hover === i} style:left="{p.x}%" style:width="{100 / chart.points.length}%" style:--y="{p.y}%"
-                        onpointerenter={() => (hover = i)} onpointerleave={() => hover === i && (hover = null)} onfocus={() => (hover = i)} onblur={() => (hover = null)}
-                        aria-label="{dtime(p.at)} : {nf(p.price)} points"></button>
-                    {/each}
-                    {#if pt}<div class="mk-tip" class:flip={pt.x > 70} class:flop={pt.x < 30} style:left="{pt.x}%" style:top="{pt.y}%"><b><span class="auc-coin"></span>{nf(pt.price)}</b>{dtime(pt.at)}</div>{/if}
+                  <div class="mk-price-head">
+                    <h3 class="mk-h">Évolution des prix</h3>
+                    <button class="link-btn" onclick={() => (analysis = true)}>Analyse complète<Icon name="next" width={2} /></button>
                   </div>
-                  <div class="mk-x"><span>{chart.first}</span><span>{chart.last}</span></div>
+                  <PriceChart series={rm.series} avg={rm.avg} />
                 </section>
               {/if}
             {:else}
@@ -300,11 +338,10 @@
           {/if}
           <!-- what can be bought now comes before the history -->
           {#if marketState !== "error"}<ListingCompare {listings} soldAvg={rm.avg} {now} onpick={openListing} />{/if}
-          {#if market && rm.count}
-            <details class="mk-history">
-              <summary>Historique des ventes <span>{rm.recent.length}{rm.count > rm.recent.length ? ` sur ${rm.count}` : ""}</span></summary>
-              <ol class="mk-list">{#each rm.recent as sale (sale.id ?? sale.at)}<li><span>{dtime(sale.at)}</span><b><span class="auc-coin"></span>{nf(sale.price)}</b></li>{/each}</ol>
-            </details>
+          {#if market && rm.count > 1}
+            <button class="mk-all" onclick={() => (analysis = true)}>
+              <span>Toutes les ventes <b>{nf(rm.count)}</b></span><span class="mk-all-go">Analyse complète<Icon name="next" width={2} /></span>
+            </button>
           {/if}
         </div>
       {/if}
@@ -312,3 +349,7 @@
     </div>
   </div>
 </div>
+
+{#if analysis}
+  <MarketAnalysis card={c} {rm} {listings} {now} onclose={() => (analysis = false)} onpick={openListing} />
+{/if}

@@ -6,7 +6,7 @@ const DEFAULTS = {
   hideStats: false, // hide ATK/DEF everywhere
   hideSensitive: true, // blur images flagged nsfw_image until revealed
   sideRail: false, // the sidebar folded to a rail of icons (wide screens)
-  collection: { sort: "rarity", filter: "ALL", favOnly: false, shinyOnly: false },
+  collection: { sort: "rarity", filter: "ALL", favOnly: false },
   catalog: { sort: "rarity", rarity: "", wishOnly: false },
   market: { tab: "browse", sort: "recent", rarity: "" },
 };

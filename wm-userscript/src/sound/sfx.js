@@ -1,10 +1,6 @@
 // Where the interface makes its sounds: the rules live here so components only say what happened.
 // The sounds themselves are in sound.js. Every helper takes the player last, for the tests.
 import { play } from "./sound.js";
-import { RARITIES_DESC } from "../wm/schema.js";
-
-/** The rarest rarity in a haul of cards (null for none): one sting sums up a whole grid. */
-export const rarest = (cards) => RARITIES_DESC.find((r) => cards?.some((c) => c.rarity === r)) ?? null;
 
 /** Run a write the player cares about: a chime when it lands, a low buzz when it fails. */
 export async function sounded(run, sfx = play) {

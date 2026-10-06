@@ -10,6 +10,7 @@
   import { data } from "../../wm/index.js";
   import { nf, countdown, secondsUntil } from "../../lib/format.js";
   import { PagedList, debouncedSearch } from "../../lib/paged.svelte.js";
+  import { reuse } from "../../lib/reuse.js";
   import { scrollFade } from "../../lib/scrollFade.js";
   import { settings } from "../../lib/settings.svelte.js";
 
@@ -26,7 +27,8 @@
   $effect(() => Object.assign(prefs, { tab, sort, rarity }));
   let selected = $state(null);
 
-  const list = new PagedList((page) => data.marketplace({ page, sort, q: query, rarity }));
+  let quiet = false; // a refresh nobody asked for: no loading bar
+  const list = new PagedList((page) => data.marketplace({ page, sort, q: query, rarity, quiet }));
   list.go(0);
 
   debouncedSearch(() => search, (q) => { if (q !== query) { query = q; list.go(0); } });
@@ -34,7 +36,11 @@
   // My listings, bids, wins and history (one call).
   let mine = $state(null);
   let mineError = $state(false); // my listings/bids failed to load: show a retry, never an endless skeleton
-  const loadMine = () => { mineError = false; return data.myMarket().then((m) => (mine = m), () => (mineError = !mine)); };
+  // my sales, bids, wins and history; unchanged rows keep their objects (nothing redrawn)
+  const loadMine = (quiet = false) => {
+    mineError = false;
+    return data.myMarket({ quiet }).then((m) => (mine = { ...m, selling: reuse(mine?.selling, m.selling), bidding: reuse(mine?.bidding, m.bidding), won: reuse(mine?.won, m.won), history: reuse(mine?.history, m.history) }), () => (mineError = !mine));
+  };
   loadMine();
 
   // One shared clock for every countdown on the page.
@@ -50,8 +56,11 @@
   function closeModal() {
     selected = null;
     if (openId) history.replaceState({}, "", "/marketplace");
-    loadMine();
-    list.go();
+    loadMine(true);
+    // what changed while the auction was open (a bid, a sale) lands quietly: no dimmed grid, and
+    // the listings that did not change are not redrawn
+    quiet = true;
+    list.refresh((old, fresh) => ({ ...fresh, auctions: reuse(old?.auctions, fresh.auctions) })).finally(() => (quiet = false));
     onwallet?.();
   }
 
@@ -61,12 +70,18 @@
     return a.status === "cancelled" ? "Annulée" : "Invendue";
   }
 
+  // The game sends my wins and past sales as one list of the latest 50 at most, with no way to page
+  // further back (checked live): at the cap the count says "50+" and the list says why it stops.
+  const MINE_CAP = 50;
+  const count = (l) => (!l?.length ? "" : l.length >= MINE_CAP ? `${MINE_CAP}+` : `${l.length}`);
+  const capped = $derived((tab === "won" || tab === "history") && (mine?.[tab]?.length ?? 0) >= MINE_CAP);
+
   // [id, label, phone label]: a phone shows the short names, the row scrolls with a fading edge
   const tabs = $derived([
     ["browse", "Toutes les ventes", "Tout"],
     ["selling", `Mes ventes ${mine ? `${mine.selling.length}/${mine.max}` : ""}`],
     ["bidding", `Mes enchères ${mine?.bidding.length || ""}`, `Enchères ${mine?.bidding.length || ""}`],
-    ["won", `Remportées ${mine?.won.length || ""}`],
+    ["won", `Remportées ${count(mine?.won)}`],
     ["history", "Historique"],
   ]);
   const shown = $derived(tab === "browse" ? list.data?.auctions : mine?.[tab]);
@@ -137,6 +152,7 @@
       </div>
     {/each}
   </div>
+  {#if capped}<p class="mine-cap">Le jeu ne renvoie que les {MINE_CAP} plus récentes.</p>{/if}
   {#if tab === "browse"}
     <Pager page={list.page} hasNext={list.data.hasMore} loading={list.loading} ongo={(p) => list.go(p)} />
   {/if}

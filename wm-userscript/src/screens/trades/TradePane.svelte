@@ -27,6 +27,12 @@
   let viewing = $state(null);
   const chain = $derived(chainOf(t, all));
   const steps = $derived(timeline(chain));
+  // a long negotiation (dozens or hundreds of offers) folds its middle: the first offer, then the
+  // latest ones; the offer being viewed always shows
+  const FOLD_FROM = 8, KEEP_END = 4;
+  let chainOpen = $state(false);
+  const folded = (i) => !chainOpen && steps.length > FOLD_FROM && i >= 1 && i < steps.length - KEEP_END && steps[i].offer?.id !== o.id;
+  const foldedCount = $derived(steps.filter((_, i) => folded(i)).length);
   const o = $derived(chain.find((c) => c.id === viewing) ?? t);
   const earlier = $derived(o.id !== t.id);
   const v = $derived(verdict(sideValue(o.give, o.giveCoins, values), sideValue(o.get, o.getCoins, values)));
@@ -38,8 +44,11 @@
   // the negotiation fits beside it (see `lay`), else it scrolls below
   let chainH = $state(0);
   let earlierH = $state(0); // the "earlier offer" banner, when shown, takes its share of the height
+  // a big trade (more cards than show well at card size): both sides as mini cards, see TradeSide
+  const COMPACT_FROM = 16;
+  const compact = $derived(o.give.length + o.get.length > COMPACT_FROM);
   const lay = $derived.by(() => {
-    if (!box) return null;
+    if (!box || compact) return null;
     const shape = [sideShape(o.give, o.giveCoins), sideShape(o.get, o.getCoins)];
     const h = box.height - (earlier ? earlierH + DEAL.bodyGap : 0);
     const all = dealLayout(box.width, h, ...shape);
@@ -104,16 +113,19 @@
       {#if earlier}
         <p class="tp-earlier" bind:offsetHeight={earlierH}><span><b>{steps.find((s) => s.offer?.id === o.id)?.text} {steps.find((s) => s.offer?.id === o.id)?.by}</b>, {ago(o.createdAt)}: une offre précédente.</span><button class="btn" onclick={() => (viewing = null)}>Voir la dernière offre</button></p>
       {/if}
-      <div class="tp-sides" class:stacked={lay?.stacked} class:scrolls={lay && !lay.fits} class:measuring={!lay}>
-        <TradeSide label={SIDE.give} items={o.give} coins={o.giveCoins} cols={lay?.give} narrow={slim(lay?.give)} {values} onopen={(it) => (card = it)} />
+      <div class="tp-sides" class:compact class:stacked={lay?.stacked} class:scrolls={lay && !lay.fits} class:measuring={!lay && !compact}>
+        <TradeSide label={SIDE.give} items={o.give} coins={o.giveCoins} cols={lay?.give} narrow={slim(lay?.give)} {compact} {values} onopen={(it) => (card = it)} />
         <TradeVerdict {v} />
-        <TradeSide label={SIDE.get} items={o.get} coins={o.getCoins} cols={lay?.get} narrow={slim(lay?.get)} {values} onopen={(it) => (card = it)} />
+        <TradeSide label={SIDE.get} items={o.get} coins={o.getCoins} cols={lay?.get} narrow={slim(lay?.get)} {compact} {values} onopen={(it) => (card = it)} />
       </div>
       {#if steps.length > 2 || t.status !== "pending"}
         <section class="tp-chain" bind:offsetHeight={chainH}>
           <h3>Négociation</h3>
           <ol>
             {#each steps as s, i (i)}
+              {#if folded(i)}
+                {#if i === 1}<li class="tp-fold"><button class="link-btn" onclick={() => (chainOpen = true)}>Voir les {foldedCount} étapes intermédiaires</button></li>{/if}
+              {:else}
               <li data-k={s.kind} class:now={i === steps.length - 1}>
                 {#if s.offer}
                   <!-- an offer step shows its deal, and its cards above once picked -->
@@ -126,6 +138,7 @@
                   {#if s.at}<span class="nowrap tp-chain-when">{ago(s.at)}</span>{/if}
                 {/if}
               </li>
+              {/if}
             {/each}
           </ol>
         </section>

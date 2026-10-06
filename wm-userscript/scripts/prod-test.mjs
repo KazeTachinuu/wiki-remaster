@@ -105,23 +105,22 @@ if (on("profile")) {
 // --- collection (also feeds estimate + writes) -----------------------------------------
 let coll = null;
 if (on("collection") || on("estimate") || WRITES.size) {
-  await check("collection: every page loads, no broken rows", async () => {
+  await check("collection: the first page and one page per rarity load, no broken rows", async () => {
+    // what the app reads: a page at a time (myCards), never the whole collection
     coll = await ev(async () => {
-      const d = await window.__wm.data.collection();
-      return {
-        items: d.items.map((i) => ({ id: i.id, cardId: i.card.id, rarity: i.card.rarity, title: i.card.title, count: i.count })),
-        stats: d.stats,
-      };
+      const first = await window.__wm.data.myCards({ page: 0 });
+      const byRarity = [];
+      for (const rarity of ["L", "UR", "SR", "R", "PC", "C"]) { await new Promise((r) => setTimeout(r, 600)); byRarity.push(...(await window.__wm.data.myCards({ rarity })).items); }
+      const row = (i) => ({ id: i.id, cardId: i.card.id, rarity: i.card.rarity, title: i.card.title, count: i.count });
+      return { first: first.items.map(row), total: first.total, counts: first.counts, items: byRarity.map(row) };
     });
-    const { items, stats } = coll;
-    const sum = Object.values(stats.counts).reduce((a, b) => a + b, 0);
-    assert(items.length > 0, "empty collection");
-    // The server's order can shift while paging (cards gained mid-load), so allow a small gap.
-    assert(Math.abs(items.length - stats.copies) <= 5, `loaded ${items.length} rows but total=${stats.copies} (a page failed silently)`);
-    assert(new Set(items.map((i) => i.id)).size === items.length, "duplicate rows across pages");
-    assert(items.every((i) => i.cardId && i.rarity && i.title), "row missing id/rarity/title");
-    assert(sum === stats.copies, `rarityCounts sum ${sum} != copies ${stats.copies}`);
-    return `${stats.unique} cards, ${stats.copies} copies`;
+    const { first, total, counts, items } = coll;
+    const sum = Object.values(counts).reduce((a, b) => a + b, 0);
+    assert(first.length > 0, "empty collection");
+    assert(Number.isInteger(total) && sum === total, `rarityCounts sum ${sum} != total ${total}`);
+    assert(new Set(first.map((i) => i.id)).size === first.length, "duplicate rows in a page");
+    assert([...first, ...items].every((i) => i.cardId && i.rarity && i.title), "row missing id/rarity/title");
+    return `${total} copies, first page ${first.length} rows, ${items.length} rows across the rarities`;
   });
 }
 
@@ -306,7 +305,25 @@ if (on("trades")) {
     assert(!word || found.some((r) => r.card.wikipedia_title.includes(word)), `q=${word} did not find its own card`);
     const named = await get("&sort=name");
     assert(named.length && named.map((r) => r.card.id).join() !== all.map((r) => r.card.id).join(), "sort=name kept the rarity order");
-    return `rarity=PC ${pc.length}, PC+C ${two.length}, q=${word} ${found.length}, sort=name first ${named[0]?.card.wikipedia_title}`;
+    const added = (await get("&sort=added")).map((r) => r.obtained_at);
+    assert(added.every((t, i) => !i || added[i - 1] >= t), "sort=added is not newest first");
+    return `rarity=PC ${pc.length}, PC+C ${two.length}, q=${word} ${found.length}, sort=name first ${named[0]?.card.wikipedia_title}, sort=added newest first`;
+  });
+  await check("collection: my collection is searched, filtered and ordered by the server", async () => {
+    // the collection screen and my side of the trade picker ask these (myCards), page by page
+    const get = async (q) => { const r = await raw(`/api/my-collection?page=0${q}`); await Bun.sleep(600); assert(r.status === 200, `${q}: status ${r.status}`); return r.body; };
+    const base = await get("&stats=1");
+    assert(Number.isInteger(base.total) && base.rarityCounts && typeof base.rarityCounts === "object", "stats=1 has no total or rarityCounts");
+    const word = base.collection[0]?.card?.category?.split(/\s+/)[0];
+    const found = word ? (await get(`&q=${encodeURIComponent(word)}&stats=1`)) : null;
+    assert(!found || found.collection.length > 0, `q=${word} (a description word) found nothing`);
+    const sr = await get("&rarity=SR");
+    assert(sr.collection.every((r) => r.card.rarity === "SR"), "rarity=SR returned other rarities");
+    const added = (await get("&sort=added")).collection.map((r) => r.obtained_at);
+    assert(added.every((t, i) => !i || added[i - 1] >= t), "sort=added is not newest first");
+    const starred = (await get("&sort=starred")).collection.map((r) => !!r.starred);
+    assert(starred.every((s, i) => !i || starred[i - 1] || !s), "sort=starred does not put favourites first");
+    return `${base.total} copies; q=${word} ${found?.collection.length ?? "-"}; rarity=SR ${sr.collection.length}; added and starred ordered`;
   });
   await check("trades: GET /api/chat/<friend id> shape", async () => {
     if (!friend) return "no friend to read";
@@ -538,7 +555,7 @@ if (WRITES.has("sell")) await check("WRITE list a common at 40, then cancel", as
   const early = await ev((id) => window.__wm.data.reprice(id, 30).then(() => "ok", (e) => e.message), r.auction_id);
   const c = await ev((id) => window.__wm.data.cancelAuction(id), r.auction_id);
   assert(c.status === "cancelled", JSON.stringify(c));
-  const back = await ev(async (title) => (await window.__wm.data.collection()).items.some((i) => i.card.title === title), it.title);
+  const back = await ev(async (title) => (await window.__wm.data.myCards({ q: title })).items.some((i) => i.card.title === title), it.title);
   assert(back, "card did not come back after cancel");
   return `${it.title}: listed, early reprice -> "${early}", cancelled, card back`;
 });

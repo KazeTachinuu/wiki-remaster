@@ -1,0 +1,100 @@
+/* A card's price chart (PriceChart.svelte): price gridlines labelled on the left, one point per
+   day, the day's middle half as a band; in full, every sale as a dot and the volume underneath. */
+.pc-plot{position:relative;height:150px;margin:var(--s4) 0 0 42px}
+.pc.full .pc-plot{height:clamp(220px,38vh,380px)}
+.pc-grid{position:absolute;left:0;right:0;border-top:1px dashed color-mix(in oklab,var(--line2) 70%,transparent);pointer-events:none}
+.pc-grid span{position:absolute;right:calc(100% + 8px);top:-.65em;font-size:10.5px;color:var(--fg-faint);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pc-plot svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.pc-avg{position:absolute;left:0;right:0;border-top:1px dashed color-mix(in oklab,var(--r-l) 55%,transparent);pointer-events:none}
+.pc-avg span{position:absolute;right:0;bottom:3px;padding:0 4px;border-radius:4px;background:var(--elev);font-size:10px;font-weight:600;color:color-mix(in oklab,var(--r-l) 80%,transparent)}
+.pc-slice{position:absolute;top:0;bottom:0;padding:0;border:none;background:none;cursor:crosshair}
+.pc-slice::before{content:"";position:absolute;left:var(--x);top:0;bottom:0;border-left:1px solid var(--line2);opacity:0;transition:opacity .12s}
+.pc-slice::after{content:"";position:absolute;left:var(--x);top:var(--y);width:7px;height:7px;translate:-50% -50%;border-radius:50%;background:var(--surface);border:2px solid var(--accent);transition:scale .12s}
+.pc-slice.on::before{opacity:1}
+.pc-slice.on::after{scale:1.4;background:var(--accent)}
+/* many days: the line says it all, a day's dot only shows when read */
+.pc-slice.dense::after{opacity:0;width:6px;height:6px}
+.pc-slice.dense.on::after{opacity:1}
+#wm-app-root .pc-slice:focus-visible{outline:none}
+#wm-app-root .pc-slice:focus-visible::after{box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 40%,transparent)}
+.pc-tip{position:absolute;translate:-50% calc(-100% - 12px);display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 10px;border-radius:9px;
+  background:var(--elev2);border:1px solid var(--line2);box-shadow:0 10px 24px -12px #000;font-size:11px;color:var(--fg-soft);white-space:nowrap;pointer-events:none;z-index:1}
+.pc-tip b{display:inline-flex;align-items:center;gap:5px;font:700 14px/1.2 var(--display);color:var(--r-l);font-variant-numeric:tabular-nums}
+.pc-tip.flip{translate:calc(-100% + 16px) calc(-100% - 12px)}
+.pc-tip.flop{translate:-16px calc(-100% - 12px)}
+.pc-x{position:relative;height:1.4em;margin:var(--s2) 0 0 42px;font-size:11px;color:var(--fg-faint)}
+.pc-x span{position:absolute;top:0;translate:-50% 0;white-space:nowrap}
+.pc-x span:first-child{translate:0 0}
+.pc-x span:last-child:not(:first-child){translate:-100% 0}
+
+/* full: every sale as a small dot behind the line, hollow on the edge when past the scale */
+.pc-dot{position:absolute;width:5px;height:5px;translate:-50% -50%;border-radius:50%;background:color-mix(in oklab,var(--accent) 45%,transparent);pointer-events:none}
+.pc-dot.out{background:none;border:1.5px solid var(--r-ur);width:7px;height:7px}
+/* sales per day, under the plot, on the same x */
+.pc-vol{position:relative;height:38px;margin:var(--s2) 0 0 42px;border-bottom:1px solid var(--line)}
+.pc-vol span{position:absolute;bottom:0;translate:-50% 0;min-height:2px;border-radius:2px 2px 0 0;background:color-mix(in oklab,var(--fg-faint) 45%,transparent);transition:background .12s}
+.pc-vol span.on{background:var(--accent)}
+
+/* The market analysis (MarketAnalysis.svelte): the whole window, over the card's own (its level
+   is the other dialogs' one: above the card window, below the human check that comes later) */
+.ma{position:fixed;inset:0;z-index:2147483601;display:flex;flex-direction:column;background:var(--bg);outline:none;animation:ma-in .18s ease-out}
+@keyframes ma-in{from{opacity:0;transform:translateY(8px)}}
+.ma-head{padding-top:max(var(--s4),env(safe-area-inset-top))}
+.ma-rar{font-weight:700;color:var(--rc)}
+/* scrolls across the whole width (its scrollbar on the window's edge), the content centered */
+.ma-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--s5);
+  padding:var(--s5) max(var(--s5),calc((100% - 1180px) / 2)) max(var(--s6),env(safe-area-inset-bottom))}
+.ma-periods{justify-content:flex-start}
+.ma-figs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--s2)}
+.ma-fig{display:flex;flex-direction:column;gap:2px;min-width:0;padding:var(--s3);border-radius:12px;background:var(--elev);border:1px solid var(--line)}
+.ma-fig .mk-h{margin:0}
+.ma-fig b{font:700 22px/1.15 var(--display);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ma-chart{background:var(--elev);border:1px solid var(--line);border-radius:var(--radius);padding:var(--s4) var(--s5) var(--s3)}
+.ma-chart .pc-plot{margin-top:var(--s2)}
+.ma-legend{display:flex;flex-wrap:wrap;gap:6px var(--s4);margin:var(--s3) 0 0;font-size:12px;color:var(--fg-faint)}
+.ma-legend span{display:inline-flex;align-items:center;gap:6px}
+.ma-legend i{display:inline-block;flex:none}
+.lg-line{width:14px;height:2px;border-radius:2px;background:var(--accent)}
+.lg-band{width:12px;height:10px;border-radius:3px;background:color-mix(in oklab,var(--accent) 20%,transparent)}
+.lg-dot{width:6px;height:6px;border-radius:50%;background:color-mix(in oklab,var(--accent) 45%,transparent)}
+.lg-avg{width:14px;border-top:1px dashed var(--r-l)}
+/* chart and sales side by side, the sales panel as tall as the chart (it does not size the row)
+   and scrolling inside */
+.ma-main{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(300px,1fr);gap:var(--s4);align-items:stretch}
+.ma-sales{contain:size;display:flex;flex-direction:column;min-height:0;background:var(--elev);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.ma-sales-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);padding:var(--s3) var(--s4) var(--s2)}
+.ma-sales-head .mk-h{margin:0}
+.ma-sales-head .mk-h span{margin-left:4px;letter-spacing:0;color:var(--fg-soft)}
+.ma-hint{font-size:11.5px;color:var(--fg-faint);text-align:right}
+.ma-day{display:inline-flex;align-items:center;gap:6px;padding:4px 8px 4px 10px;border-radius:999px;border:1px solid color-mix(in oklab,var(--accent) 45%,var(--line));background:color-mix(in oklab,var(--accent) 12%,var(--elev));color:var(--fg);font:600 12px var(--body);cursor:pointer}
+.ma-day svg{width:11px;height:11px}
+/* the sort: one quiet segmented row */
+.ma-sort{display:flex;gap:2px;margin:0 var(--s4) var(--s2);padding:2px;border-radius:9px;background:var(--surface);border:1px solid var(--line)}
+.ma-sort button{flex:1;padding:5px 6px;border:none;border-radius:7px;background:none;color:var(--fg-faint);font:600 12px var(--body);cursor:pointer;white-space:nowrap}
+.ma-sort button.on{background:var(--elev2);color:var(--fg)}
+.ma-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;list-style:none;margin:0;padding:0 0 var(--s2);border-top:1px solid var(--line)}
+.ma-list li{display:grid;grid-template-columns:1fr auto 64px;align-items:center;gap:var(--s3);padding:6px var(--s4);font-size:12.5px;font-variant-numeric:tabular-nums}
+.ma-list li:nth-child(even){background:color-mix(in oklab,var(--surface) 55%,transparent)}
+.ma-when{color:var(--fg-soft)}
+.ma-gap{font-size:11.5px;color:var(--fg-faint);text-align:right}
+.ma-gap.up{color:var(--r-ur)}
+.ma-gap.down{color:var(--accent)}
+.ma-list b{display:inline-flex;align-items:center;justify-content:flex-end;gap:5px;font-weight:700}
+.ma-note{flex:none;margin:0;padding:var(--s2) var(--s4);border-top:1px solid var(--line);text-align:center;font-size:11.5px;color:var(--fg-faint)}
+/* narrower: the sales under the chart, a few screenfuls tall at most, still scrolling inside */
+@media(max-width:900px){
+  .ma-main{grid-template-columns:minmax(0,1fr)}
+  .ma-sales{contain:none;max-height:min(460px,62dvh)}
+}
+@media(max-width:560px){
+  .ma-body{padding-inline:var(--s4);gap:var(--s4)}
+  .ma-figs{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .ma-fig b{font-size:18px}
+  .ma-chart{padding:var(--s3) var(--s3) var(--s2)}
+  .ma-chart .pc-plot,.ma-chart .pc-vol,.ma-chart .pc-x{margin-left:34px}
+}
+
+.pc-tip b small{font:600 10px var(--body);color:var(--fg-faint);letter-spacing:.03em;margin-left:2px}
+.ma-back{width:42px;padding:0;justify-content:center;flex:none}
+.lg-out{width:7px;height:7px;border-radius:50%;border:1.5px solid var(--r-ur)}
+.pc-slice.pickable{cursor:pointer}

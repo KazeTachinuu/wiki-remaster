@@ -5,17 +5,17 @@
 
 import { MockData } from "./adapters/mock.js";
 import { RealData } from "./adapters/real.js";
-import { load, save, drop } from "./cache.js";
+import { load, save, drop, sweep } from "./cache.js";
 import { backgroundLane, pageLane } from "./lane.js";
-import { countsFrom } from "./schema.js";
 import { isRateLimited } from "./api.js";
 
 export const data = /(^|\.)wiki-masters\.com$/.test(location.hostname) ? RealData : MockData;
+sweep();
 
-export { RNAME, RARITIES, RARITIES_DESC, normSearch } from "./schema.js";
+export { RNAME, RARITIES, RARITIES_DESC, normSearch, pickCopy } from "./schema.js";
 export { initCapture, refreshProfile, getProfile, health, activity, isRateLimited } from "./api.js";
 export { session, recordPull } from "./session.js";
-export { STATUS, SIDE, statusLabel, tradeTabs, sideValue, verdict, balanceLabel, verdictTitle, chainOf, timeline, offerSummary, dealLine, balanceBadge, stepIn, afterLeaving } from "./trades.js";
+export { STATUS, SIDE, statusLabel, tradeTabs, sideValue, verdict, balanceLabel, verdictTitle, chainOf, roundsOf, timeline, offerSummary, dealLine, balanceBadge, stepIn, afterLeaving } from "./trades.js";
 
 // --- Market values: persisted 24 h per card, fetched through one paced lane ---------------
 // A value is one request per card, and a collection can hold a thousand cards. The game flags
@@ -27,6 +27,13 @@ const RATE_PAUSE_MS = 60e3;
 export { backgroundLane, pageLane };
 const saved = Object.fromEntries(Object.entries(load("values", Infinity) || {}).filter(([, [, t]]) => Date.now() - t < VALUE_TTL));
 const inflight = new Map(); // card id -> Promise, shared by concurrent callers
+// The browser keeps ~5 MB for the whole site, the game's own data included: the saved values stop
+// at the most recent few thousand (about 60 bytes each), however many cards are browsed.
+const VALUE_KEEP = 4000;
+const newest = (map, n) => {
+  const e = Object.entries(map);
+  return e.length <= n ? map : Object.fromEntries(e.sort((a, b) => b[1][1] - a[1][1]).slice(0, n));
+};
 let saveTimer = null;
 
 /** A card's market value: its sold average at its current rarity, or null. */
@@ -38,7 +45,7 @@ export function marketValueFor(card) {
     // A rate limit pauses the lane, then this card waits in it and tries again (twice at most).
     const fetchValue = (left) => backgroundLane.run(() => data.marketValue(card)).then((v) => {
       saved[card.id] = [v, Date.now()];
-      saveTimer ??= setTimeout(() => { saveTimer = null; save("values", saved); }, 1000);
+      saveTimer ??= setTimeout(() => { saveTimer = null; save("values", newest(saved, VALUE_KEEP)); }, 1000);
       return v;
     }, (e) => {
       if (!isRateLimited(e)) return null;
@@ -50,46 +57,32 @@ export function marketValueFor(card) {
   return inflight.get(card.id);
 }
 
-// --- Collection: stale-while-revalidate --------------------------------------------------
+// --- Collection: asked of the server, page by page -----------------------------------------
+// The game's server searches, filters by rarity and orders by rarity or name (checked by
+// test:prod), so the collection screen and the trade picker ask it for one page at a time,
+// whatever the size of the collection, as the game's own collection page does. Only the first
+// page as it opens (rarity order, no search) is saved, so the screen shows at once.
 
-// One saved copy per browser profile: another account on the same browser sees the
-// old list until the fresh load lands (seconds).
-const COLLECTION_TTL = 7 * 86400e3;
+// One saved first page per browser profile: another account on the same browser sees it until
+// the fresh one lands (a second).
+const FIRST_TTL = 7 * 86400e3;
+const FIRST_KEY = "collection.first.v1";
 
-// the collection's own cache key, versioned with its shape (stats.copies, at), so a shape change
-// does not throw away the other caches (market values)
-const COLLECTION_KEY = "collection.v4";
-// A saved copy this recent is used as is: our own changes (a pack, a discard) patch it, so only a
-// change made elsewhere (the original site, a trade) waits for this long or for a reload.
-const COLLECTION_FRESH_MS = 5 * 60e3;
-let collectionLoad = null; // one load at a time, shared by every screen asking
+/** The first page of my collection as saved last time ({ items, total, counts, pending }), or null. */
+export const savedFirstPage = () => load(FIRST_KEY, FIRST_TTL);
 
 /**
- * Load the collection. `onCached` gets the last saved copy immediately (if any); a recent one is
- * the answer, an older one is refreshed (`force` refreshes always). Without a saved copy,
- * `onPartial` streams pages as they arrive.
+ * One page of my collection, asked of the server (`q`, `rarity`, `sort`: "rarity" | "name"). The
+ * opening page (page 0, no search, no filter, rarity order) is saved for next time.
  */
-export function loadCollection({ onCached, onPartial, force = false } = {}) {
-  const cached = load(COLLECTION_KEY, COLLECTION_TTL);
-  if (cached) onCached?.(cached);
-  if (cached && !force && Date.now() - cached.at < COLLECTION_FRESH_MS) return Promise.resolve(cached);
-  collectionLoad ??= data.collection({ onPartial: cached ? undefined : onPartial })
-    .then((fresh) => { const v = { ...fresh, at: Date.now() }; save(COLLECTION_KEY, v); return v; })
-    .finally(() => (collectionLoad = null));
-  return collectionLoad;
+export async function myCardsPage(query = {}) {
+  const d = await data.myCards(query);
+  const opening = !query.page && !query.q && !query.rarity && (query.sort ?? "rarity") === "rarity";
+  if (opening) save(FIRST_KEY, d);
+  return d;
 }
 
-/** Change the saved copy in place (rows in, rows out), its counts recomputed. */
-function patchCollection(change) {
-  const c = load(COLLECTION_KEY, COLLECTION_TTL);
-  if (!c) return;
-  const items = change(c.items);
-  const stats = { ...c.stats, copies: items.length, unique: new Set(items.map((it) => it.card.id)).size, counts: countsFrom(items), loading: false };
-  save(COLLECTION_KEY, { ...c, items, stats });
-}
-/** New copies (a pack): added once each. */
-export const collectionAdd = (rows) => patchCollection((items) => { const have = new Set(items.map((it) => it.id)); return [...items, ...rows.filter((r) => !have.has(r.id))]; });
-/** Copies gone (a discard). */
-export const collectionRemove = (ids) => patchCollection((items) => { const gone = new Set(ids); return items.filter((it) => !gone.has(it.id)); });
-/** Call after a change we cannot replay on the saved copy (a sale, a trade). */
-export const forgetCollection = () => drop(COLLECTION_KEY);
+// After a change (a pack, a discard, a sale, a trade): the saved first page is asked again.
+export const collectionAdd = () => drop(FIRST_KEY);
+export const collectionRemove = () => drop(FIRST_KEY);
+export const forgetCollection = () => drop(FIRST_KEY);

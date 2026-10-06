@@ -28,4 +28,15 @@ export const MockData = {
   },
 
   reset: () => api("/api/reset", { method: "POST" }),
+
+  // favourites and tags: the live game writes them to its database from its client; the dev API
+  // stands in for it under /api/__sb (same operations, same shapes)
+  setStarred: (id, starred) => api("/api/__sb/star", { method: "PATCH", body: { id, starred }, label: starred ? "Ajout aux favoris" : "Retrait des favoris" }),
+  myTags: () => api("/api/__sb/tags", { quiet: true }),
+  async createTag(name, color) {
+    try { return (await api("/api/__sb/tags", { method: "POST", body: { name, color }, label: "Nouvelle étiquette" }))[0]; }
+    catch (e) { if (e.data?.code !== "23505") throw e; return (await api("/api/__sb/tags", { quiet: true })).find((t) => t.name === name); }
+  },
+  tagCard: (userCardId, tagId) => api("/api/__sb/card-tags", { method: "POST", body: { user_card_id: userCardId, tag_id: tagId }, label: "Étiquette" }),
+  untagCard: (userCardId, tagId) => api(`/api/__sb/card-tags?user_card_id=${encodeURIComponent(userCardId)}&tag_id=${encodeURIComponent(tagId)}`, { method: "DELETE", label: "Étiquette" }),
 };

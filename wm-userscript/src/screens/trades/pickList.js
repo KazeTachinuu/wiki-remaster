@@ -1,8 +1,11 @@
-// The cards a trade picker shows: filtered by rarity and search, sorted, the copies locked in a
-// pending trade last (still visible, not pickable). Pure, so the composer's grid stays dumb.
-import { normSearch, RARITIES_DESC } from "../../wm/schema.js";
+// The order of a trade picker's cards: the server searches, filters and sorts by rarity, name or
+// date added (CardPicker asks it); here the cards it sent are ordered (by value, which only we know), with
+// the copies locked in a pending trade last (still visible, not pickable). Pure, so the
+// composer's grid stays dumb.
+import { RARITIES_DESC } from "../../wm/schema.js";
 
 const RANK = Object.fromEntries(RARITIES_DESC.map((r, i) => [r, i])); // 0 = rarest
+const added = (it) => Date.parse(it.obtained_at || "") || 0;
 const val = (values, it) => values.get(it.card.id) ?? -1;
 const byName = (a, b) => a.card.title.localeCompare(b.card.title, "fr", { sensitivity: "base" });
 const SORTS = {
@@ -10,9 +13,10 @@ const SORTS = {
   rarity: () => (a, b) => RANK[a.card.rarity] - RANK[b.card.rarity] || byName(a, b),
   value: (v) => (a, b) => val(v, b) - val(v, a) || RANK[a.card.rarity] - RANK[b.card.rarity] || byName(a, b),
   name: () => byName,
+  recent: () => (a, b) => added(b) - added(a) || byName(a, b),
 };
 /** Sort options, in the order the picker lists them. */
-export const PICK_SORTS = [["rarity", "Rareté"], ["value", "Valeur estimée"], ["name", "Nom"]];
+export const PICK_SORTS = [["rarity", "Rareté"], ["recent", "Récentes"], ["value", "Valeur estimée"], ["name", "Nom"]];
 
 /** True once every row has a value entry (null = known to have none), so a value sort can settle. */
 export const allValued = (items, values) => items.every((it) => values.has(it.card.id));
@@ -21,11 +25,9 @@ export const allValued = (items, values) => items.every((it) => values.has(it.ca
  * items: collection rows ({ id, card }); values: Map card id -> value; isLocked(row) -> bool.
  * Returns a new array.
  */
-export function pickList(items, { q = "", rarity = "", sort = "rarity", values, isLocked = () => false }) {
-  const nq = normSearch(q);
+export function pickList(items, { sort = "rarity", values, isLocked = () => false }) {
   const cmp = (SORTS[sort] ?? SORTS.rarity)(values);
   return items
-    .filter((it) => (!rarity || it.card.rarity === rarity) && (!nq || normSearch(it.card.title).includes(nq)))
     .map((it) => ({ it, locked: !!isLocked(it) }))
     .sort((a, b) => a.locked - b.locked || cmp(a.it, b.it))
     .map((x) => x.it);

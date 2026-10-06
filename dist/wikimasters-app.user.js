@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.12.7
+// @version      0.12.8
 // @author       Hugo Sibony
 // @description  Unofficial redesign of wiki-masters.com, on the game's own data and your own session.
 // @license      MIT
@@ -9,7 +9,7 @@
 // @homepage     https://github.com/KazeTachinuu/wiki-remaster
 // @supportURL   https://github.com/KazeTachinuu/wiki-remaster/issues
 // @downloadURL  https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js
-// @updateURL    https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js
+// @updateURL    https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.meta.js
 // @match        https://www.wiki-masters.com/*
 // @match        https://wiki-masters.com/*
 // @grant        none
@@ -3972,7 +3972,22 @@
 		});
 	}
 	if (typeof window !== "undefined") ((window.__svelte ??= {}).v ??= new Set()).add("5");
-	var PREFIX = "wm-cache:v2:";
+	var ROOT = "wm-cache:";
+	var PREFIX = ROOT + "v3:";
+	var MAX_AGE = 6048e5;
+	function sweep() {
+		try {
+			const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i));
+			for (const k of keys) {
+				if (!k.startsWith(ROOT)) continue;
+				let t = 0;
+				try {
+					t = JSON.parse(localStorage.getItem(k))?.t ?? 0;
+				} catch {}
+				if (!k.startsWith(PREFIX) || Date.now() - t > MAX_AGE) localStorage.removeItem(k);
+			}
+		} catch {}
+	}
 	function load$1(key, maxAgeMs) {
 		try {
 			const e = JSON.parse(localStorage.getItem(PREFIX + key));
@@ -4187,6 +4202,29 @@
 			return null;
 		}
 	}
+	async function supabase(path, { method = "GET", body, label } = {}) {
+		if (!sb?.headers) throw Object.assign(new Error("Session du jeu pas encore prête : réessayez dans un instant."), { status: 0 });
+		const tracked = label ? activity.start(label, 1) : null;
+		try {
+			const r = await origFetch.call(window, `${sb.base}/rest/v1/${path}`, {
+				method,
+				headers: {
+					...sb.headers,
+					"content-type": "application/json",
+					prefer: method === "GET" ? "" : "return=representation"
+				},
+				body: body == null ? void 0 : JSON.stringify(body)
+			});
+			const d = await r.json().catch(() => null);
+			if (!r.ok) throw Object.assign(new Error(d?.message || "Enregistrement impossible pour le moment."), {
+				status: r.status,
+				code: d?.code
+			});
+			return d;
+		} finally {
+			if (tracked) activity.end(tracked);
+		}
+	}
 	function header(init, name) {
 		const h = init?.headers;
 		if (!h) return null;
@@ -4248,71 +4286,6 @@
 			return ret;
 		};
 	}
-	function createLane({ concurrency = 2, gapMs = 450 } = {}) {
-		const waiting = [];
-		const subs = new Set();
-		let active = 0, nextStart = 0, pausedUntil = 0, timer = null, state = "running";
-		const emit = (s) => {
-			if (s !== state) {
-				state = s;
-				for (const f of subs) f(s);
-			}
-		};
-		function pump() {
-			clearTimeout(timer);
-			timer = null;
-			const now = Date.now();
-			if (pausedUntil > now) {
-				emit("paused");
-				timer = setTimeout(pump, pausedUntil - now);
-				return;
-			}
-			emit("running");
-			if (!waiting.length || active >= concurrency) return;
-			if (nextStart > now) {
-				timer = setTimeout(pump, nextStart - now);
-				return;
-			}
-			nextStart = now + gapMs;
-			active++;
-			waiting.shift()();
-			if (waiting.length) pump();
-		}
-		return {
-			async run(task) {
-				await new Promise((go) => {
-					waiting.push(go);
-					pump();
-				});
-				try {
-					return await task();
-				} finally {
-					active--;
-					pump();
-				}
-			},
-			pause(ms) {
-				pausedUntil = Math.max(pausedUntil, Date.now() + ms);
-				pump();
-			},
-			subscribe(f) {
-				subs.add(f);
-				f(state);
-				return () => subs.delete(f);
-			},
-			get state() {
-				return state;
-			}
-		};
-	}
-	var backgroundLane = createLane({
-		concurrency: 2,
-		gapMs: 450
-	});
-	var pageLane = createLane({
-		concurrency: 4,
-		gapMs: 150
-	});
 	var nf = (n) => n == null ? "-" : Number(n).toLocaleString("fr");
 	var compact = (n) => new Intl.NumberFormat("fr", {
 		notation: "compact",
@@ -4378,15 +4351,15 @@
 		if (userId) return userId;
 		return [...trades.flatMap((t) => [t.initiator_id, t.recipient_id]), ...messages.flatMap((m) => [m.sender_id, m.recipient_id])].find((id) => id && id !== friendId) ?? null;
 	}
-	var newest = (a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt));
+	var newest$1 = (a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt));
 	function tradeTabs(trades) {
 		const answered = new Set(trades.map((t) => t.parentId).filter(Boolean));
 		const latest = trades.filter((t) => !answered.has(t.id));
 		const pending = latest.filter((t) => t.status === "pending");
 		return {
-			incoming: pending.filter((t) => t.incoming).sort(newest),
-			outgoing: pending.filter((t) => !t.incoming).sort(newest),
-			history: latest.filter((t) => t.status !== "pending").sort(newest)
+			incoming: pending.filter((t) => t.incoming).sort(newest$1),
+			outgoing: pending.filter((t) => !t.incoming).sort(newest$1),
+			history: latest.filter((t) => t.status !== "pending").sort(newest$1)
 		};
 	}
 	function sideValue(items, coins, values) {
@@ -4465,16 +4438,25 @@
 	}
 	function chainOf(trade, all) {
 		const byId = new Map(all.map((t) => [t.id, t]));
+		const childOf = new Map(all.filter((t) => t.parentId).map((t) => [t.parentId, t]));
 		let root = trade;
 		while (root.parentId && byId.has(root.parentId)) root = byId.get(root.parentId);
 		const chain = [root];
-		for (let cur = root;;) {
-			const next = all.find((t) => t.parentId === cur.id);
-			if (!next) break;
-			chain.push(next);
-			cur = next;
-		}
+		for (let next = childOf.get(root.id); next; next = childOf.get(next.id)) chain.push(next);
 		return chain;
+	}
+	function roundsOf(all) {
+		const byId = new Map(all.map((t) => [t.id, t]));
+		const rootOf = new Map();
+		const root = (t) => {
+			if (rootOf.has(t.id)) return rootOf.get(t.id);
+			const r = t.parentId && byId.has(t.parentId) ? root(byId.get(t.parentId)) : t.id;
+			rootOf.set(t.id, r);
+			return r;
+		};
+		const size = new Map();
+		for (const t of all) size.set(root(t), (size.get(root(t)) ?? 0) + 1);
+		return new Map(all.map((t) => [t.id, size.get(rootOf.get(t.id))]));
 	}
 	var who = (mine, other) => mine ? "vous" : other;
 	var OUTCOME = {
@@ -4656,10 +4638,10 @@
 		for (const id of cardIds) drawn.set(id, (drawn.get(id) ?? 0) + 1);
 		return new Set(cardIds.filter((id) => (owned.get(id) ?? 0) <= drawn.get(id)));
 	}
-	function countsFrom(items) {
-		const counts = Object.fromEntries(RARITIES$1.map((r) => [r, 0]));
-		for (const it of items) if (it.card.rarity in counts) counts[it.card.rarity] += 1;
-		return counts;
+	function pickCopy(rows, card) {
+		const mine = (rows || []).filter((r) => r.card?.id === card.id);
+		const t = (r) => Date.parse(r.obtained_at || "") || 0;
+		return mine.sort((a, b) => (b.is_shiny === !!card.is_shiny) - (a.is_shiny === !!card.is_shiny) || t(b) - t(a))[0] ?? null;
 	}
 	function validateCards(endpoint, cards) {
 		if (!cards.length) return true;
@@ -4719,11 +4701,26 @@
 	var lastBalance = null;
 	var SAME_CARD_MS = 6e4;
 	var sameCards = new Map();
+	var marketMemo = new Map();
 	var tz = () => ({ "x-wiki-calendar-tz": Intl.DateTimeFormat().resolvedOptions().timeZone });
 	var ACTION_LABEL = {
 		accept: "Acceptation de l'échange",
 		decline: "Refus de l'échange",
 		cancel: "Annulation de l'offre"
+	};
+	var nTag = (t) => {
+		const x = t?.tag ?? t;
+		return x?.id ? {
+			id: x.id,
+			name: x.name ?? "",
+			color: x.color ?? null
+		} : null;
+	};
+	var COLLECTION_SORT = {
+		rarity: null,
+		name: "name",
+		recent: "added",
+		starred: "starred"
 	};
 	var qs = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== "" && v !== false)).toString();
 	function mapCollection(rows) {
@@ -4736,7 +4733,7 @@
 				is_shiny: !!it.is_shiny,
 				starred: !!it.starred,
 				obtained_at: it.obtained_at || null,
-				_s: normSearch(card.title + " " + card.category)
+				tags: (it.tags || []).map(nTag).filter(Boolean)
 			};
 		});
 	}
@@ -4839,40 +4836,23 @@
 			});
 			return d;
 		},
-		async collection({ onPartial } = {}) {
-			const first = await api("/api/my-collection?sort=rarity&page=0&stats=1");
-			const pending = first.pendingTradeCardIds || [];
-			const rows = new Map();
-			const add = (list) => {
-				for (const it of mapCollection(list || [])) rows.set(it.id, it);
-			};
-			add(first.collection);
-			const items = () => [...rows.values()];
-			const copies = first.total ?? rows.size;
-			const stats = (loading) => ({
-				copies,
-				unique: new Set(items().map((it) => it.card.id)).size,
-				counts: first.rarityCounts || countsFrom(items()),
-				loading
-			});
-			const pages = Math.ceil(copies / PAGE);
-			if (pages > 1) {
-				onPartial?.({
-					items: items(),
-					stats: stats(true)
-				});
-				await Promise.all(Array.from({ length: pages - 1 }, (_, i) => pageLane.run(() => api(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`, { quiet: true })).then((d) => {
-					add(d.collection);
-					onPartial?.({
-						items: items(),
-						stats: stats(true)
-					});
-				})));
-			}
+		async myCards({ page = 0, q, rarity, sort, tag } = {}) {
+			const d = await api(`/api/my-collection?${qs({
+				page,
+				q,
+				rarity,
+				sort: COLLECTION_SORT[sort],
+				tag_id: tag && tag !== "none" ? tag : null,
+				untagged: tag === "none" ? 1 : null,
+				stats: page ? null : 1
+			})}`, { quiet: page > 0 });
+			const rows = d.collection || [];
 			return {
-				items: items(),
-				stats: stats(false),
-				pending
+				items: mapCollection(rows),
+				hasMore: rows.length === PAGE,
+				total: d.total ?? null,
+				counts: d.rarityCounts || {},
+				pending: d.pendingTradeCardIds || []
 			};
 		},
 		async catalog({ page = 0, sort = "rarity", q, rarity, wishlist } = {}) {
@@ -4937,8 +4917,8 @@
 			list.catch(() => sameCards.delete(card.id));
 			return list;
 		},
-		async myMarket() {
-			const d = await api("/api/marketplace?page=1&limit=1&mine=1");
+		async myMarket({ quiet } = {}) {
+			const d = await api("/api/marketplace?page=1&limit=1&mine=1", { quiet });
 			const list = (k, mine) => (d[k] || []).map((a) => ({
 				...nAuction(a, this.userId),
 				...mine && { mine: true }
@@ -5039,7 +5019,7 @@
 				page,
 				q,
 				rarity,
-				sort: sort === "name" ? "name" : null
+				sort: COLLECTION_SORT[sort]
 			})}`);
 			const rows = d.collection || [];
 			return {
@@ -5048,6 +5028,49 @@
 				hasMore: rows.length === PAGE
 			};
 		},
+		async myCopy(card) {
+			return pickCopy((await this.myCards({ q: card.title })).items, card);
+		},
+		setStarred: (userCardId, starred) => supabase(`user_cards?id=eq.${encodeURIComponent(userCardId)}`, {
+			method: "PATCH",
+			body: { starred },
+			label: starred ? "Ajout aux favoris" : "Retrait des favoris"
+		}),
+		async myTags() {
+			const me = needMe(this.userId);
+			return (await supabase(`tags?select=*&user_id=eq.${encodeURIComponent(me)}&order=name.asc`) || []).map(nTag).filter(Boolean);
+		},
+		async createTag(name, color) {
+			const me = needMe(this.userId);
+			try {
+				const [row] = await supabase("tags", {
+					method: "POST",
+					body: {
+						user_id: me,
+						name,
+						color
+					},
+					label: "Nouvelle étiquette"
+				});
+				return nTag(row);
+			} catch (e) {
+				if (e.code !== "23505") throw e;
+				const [row] = await supabase(`tags?select=*&user_id=eq.${encodeURIComponent(me)}&name=eq.${encodeURIComponent(name)}`);
+				return nTag(row);
+			}
+		},
+		tagCard: (userCardId, tagId) => supabase("user_card_tags", {
+			method: "POST",
+			body: {
+				user_card_id: userCardId,
+				tag_id: tagId
+			},
+			label: "Étiquette"
+		}),
+		untagCard: (userCardId, tagId) => supabase(`user_card_tags?user_card_id=eq.${encodeURIComponent(userCardId)}&tag_id=eq.${encodeURIComponent(tagId)}`, {
+			method: "DELETE",
+			label: "Étiquette"
+		}),
 		humanCheck: (token) => api("/api/human-check", {
 			method: "POST",
 			body: { token },
@@ -5070,7 +5093,18 @@
 		async marketValue(card) {
 			return (await api(`/api/marketplace/cards/${card.id}/sales?scope=summary`, { quiet: true })).summary?.[card.rarity]?.average ?? null;
 		},
-		async marketStats(card) {
+		marketStats(card) {
+			const hit = marketMemo.get(card.id);
+			if (hit && Date.now() - hit.at < SAME_CARD_MS) return hit.stats;
+			const stats = this.fetchMarketStats(card);
+			marketMemo.set(card.id, {
+				at: Date.now(),
+				stats
+			});
+			stats.catch(() => marketMemo.delete(card.id));
+			return stats;
+		},
+		async fetchMarketStats(card) {
 			const d = await api(`/api/marketplace/cards/${card.id}/sales?scope=summary`, { quiet: true });
 			const averages = Object.fromEntries(Object.entries(d.summary || {}).map(([r, v]) => [r, v?.average ?? null]));
 			if (!d.isPro) return {
@@ -5123,8 +5157,109 @@
 				is_vip: !!p.is_vip
 			};
 		},
-		reset: () => api("/api/reset", { method: "POST" })
+		reset: () => api("/api/reset", { method: "POST" }),
+		setStarred: (id, starred) => api("/api/__sb/star", {
+			method: "PATCH",
+			body: {
+				id,
+				starred
+			},
+			label: starred ? "Ajout aux favoris" : "Retrait des favoris"
+		}),
+		myTags: () => api("/api/__sb/tags", { quiet: true }),
+		async createTag(name, color) {
+			try {
+				return (await api("/api/__sb/tags", {
+					method: "POST",
+					body: {
+						name,
+						color
+					},
+					label: "Nouvelle étiquette"
+				}))[0];
+			} catch (e) {
+				if (e.data?.code !== "23505") throw e;
+				return (await api("/api/__sb/tags", { quiet: true })).find((t) => t.name === name);
+			}
+		},
+		tagCard: (userCardId, tagId) => api("/api/__sb/card-tags", {
+			method: "POST",
+			body: {
+				user_card_id: userCardId,
+				tag_id: tagId
+			},
+			label: "Étiquette"
+		}),
+		untagCard: (userCardId, tagId) => api(`/api/__sb/card-tags?user_card_id=${encodeURIComponent(userCardId)}&tag_id=${encodeURIComponent(tagId)}`, {
+			method: "DELETE",
+			label: "Étiquette"
+		})
 	};
+	function createLane({ concurrency = 2, gapMs = 450 } = {}) {
+		const waiting = [];
+		const subs = new Set();
+		let active = 0, nextStart = 0, pausedUntil = 0, timer = null, state = "running";
+		const emit = (s) => {
+			if (s !== state) {
+				state = s;
+				for (const f of subs) f(s);
+			}
+		};
+		function pump() {
+			clearTimeout(timer);
+			timer = null;
+			const now = Date.now();
+			if (pausedUntil > now) {
+				emit("paused");
+				timer = setTimeout(pump, pausedUntil - now);
+				return;
+			}
+			emit("running");
+			if (!waiting.length || active >= concurrency) return;
+			if (nextStart > now) {
+				timer = setTimeout(pump, nextStart - now);
+				return;
+			}
+			nextStart = now + gapMs;
+			active++;
+			waiting.shift()();
+			if (waiting.length) pump();
+		}
+		return {
+			async run(task) {
+				await new Promise((go) => {
+					waiting.push(go);
+					pump();
+				});
+				try {
+					return await task();
+				} finally {
+					active--;
+					pump();
+				}
+			},
+			pause(ms) {
+				pausedUntil = Math.max(pausedUntil, Date.now() + ms);
+				pump();
+			},
+			subscribe(f) {
+				subs.add(f);
+				f(state);
+				return () => subs.delete(f);
+			},
+			get state() {
+				return state;
+			}
+		};
+	}
+	var backgroundLane = createLane({
+		concurrency: 2,
+		gapMs: 450
+	});
+	var pageLane = createLane({
+		concurrency: 4,
+		gapMs: 150
+	});
 	var session = {
 		packs: 0,
 		cards: 0,
@@ -5156,13 +5291,16 @@
 		health: () => health,
 		initCapture: () => initCapture,
 		isRateLimited: () => isRateLimited,
-		loadCollection: () => loadCollection,
 		marketValueFor: () => marketValueFor,
+		myCardsPage: () => myCardsPage,
 		normSearch: () => normSearch,
 		offerSummary: () => offerSummary,
 		pageLane: () => pageLane,
+		pickCopy: () => pickCopy,
 		recordPull: () => recordPull,
 		refreshProfile: () => refreshProfile,
+		roundsOf: () => roundsOf,
+		savedFirstPage: () => savedFirstPage,
 		session: () => session,
 		sideValue: () => sideValue,
 		statusLabel: () => statusLabel,
@@ -5173,10 +5311,16 @@
 		verdictTitle: () => verdictTitle
 	});
 	var data = /(^|\.)wiki-masters\.com$/.test(location.hostname) ? RealData : MockData;
+	sweep();
 	var VALUE_TTL = 864e5;
 	var RATE_PAUSE_MS = 6e4;
 	var saved$1 = Object.fromEntries(Object.entries(load$1("values", Infinity) || {}).filter(([, [, t]]) => Date.now() - t < VALUE_TTL));
 	var inflight = new Map();
+	var VALUE_KEEP = 4e3;
+	var newest = (map, n) => {
+		const e = Object.entries(map);
+		return e.length <= n ? map : Object.fromEntries(e.sort((a, b) => b[1][1] - a[1][1]).slice(0, n));
+	};
 	var saveTimer = null;
 	function marketValueFor(card) {
 		const hit = saved$1[card.id];
@@ -5186,7 +5330,7 @@
 				saved$1[card.id] = [v, Date.now()];
 				saveTimer ??= setTimeout(() => {
 					saveTimer = null;
-					save("values", saved$1);
+					save("values", newest(saved$1, VALUE_KEEP));
 				}, 1e3);
 				return v;
 			}, (e) => {
@@ -5198,50 +5342,17 @@
 		}
 		return inflight.get(card.id);
 	}
-	var COLLECTION_TTL = 6048e5;
-	var COLLECTION_KEY = "collection.v4";
-	var COLLECTION_FRESH_MS = 3e5;
-	var collectionLoad = null;
-	function loadCollection({ onCached, onPartial, force = false } = {}) {
-		const cached = load$1(COLLECTION_KEY, COLLECTION_TTL);
-		if (cached) onCached?.(cached);
-		if (cached && !force && Date.now() - cached.at < COLLECTION_FRESH_MS) return Promise.resolve(cached);
-		collectionLoad ??= data.collection({ onPartial: cached ? void 0 : onPartial }).then((fresh) => {
-			const v = {
-				...fresh,
-				at: Date.now()
-			};
-			save(COLLECTION_KEY, v);
-			return v;
-		}).finally(() => collectionLoad = null);
-		return collectionLoad;
+	var FIRST_TTL = 6048e5;
+	var FIRST_KEY = "collection.first.v1";
+	var savedFirstPage = () => load$1(FIRST_KEY, FIRST_TTL);
+	async function myCardsPage(query = {}) {
+		const d = await data.myCards(query);
+		if (!query.page && !query.q && !query.rarity && (query.sort ?? "rarity") === "rarity") save(FIRST_KEY, d);
+		return d;
 	}
-	function patchCollection(change) {
-		const c = load$1(COLLECTION_KEY, COLLECTION_TTL);
-		if (!c) return;
-		const items = change(c.items);
-		const stats = {
-			...c.stats,
-			copies: items.length,
-			unique: new Set(items.map((it) => it.card.id)).size,
-			counts: countsFrom(items),
-			loading: false
-		};
-		save(COLLECTION_KEY, {
-			...c,
-			items,
-			stats
-		});
-	}
-	var collectionAdd = (rows) => patchCollection((items) => {
-		const have = new Set(items.map((it) => it.id));
-		return [...items, ...rows.filter((r) => !have.has(r.id))];
-	});
-	var collectionRemove = (ids) => patchCollection((items) => {
-		const gone = new Set(ids);
-		return items.filter((it) => !gone.has(it.id));
-	});
-	var forgetCollection = () => drop(COLLECTION_KEY);
+	var collectionAdd = () => drop(FIRST_KEY);
+	var collectionRemove = () => drop(FIRST_KEY);
+	var forgetCollection = () => drop(FIRST_KEY);
 	var PATHS = {
 		close: [["path", { "d": "M6 6l12 12M18 6L6 18" }]],
 		search: [["circle", {
@@ -5331,6 +5442,11 @@
 		trades: [["path", { "d": "M4 9h13l-3-3M20 15H7l3 3" }]],
 		battle: [["path", { "d": "M4.5 19.5l1-3 9-9 2 2-9 9zM19.5 19.5l-1-3-9-9-2 2 9 9z" }]],
 		guild: [["path", { "d": "M12 3l7 2.5v5.5c0 4.2-2.9 7.4-7 9-4.1-1.6-7-4.8-7-9V5.5z" }]],
+		tag: [["path", { "d": "M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9a1 1 0 0 1 0 1.4l-7.1 7.1a1 1 0 0 1-1.4 0z" }], ["circle", {
+			"cx": "8",
+			"cy": "8",
+			"r": "1.4"
+		}]],
 		friends: [
 			["circle", {
 				"cx": "9",
@@ -5365,13 +5481,13 @@
 			"r": "3"
 		}], ["path", { "d": "M12 2.5v2.5M12 19v2.5M21.5 12H19M5 12H2.5M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8M18.4 18.4l-1.8-1.8M7.4 7.4 5.6 5.6" }]]
 	};
-	var root$29 = from_svg(`<path></path>`);
-	var root_1$28 = from_svg(`<circle></circle>`);
-	var root_2$23 = from_svg(`<rect></rect>`);
-	var root_3$20 = from_svg(`<svg viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>`);
+	var root$30 = from_svg(`<path></path>`);
+	var root_1$30 = from_svg(`<circle></circle>`);
+	var root_2$25 = from_svg(`<rect></rect>`);
+	var root_3$22 = from_svg(`<svg viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>`);
 	function Icon($$anchor, $$props) {
 		let filled = prop($$props, "filled", 3, false), width = prop($$props, "width", 3, 1.8), cls = prop($$props, "class", 3, "");
-		var svg = root_3$20();
+		var svg = root_3$22();
 		each(svg, 21, () => PATHS[$$props.name], index, ($$anchor, $$item) => {
 			var $$array = user_derived(() => to_array(get($$item), 2));
 			let tag = () => get($$array)[0];
@@ -5379,17 +5495,17 @@
 			var fragment = comment();
 			var node = first_child(fragment);
 			var consequent = ($$anchor) => {
-				var path = root$29();
+				var path = root$30();
 				attribute_effect(path, () => ({ ...attrs() }));
 				append($$anchor, path);
 			};
 			var consequent_1 = ($$anchor) => {
-				var circle = root_1$28();
+				var circle = root_1$30();
 				attribute_effect(circle, () => ({ ...attrs() }));
 				append($$anchor, circle);
 			};
 			var alternate = ($$anchor) => {
-				var rect = root_2$23();
+				var rect = root_2$25();
 				attribute_effect(rect, () => ({ ...attrs() }));
 				append($$anchor, rect);
 			};
@@ -5416,8 +5532,7 @@
 		collection: {
 			sort: "rarity",
 			filter: "ALL",
-			favOnly: false,
-			shinyOnly: false
+			favOnly: false
 		},
 		catalog: {
 			sort: "rarity",
@@ -5545,21 +5660,21 @@
 			sparkles
 		};
 	}
-	var root$28 = from_svg(`<defs><radialGradient><stop offset="0" stop-color="#fff" stop-opacity=".55"></stop><stop offset=".22" class="glow-mid"></stop><stop offset="1" class="glow-out"></stop></radialGradient></defs>`);
-	var root_1$27 = from_svg(`<path class="spark"></path>`);
-	var root_2$22 = from_svg(`<circle cx="50" cy="52" r="30"></circle><!>`, 1);
-	var root_3$19 = from_html(`<span class="wc-meteor" aria-hidden="true"></span>`);
-	var root_4$18 = from_html(`<svg class="wc-sky" viewBox="0 0 100 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><!><path stroke="#fff" stroke-opacity=".38" stroke-width=".7" stroke-linecap="round"></path><path stroke="#fff" stroke-opacity=".7" stroke-width=".85" stroke-linecap="round"></path><!><g transform="translate(50 52)"><path class="ray"></path><path class="core"></path></g></svg> <!>`, 1);
+	var root$29 = from_svg(`<defs><radialGradient><stop offset="0" stop-color="#fff" stop-opacity=".55"></stop><stop offset=".22" class="glow-mid"></stop><stop offset="1" class="glow-out"></stop></radialGradient></defs>`);
+	var root_1$29 = from_svg(`<path class="spark"></path>`);
+	var root_2$24 = from_svg(`<circle cx="50" cy="52" r="30"></circle><!>`, 1);
+	var root_3$21 = from_html(`<span class="wc-meteor" aria-hidden="true"></span>`);
+	var root_4$20 = from_html(`<svg class="wc-sky" viewBox="0 0 100 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><!><path stroke="#fff" stroke-opacity=".38" stroke-width=".7" stroke-linecap="round"></path><path stroke="#fff" stroke-opacity=".7" stroke-width=".85" stroke-linecap="round"></path><!><g transform="translate(50 52)"><path class="ray"></path><path class="core"></path></g></svg> <!>`, 1);
 	function CardSky($$anchor, $$props) {
 		const id = props_id();
 		push($$props, true);
 		let shiny = prop($$props, "shiny", 3, false);
 		const STAR = "M0-1C.08-.25.25-.08 1 0 .25.08.08.25 0 1-.08.25-.25.08-1 0-.25-.08-.08-.25 0-1Z";
-		var fragment = root_4$18();
+		var fragment = root_4$20();
 		var svg = first_child(fragment);
 		var node = child(svg);
 		var consequent = ($$anchor) => {
-			var defs = root$28();
+			var defs = root$29();
 			var radialGradient = only_child(defs);
 			template_effect(() => set_attribute(radialGradient, "id", `g${id}`));
 			append($$anchor, defs);
@@ -5571,14 +5686,14 @@
 		var path_1 = sibling(path);
 		var node_1 = sibling(path_1);
 		var consequent_1 = ($$anchor) => {
-			var fragment_1 = root_2$22();
+			var fragment_1 = root_2$24();
 			var circle = first_child(fragment_1);
 			each(sibling(circle), 17, () => $$props.sky.sparkles, index, ($$anchor, $$item) => {
 				var $$array = user_derived(() => to_array(get($$item), 3));
 				let x = () => get($$array)[0];
 				let y = () => get($$array)[1];
 				let k = () => get($$array)[2];
-				var path_2 = root_1$27();
+				var path_2 = root_1$29();
 				set_attribute(path_2, "d", STAR);
 				template_effect(() => set_attribute(path_2, "transform", `translate(${x() ?? ""} ${y() ?? ""}) scale(${k() ?? ""})`));
 				append($$anchor, path_2);
@@ -5607,7 +5722,7 @@
 				let y1 = () => get($$array_1)[3];
 				let w = () => get($$array_1)[4];
 				let o = () => get($$array_1)[5];
-				var span = root_3$19();
+				var span = root_3$21();
 				template_effect(($0, $1) => set_style(span, `left:${x0() ?? ""}%;top:${y0() / 140 * 100}%;width:${$0 ?? ""}%;--a:${$1 ?? ""}rad;--w:${w() * 2.4}px;opacity:${o() ?? ""};animation-delay:${-i * .55}s`), [() => Math.hypot(x1() - x0(), y1() - y0()), () => Math.atan2(y1() - y0(), x1() - x0())]);
 				append($$anchor, span);
 			});
@@ -5625,20 +5740,20 @@
 		append($$anchor, fragment);
 		pop();
 	}
-	var root$27 = from_html(`<img class="wc-photo onyx-photo" loading="lazy" crossorigin="anonymous"/>`);
-	var root_1$26 = from_html(`<img class="wc-bg onyx" alt="" aria-hidden="true" loading="lazy"/> <span class="ox ox-shade" aria-hidden="true"></span> <span class="ox ox-tint" aria-hidden="true"></span> <span class="ox ox-wash" aria-hidden="true"></span> <!> <span class="ox ox-lines" aria-hidden="true"></span> <span class="ox ox-shine" aria-hidden="true"></span>`, 1);
-	var root_2$21 = from_html(`<img class="wc-blur" alt="" aria-hidden="true" loading="lazy" crossorigin="anonymous"/> <img class="wc-photo" loading="lazy" crossorigin="anonymous"/>`, 1);
-	var root_3$18 = from_html(`<span aria-hidden="true"></span>`);
-	var root_4$17 = from_html(`<span class="wc-nsfw" aria-hidden="true">Contenu sensible</span>`);
-	var root_5$17 = from_html(`<span class="wc-wish" title="Liste de souhaits" aria-label="Liste de souhaits"><!></span>`);
-	var root_6$16 = from_html(`<span class="wc-star" title="Favori" aria-label="Favori"><!></span>`);
-	var root_7$14 = from_html(`<span class="wc-shiny" title="Brillante" aria-label="Brillante"><!></span>`);
-	var root_8$12 = from_html(`<span class="wc-count"> </span>`);
-	var root_9$11 = from_html(`<span class="wc-new">Nouvelle</span>`);
-	var root_10$9 = from_html(`<span class="wc-stats"><span>ATK <b> </b></span> <span>DEF <b> </b></span></span>`);
-	var root_11$8 = from_html(`<span class="wc-val" title="Valeur estimée d'après le marché"> </span>`);
-	var root_12$8 = from_html(`<div class="wc-meta"><!> <!></div>`);
-	var root_13$7 = from_html(`<article><div class="wc-face"><!> <!> <!></div> <div class="wc-scrim"></div> <div class="wc-top"><span class="wc-rtag"> </span> <span class="wc-flags"><!> <!> <!> <!> <!></span></div> <div class="wc-cap"><h3 class="wc-name"> </h3> <div class="wc-cat"> </div> <!></div></article>`);
+	var root$28 = from_html(`<img class="wc-photo onyx-photo" loading="lazy" crossorigin="anonymous"/>`);
+	var root_1$28 = from_html(`<img class="wc-bg onyx" alt="" aria-hidden="true" loading="lazy"/> <span class="ox ox-shade" aria-hidden="true"></span> <span class="ox ox-tint" aria-hidden="true"></span> <span class="ox ox-wash" aria-hidden="true"></span> <!> <span class="ox ox-lines" aria-hidden="true"></span> <span class="ox ox-shine" aria-hidden="true"></span>`, 1);
+	var root_2$23 = from_html(`<img class="wc-blur" alt="" aria-hidden="true" loading="lazy" crossorigin="anonymous"/> <img class="wc-photo" loading="lazy" crossorigin="anonymous"/>`, 1);
+	var root_3$20 = from_html(`<span aria-hidden="true"></span>`);
+	var root_4$19 = from_html(`<span class="wc-nsfw" aria-hidden="true">Contenu sensible</span>`);
+	var root_5$19 = from_html(`<span class="wc-wish" title="Liste de souhaits" aria-label="Liste de souhaits"><!></span>`);
+	var root_6$18 = from_html(`<span class="wc-star" title="Favori" aria-label="Favori"><!></span>`);
+	var root_7$17 = from_html(`<span class="wc-shiny" title="Brillante" aria-label="Brillante"><!></span>`);
+	var root_8$16 = from_html(`<span class="wc-count"> </span>`);
+	var root_9$14 = from_html(`<span class="wc-new">Nouvelle</span>`);
+	var root_10$11 = from_html(`<span class="wc-stats"><span>ATK <b> </b></span> <span>DEF <b> </b></span></span>`);
+	var root_11$10 = from_html(`<span class="wc-val" title="Valeur estimée d'après le marché"> </span>`);
+	var root_12$9 = from_html(`<div class="wc-meta"><!> <!></div>`);
+	var root_13$9 = from_html(`<article><div class="wc-face"><!> <!> <!></div> <div class="wc-scrim"></div> <div class="wc-top"><span class="wc-rtag"> </span> <span class="wc-flags"><!> <!> <!> <!> <!></span></div> <div class="wc-cap"><h3 class="wc-name"> </h3> <div class="wc-cat"> </div> <!></div></article>`);
 	function Card($$anchor, $$props) {
 		push($$props, true);
 		let count = prop($$props, "count", 3, 1), isNew = prop($$props, "isNew", 3, false), shiny = prop($$props, "shiny", 3, false), starred = prop($$props, "starred", 3, false), value = prop($$props, "value", 3, void 0), owned = prop($$props, "owned", 3, true), wishlisted = prop($$props, "wishlisted", 3, false), big = prop($$props, "big", 3, false), caption = prop($$props, "caption", 3, true), stats = prop($$props, "stats", 3, true);
@@ -5662,17 +5777,17 @@
 				img.removeEventListener("error", done);
 			} };
 		}
-		var article = root_13$7();
+		var article = root_13$9();
 		let classes;
 		var div = child(article);
 		var node = child(div);
 		var consequent_1 = ($$anchor) => {
-			var fragment = root_1$26();
+			var fragment = root_1$28();
 			var img_1 = first_child(fragment);
 			action(img_1, ($$node) => fadeIn?.($$node));
 			var node_1 = sibling(img_1, 8);
 			var consequent = ($$anchor) => {
-				var img_2 = root$27();
+				var img_2 = root$28();
 				template_effect(() => {
 					set_attribute(img_2, "src", $$props.card.image_url);
 					set_attribute(img_2, "alt", $$props.card.title);
@@ -5690,7 +5805,7 @@
 			append($$anchor, fragment);
 		};
 		var consequent_2 = ($$anchor) => {
-			var fragment_1 = root_2$21();
+			var fragment_1 = root_2$23();
 			var img_3 = first_child(fragment_1);
 			var img_4 = sibling(img_3, 2);
 			action(img_4, ($$node) => fadeIn?.($$node));
@@ -5721,7 +5836,7 @@
 		});
 		var node_2 = sibling(node, 2);
 		var consequent_4 = ($$anchor) => {
-			var span = root_3$18();
+			var span = root_3$20();
 			let classes_1;
 			template_effect(() => classes_1 = set_class(span, 1, "wc-holo", null, classes_1, { onyx: get(onyx) }));
 			append($$anchor, span);
@@ -5731,7 +5846,7 @@
 		});
 		var node_3 = sibling(node_2, 2);
 		var consequent_5 = ($$anchor) => {
-			append($$anchor, root_4$17());
+			append($$anchor, root_4$19());
 		};
 		if_block(node_3, ($$render) => {
 			if (get(blurred)) $$render(consequent_5);
@@ -5743,7 +5858,7 @@
 		var span_3 = sibling(span_2, 2);
 		var node_4 = child(span_3);
 		var consequent_6 = ($$anchor) => {
-			var span_4 = root_5$17();
+			var span_4 = root_5$19();
 			Icon(child(span_4), {
 				name: "heart",
 				filled: true,
@@ -5757,7 +5872,7 @@
 		});
 		var node_6 = sibling(node_4, 2);
 		var consequent_7 = ($$anchor) => {
-			var span_5 = root_6$16();
+			var span_5 = root_6$18();
 			Icon(child(span_5), {
 				name: "star",
 				filled: true,
@@ -5771,7 +5886,7 @@
 		});
 		var node_8 = sibling(node_6, 2);
 		var consequent_8 = ($$anchor) => {
-			var span_6 = root_7$14();
+			var span_6 = root_7$17();
 			Icon(child(span_6), {
 				name: "sparkle",
 				filled: true,
@@ -5785,7 +5900,7 @@
 		});
 		var node_10 = sibling(node_8, 2);
 		var consequent_9 = ($$anchor) => {
-			var span_7 = root_8$12();
+			var span_7 = root_8$16();
 			var text_1 = only_child(span_7);
 			template_effect(() => set_text(text_1, `x${count() ?? ""}`));
 			append($$anchor, span_7);
@@ -5795,7 +5910,7 @@
 		});
 		var node_11 = sibling(node_10, 2);
 		var consequent_10 = ($$anchor) => {
-			append($$anchor, root_9$11());
+			append($$anchor, root_9$14());
 		};
 		if_block(node_11, ($$render) => {
 			if (isNew()) $$render(consequent_10);
@@ -5809,10 +5924,10 @@
 		var text_3 = only_child(div_3, true);
 		var node_12 = sibling(div_3, 2);
 		var consequent_13 = ($$anchor) => {
-			var div_4 = root_12$8();
+			var div_4 = root_12$9();
 			var node_13 = child(div_4);
 			var consequent_11 = ($$anchor) => {
-				var span_9 = root_10$9();
+				var span_9 = root_10$11();
 				var span_10 = child(span_9);
 				var text_4 = only_child(sibling(child(span_10)), true);
 				reset(span_10);
@@ -5831,7 +5946,7 @@
 			});
 			var node_14 = sibling(node_13, 2);
 			var consequent_12 = ($$anchor) => {
-				var span_12 = root_11$8();
+				var span_12 = root_11$10();
 				var text_6 = only_child(span_12, true);
 				template_effect(($0) => set_text(text_6, $0), [() => nf(value())]);
 				append($$anchor, span_12);
@@ -6130,7 +6245,6 @@
 		play("flip");
 		play(rarity, .12);
 	}
-	var rarest = (cards) => RARITIES_DESC.find((r) => cards?.some((c) => c.rarity === r)) ?? null;
 	async function sounded(run, sfx = play) {
 		try {
 			const d = await run();
@@ -6201,27 +6315,27 @@
 		for (const a of auctions || []) n.set(a.card.id, (n.get(a.card.id) || 0) + 1);
 		return n;
 	}
-	var root$26 = from_html(` <b> </b>`, 1);
-	var root_1$25 = from_html(`<span class="cmp-sum"> <b> </b> · moyenne <b> </b><!></span>`);
-	var root_2$20 = from_html(`<li><div class="cmp-row sk"></div></li>`);
-	var root_3$17 = from_html(`<ol class="cmp-list" aria-label="Recherche des ventes en cours"></ol>`);
-	var root_4$16 = from_html(`<div class="auc-empty"> <!></div>`);
-	var root_5$16 = from_html(`<span class="cmp-shiny" title="Brillante"><!></span>`);
-	var root_6$15 = from_html(`<span class="cmp-tag">Finit en premier</span>`);
-	var root_7$13 = from_html(`<li><button><span class="cmp-price"><span class="auc-coin"></span> <!></span> <span> </span> <span> <!></span> <span class="cmp-who"> </span></button></li>`);
-	var root_8$11 = from_html(`<ol class="cmp-list"></ol>`);
-	var root_9$10 = from_html(`<section class="auc-panel cmp" aria-label="Ventes en cours de cette carte"><div class="cmp-head"><h3>Ventes en cours</h3> <!></div> <!></section>`);
+	var root$27 = from_html(` <b> </b>`, 1);
+	var root_1$27 = from_html(`<span class="cmp-sum"> <b> </b> · moyenne <b> </b><!></span>`);
+	var root_2$22 = from_html(`<li><div class="cmp-row sk"></div></li>`);
+	var root_3$19 = from_html(`<ol class="cmp-list" aria-label="Recherche des ventes en cours"></ol>`);
+	var root_4$18 = from_html(`<div class="auc-empty"> <!></div>`);
+	var root_5$18 = from_html(`<span class="cmp-shiny" title="Brillante"><!></span>`);
+	var root_6$17 = from_html(`<span class="cmp-tag">Finit en premier</span>`);
+	var root_7$16 = from_html(`<li><button><span class="cmp-price"><span class="auc-coin"></span> <!></span> <span> </span> <span> <!></span> <span class="cmp-who"> </span></button></li>`);
+	var root_8$15 = from_html(`<ol class="cmp-list"></ol>`);
+	var root_9$13 = from_html(`<section class="auc-panel cmp" aria-label="Ventes en cours de cette carte"><div class="cmp-head"><h3>Ventes en cours</h3> <!></div> <!></section>`);
 	function ListingCompare($$anchor, $$props) {
 		push($$props, true);
 		let current = prop($$props, "current", 3, null), soldAvg = prop($$props, "soldAvg", 3, null);
 		const all = user_derived(() => $$props.listings && (current() ? [current(), ...$$props.listings.filter((o) => o.id !== current().id)] : $$props.listings));
 		const cmp = user_derived(() => get(all) && compareListings(get(all), $$props.now));
 		const others = user_derived(() => get(cmp) ? get(cmp).rows.length - (current() ? 1 : 0) : 0);
-		var section = root_9$10();
+		var section = root_9$13();
 		var div = child(section);
 		var node = sibling(child(div), 2);
 		var consequent_1 = ($$anchor) => {
-			var span = root_1$25();
+			var span = root_1$27();
 			var text = child(span);
 			var b = sibling(text);
 			var text_1 = only_child(b, true);
@@ -6229,7 +6343,7 @@
 			var text_2 = only_child(b_1, true);
 			var node_1 = sibling(b_1);
 			var consequent = ($$anchor) => {
-				var fragment = root$26();
+				var fragment = root$27();
 				var text_3 = first_child(fragment);
 				text_3.nodeValue = " · vendue en moyenne ";
 				var text_4 = only_child(sibling(text_3), true);
@@ -6253,15 +6367,15 @@
 		reset(div);
 		var node_2 = sibling(div, 2);
 		var consequent_2 = ($$anchor) => {
-			var ol = root_3$17();
+			var ol = root_3$19();
 			each(ol, 20, () => Array(3), index, ($$anchor, _) => {
-				append($$anchor, root_2$20());
+				append($$anchor, root_2$22());
 			});
 			reset(ol);
 			append($$anchor, ol);
 		};
 		var consequent_4 = ($$anchor) => {
-			var div_1 = root_4$16();
+			var div_1 = root_4$18();
 			var text_5 = child(div_1, true);
 			var node_3 = sibling(text_5);
 			var consequent_3 = ($$anchor) => {
@@ -6277,18 +6391,18 @@
 			append($$anchor, div_1);
 		};
 		var alternate = ($$anchor) => {
-			var ol_1 = root_8$11();
+			var ol_1 = root_8$15();
 			each(ol_1, 21, () => get(cmp).rows, (r) => r.id, ($$anchor, r) => {
 				const left = user_derived(() => secondsUntil(get(r).endAt, $$props.now) ?? 0);
 				const here = user_derived(() => get(r).id === current()?.id);
-				var li_1 = root_7$13();
+				var li_1 = root_7$16();
 				var button = child(li_1);
 				let classes;
 				var span_1 = child(button);
 				var text_7 = sibling(child(span_1), 1, true);
 				var node_4 = sibling(text_7);
 				var consequent_5 = ($$anchor) => {
-					var span_2 = root_5$16();
+					var span_2 = root_5$18();
 					Icon(child(span_2), {
 						name: "sparkle",
 						width: 2
@@ -6308,7 +6422,7 @@
 				var text_9 = child(span_4, true);
 				var node_6 = sibling(text_9);
 				var consequent_6 = ($$anchor) => {
-					append($$anchor, root_6$15());
+					append($$anchor, root_6$17());
 				};
 				if_block(node_6, ($$render) => {
 					if (get(r).soonest) $$render(consequent_6);
@@ -6374,37 +6488,710 @@
 			sellAt
 		};
 	}
-	var root$25 = from_html(`<div class="modal-cat"> </div>`);
-	var root_1$24 = from_html(`<p class="modal-sum muted">Chargement du résumé...</p>`);
-	var root_2$19 = from_html(`<p class="modal-sum"> </p>`);
-	var root_3$16 = from_html(`<div class="fact"><div class="fk">Valeur estimée</div><div class="fv val"> </div></div>`);
-	var root_4$15 = from_html(`<div class="fact"><div class="fk">Exemplaires</div><div class="fv"> <!></div></div>`);
-	var root_5$15 = from_html(`<div class="fact"><div class="fk" title="Vues de l'article Wikipédia sur 30 jours">Vues (30 j)</div><div class="fv"> </div></div>`);
-	var root_6$14 = from_html(`<div class="fact"><div class="fk">Attaque</div><div class="fv atk"> </div></div> <div class="fact"><div class="fk">Défense</div><div class="fv def"> </div></div>`, 1);
-	var root_7$12 = from_html(`<div class="modal-obtained"> </div>`);
-	var root_8$10 = from_html(`<a class="modal-wiki" target="_blank" rel="noopener noreferrer">Voir l'article Wikipédia</a>`);
-	var root_9$9 = from_html(`<div class="confirm"><div class="confirm-text">Défausser cette carte contre <b>1 point</b> ?</div> <div class="af-actions"><button class="btn">Annuler</button> <button class="btn danger">Défausser</button></div></div>`);
-	var root_10$8 = from_html(`<button type="button" class="sell2-suggest"> </button>`);
-	var root_11$7 = from_html(`<button type="button"> </button>`);
-	var root_12$7 = from_html(`<div class="sell2"><div class="sell2-head">Mettre en vente</div> <div class="sell2-block"><div class="sell2-lab"><span>Prix de départ</span> <!></div> <div class="af-input-row"><input class="af-input" type="number" min="1" step="1" inputmode="numeric" placeholder="0"/> <span class="af-unit">pts</span></div></div> <div class="sell2-block"><div class="sell2-lab"><span>Durée de l'enchère</span></div> <div class="sell2-durs"></div></div> <div class="af-actions"><button class="btn">Annuler</button> <button class="btn primary"> </button></div></div>`);
-	var root_13$6 = from_html(`<div class="actions"><button class="btn primary">Mettre en vente</button> <button class="btn danger">Défausser, +1 pt</button></div>`);
-	var root_14$5 = from_html(`<div role="tabpanel" class="modal-panel"><!> <div class="facts"><!> <!> <!> <!></div> <!> <!> <!> <div class="modal-credit">Texte de l'article sous licence CC BY-SA 4.0</div></div>`);
-	var root_15$5 = from_html(`<p class="modal-sum muted">Analyse du marché...</p>`);
-	var root_16$5 = from_html(`<div class="modal-sum muted">Marché indisponible pour le moment. <button class="link-btn">Réessayer</button></div>`);
-	var root_17$5 = from_html(`<div class="mk-kpi"><span class="mk-h">Dernière vente</span> <b> </b> <small> </small></div>`);
-	var root_18$4 = from_html(`<button><span class="mk-h">En vente dès</span> <b> </b> <small> <!></small></button>`);
-	var root_19$4 = from_html(`<div class="mk-sell"><span>Pour vendre vite : <b> </b> </span> <button class="btn primary">Mettre en vente</button></div>`);
-	var root_20$4 = from_html(`<div class="mk-avgline"><span>marché</span></div>`);
-	var root_21$4 = from_html(`<button></button>`);
-	var root_22$4 = from_html(`<div><b><span class="auc-coin"></span> </b> </div>`);
-	var root_23$3 = from_html(`<section class="mk-price"><h3 class="mk-h">Évolution des prix</h3> <div class="mk-plot"><svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path fill="var(--accent)" fill-opacity="0.12"></path><path fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path></svg> <!> <!> <!></div> <div class="mk-x"><span> </span><span> </span></div></section>`);
-	var root_24$2 = from_html(`<div class="mk-kpis"><div class="mk-kpi"><span class="mk-h">Prix du marché</span> <b class="gold"> </b> <small> </small></div> <!> <!></div> <!> <!>`, 1);
-	var root_25$1 = from_html(`<p class="modal-sum muted">Aucune vente de cette carte pour le moment.</p>`);
-	var root_26$1 = from_html(`<li><span> </span><b><span class="auc-coin"></span> </b></li>`);
-	var root_27$1 = from_html(`<details class="mk-history"><summary>Historique des ventes <span> </span></summary> <ol class="mk-list"></ol></details>`);
+	var quantile = (sorted, q) => {
+		const i = q * (sorted.length - 1), lo = Math.floor(i);
+		return lo + 1 < sorted.length ? sorted[lo] + (sorted[lo + 1] - sorted[lo]) * (i - lo) : sorted[lo];
+	};
+	function niceStep(raw) {
+		const p = 10 ** Math.floor(Math.log10(raw || 1));
+		return p * ([
+			1,
+			2,
+			2.5,
+			5,
+			10
+		].find((m) => m * p >= raw) ?? 10);
+	}
+	var DAY = 864e5;
+	var PERIODS = [
+		[
+			"7",
+			"7 j",
+			7
+		],
+		[
+			"30",
+			"30 j",
+			30
+		],
+		[
+			"90",
+			"90 j",
+			90
+		],
+		[
+			"all",
+			"Tout",
+			null
+		]
+	];
+	var inPeriod = (series, days, now = Date.now()) => days == null ? series : series.filter((s) => s.at >= now - days * DAY);
+	function saleStats(series) {
+		const p = series.map((s) => s.price).sort((a, b) => a - b);
+		if (!p.length) return {
+			count: 0,
+			last: null,
+			median: null,
+			avg: null,
+			min: null,
+			max: null
+		};
+		return {
+			count: p.length,
+			last: series.at(-1).price,
+			median: Math.round(quantile(p, .5)),
+			avg: Math.round(p.reduce((a, b) => a + b, 0) / p.length),
+			min: p[0],
+			max: p.at(-1)
+		};
+	}
+	function groupStart(t, week = false) {
+		const d = new Date(t);
+		return new Date(d.getFullYear(), d.getMonth(), d.getDate() - (week ? (d.getDay() + 6) % 7 : 0)).getTime();
+	}
+	function priceChart(series, { avg = null, label = (t) => new Date(t).toLocaleDateString("fr", {
+		day: "numeric",
+		month: "short"
+	}) } = {}) {
+		const sales = (series || []).filter((s) => s.price != null && s.at).sort((a, b) => a.at - b.at);
+		if (sales.length < 2) return null;
+		const span = sales.at(-1).at - sales[0].at;
+		const week = span > 120 * DAY;
+		const groups = new Map();
+		for (const s of sales) {
+			const key = groupStart(s.at, week);
+			(groups.get(key) ?? groups.set(key, {
+				at: key + (week ? 3.5 : .5) * DAY,
+				prices: []
+			}).get(key)).prices.push(s.price);
+		}
+		const want = Math.min(25, Math.max(6, sales.length / 10));
+		const half = Math.min(Math.max(DAY, span * want / sales.length), Math.max(DAY, span / 5)) / 2;
+		const around = (t) => {
+			let near = sales.filter((s) => Math.abs(s.at - t) <= half);
+			const k = Math.max(3, Math.round(want / 2));
+			if (near.length < k) near = [...sales].sort((a, b) => Math.abs(a.at - t) - Math.abs(b.at - t)).slice(0, k);
+			return near.map((s) => s.price).sort((a, b) => a - b);
+		};
+		const buckets = [...groups].sort((a, b) => a[0] - b[0]).map(([key, { at, prices }]) => {
+			const own = prices.sort((a, b) => a - b), win = around(at);
+			return {
+				key,
+				at,
+				count: own.length,
+				min: own[0],
+				max: own.at(-1),
+				median: Math.round(quantile(own, .5)),
+				trend: Math.round(quantile(win, .5)),
+				q1: quantile(win, .25),
+				q3: quantile(win, .75)
+			};
+		});
+		const all = sales.map((s) => s.price).sort((a, b) => a - b);
+		let lo = Math.min(quantile(all, .05), avg ?? Infinity);
+		let hi = Math.max(quantile(all, .95), avg ?? -Infinity);
+		if (hi - lo < 1) {
+			hi += 1;
+			lo = Math.max(0, lo - 1);
+		}
+		const pad = (hi - lo) * .1;
+		lo = Math.max(0, lo - pad);
+		hi += pad;
+		const y = (v) => Math.min(100, Math.max(0, (1 - (v - lo) / (hi - lo)) * 100));
+		const t0 = buckets[0].at, t1 = buckets.at(-1).at;
+		const x = (t) => t1 === t0 ? 50 : Math.min(100, Math.max(0, (t - t0) / (t1 - t0) * 100));
+		const f = (n) => n.toFixed(2);
+		const points = buckets.map((b) => ({
+			...b,
+			x: x(b.at),
+			y: y(b.trend),
+			out: b.trend > hi || b.trend < lo
+		}));
+		points.forEach((p, i) => {
+			p.x0 = i ? (points[i - 1].x + p.x) / 2 : 0;
+			p.x1 = i < points.length - 1 ? (p.x + points[i + 1].x) / 2 : 100;
+		});
+		const steps = (t1 - t0) / (week ? 7 * DAY : DAY);
+		const barW = steps ? Math.min(4, Math.max(.4, 100 / steps * .7)) : 4;
+		const line = points.map((p, i) => `${i ? "L" : "M"}${f(p.x)} ${f(p.y)}`).join(" ");
+		const band = points.length > 1 ? `${points.map((p, i) => `${i ? "L" : "M"}${f(p.x)} ${f(y(p.q3))}`).join(" ")} ${[...points].reverse().map((p) => `L${f(p.x)} ${f(y(p.q1))}`).join(" ")} Z` : null;
+		const maxCount = Math.max(...points.map((p) => p.count));
+		const step = niceStep((hi - lo) / 3);
+		const yTicks = [];
+		for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) yTicks.push({
+			value: v,
+			y: y(v)
+		});
+		const n = Math.min(4, points.length);
+		const xTicks = n < 2 ? [{
+			label: label(t0),
+			x: 50
+		}] : Array.from({ length: n }, (_, i) => {
+			const t = t0 + (t1 - t0) * i / (n - 1);
+			return {
+				label: label(t),
+				x: x(t)
+			};
+		});
+		return {
+			grouping: week ? "week" : "day",
+			points,
+			line,
+			band,
+			yTicks,
+			xTicks,
+			maxCount,
+			barW,
+			avgY: avg == null ? null : y(avg),
+			dots: sales.map((s) => ({
+				x: x(s.at),
+				y: y(s.price),
+				out: s.price > hi || s.price < lo
+			}))
+		};
+	}
+	var root$26 = from_html(`<div class="pc-grid"><span> </span></div>`);
+	var root_1$26 = from_svg(`<path fill="var(--accent)" fill-opacity="0.12"></path>`);
+	var root_2$21 = from_html(`<span></span>`);
+	var root_3$18 = from_html(`<div class="pc-avg"><span>marché</span></div>`);
+	var root_4$17 = from_html(`<button></button>`);
+	var root_5$17 = from_html(`<div><b><span class="auc-coin"></span> <small>tendance</small></b> <span> </span> <span> </span></div>`);
+	var root_6$16 = from_html(`<div class="pc-vol" aria-hidden="true"></div>`);
+	var root_7$15 = from_html(`<span> </span>`);
+	var root_8$14 = from_html(`<div><div class="pc-plot"><!> <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><!><path fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path></svg> <!> <!> <!> <!></div> <!> <div class="pc-x"></div></div>`);
+	function PriceChart($$anchor, $$props) {
+		push($$props, true);
+		let avg = prop($$props, "avg", 3, null), full = prop($$props, "full", 3, false), picked = prop($$props, "picked", 3, null), onpick = prop($$props, "onpick", 3, null);
+		const dshort = (t) => new Date(t).toLocaleDateString("fr", {
+			day: "numeric",
+			month: "short"
+		});
+		const chart = user_derived(() => priceChart($$props.series, {
+			avg: avg(),
+			label: dshort
+		}));
+		let hover = state(null);
+		const pt = user_derived(() => get(hover) != null ? get(chart)?.points[get(hover)] : null);
+		const per = user_derived(() => get(chart)?.grouping === "week" ? "semaine du" : "");
+		const daySales = (p) => p.count > 1 ? `${p.count} ventes, de ${nf(p.min)} à ${nf(p.max)}` : `1 vente à ${nf(p.min)}`;
+		var fragment = comment();
+		var node = first_child(fragment);
+		var consequent_5 = ($$anchor) => {
+			var div = root_8$14();
+			let classes;
+			var div_1 = child(div);
+			var node_1 = child(div_1);
+			each(node_1, 17, () => get(chart).yTicks, (t) => t.value, ($$anchor, t) => {
+				var div_2 = root$26();
+				let styles;
+				var text = only_child(child(div_2), true);
+				reset(div_2);
+				template_effect(($0) => {
+					styles = set_style(div_2, "", styles, { top: `${get(t).y ?? ""}%` });
+					set_text(text, $0);
+				}, [() => nf(get(t).value)]);
+				append($$anchor, div_2);
+			});
+			var svg = sibling(node_1, 2);
+			var node_2 = child(svg);
+			var consequent = ($$anchor) => {
+				var path = root_1$26();
+				template_effect(() => set_attribute(path, "d", get(chart).band));
+				append($$anchor, path);
+			};
+			if_block(node_2, ($$render) => {
+				if (get(chart).band) $$render(consequent);
+			});
+			var path_1 = sibling(node_2);
+			reset(svg);
+			var node_3 = sibling(svg, 2);
+			var consequent_1 = ($$anchor) => {
+				var fragment_1 = comment();
+				each(first_child(fragment_1), 17, () => get(chart).dots, index, ($$anchor, d) => {
+					var span_1 = root_2$21();
+					let classes_1;
+					let styles_1;
+					template_effect(() => {
+						classes_1 = set_class(span_1, 1, "pc-dot", null, classes_1, { out: get(d).out });
+						styles_1 = set_style(span_1, "", styles_1, {
+							left: `${get(d).x ?? ""}%`,
+							top: `${get(d).y ?? ""}%`
+						});
+					});
+					append($$anchor, span_1);
+				});
+				append($$anchor, fragment_1);
+			};
+			if_block(node_3, ($$render) => {
+				if (full()) $$render(consequent_1);
+			});
+			var node_5 = sibling(node_3, 2);
+			var consequent_2 = ($$anchor) => {
+				var div_3 = root_3$18();
+				let styles_2;
+				template_effect(() => styles_2 = set_style(div_3, "", styles_2, { top: `${get(chart).avgY ?? ""}%` }));
+				append($$anchor, div_3);
+			};
+			if_block(node_5, ($$render) => {
+				if (get(chart).avgY != null) $$render(consequent_2);
+			});
+			var node_6 = sibling(node_5, 2);
+			each(node_6, 19, () => get(chart).points, (p) => p.at, ($$anchor, p, i) => {
+				var button = root_4$17();
+				let classes_2;
+				let styles_3;
+				template_effect(($0, $1, $2) => {
+					classes_2 = set_class(button, 1, "pc-slice", null, classes_2, {
+						on: get(hover) === get(i) || picked() === get(p).key,
+						pickable: !!onpick(),
+						dense: full() || get(chart).points.length > 24
+					});
+					set_attribute(button, "aria-pressed", onpick() ? picked() === get(p).key : void 0);
+					set_attribute(button, "aria-label", `${get(per) ?? ""} ${$0 ?? ""} : tendance ${$1 ?? ""} points ; ${$2 ?? ""}`);
+					styles_3 = set_style(button, "", styles_3, {
+						left: `${get(p).x0 ?? ""}%`,
+						width: `${get(p).x1 - get(p).x0}%`,
+						"--x": `${get(p).x - get(p).x0}%`,
+						"--y": `${get(p).y ?? ""}%`
+					});
+				}, [
+					() => dshort(get(p).at),
+					() => nf(get(p).trend),
+					() => daySales(get(p))
+				]);
+				delegated("click", button, () => onpick()?.(picked() === get(p).key ? null : {
+					key: get(p).key,
+					at: get(p).at,
+					week: get(chart).grouping === "week",
+					count: get(p).count
+				}));
+				event("pointerenter", button, () => set(hover, get(i), true));
+				event("pointerleave", button, () => get(hover) === get(i) && set(hover, null));
+				event("focus", button, () => set(hover, get(i), true));
+				event("blur", button, () => set(hover, null));
+				append($$anchor, button);
+			});
+			var node_7 = sibling(node_6, 2);
+			var consequent_3 = ($$anchor) => {
+				var div_4 = root_5$17();
+				let classes_3;
+				let styles_4;
+				var b = child(div_4);
+				var text_1 = sibling(child(b), 1, true);
+				next();
+				reset(b);
+				var span_2 = sibling(b, 2);
+				var text_2 = only_child(span_2);
+				var text_3 = only_child(sibling(span_2, 2), true);
+				reset(div_4);
+				template_effect(($0, $1, $2) => {
+					classes_3 = set_class(div_4, 1, "pc-tip", null, classes_3, {
+						flip: get(pt).x > 70,
+						flop: get(pt).x < 30
+					});
+					styles_4 = set_style(div_4, "", styles_4, {
+						left: `${get(pt).x ?? ""}%`,
+						top: `${get(pt).y ?? ""}%`
+					});
+					set_text(text_1, $0);
+					set_text(text_2, `${get(per) ?? ""} ${$1 ?? ""}`);
+					set_text(text_3, $2);
+				}, [
+					() => nf(get(pt).trend),
+					() => dshort(get(pt).at),
+					() => daySales(get(pt))
+				]);
+				append($$anchor, div_4);
+			};
+			if_block(node_7, ($$render) => {
+				if (get(pt)) $$render(consequent_3);
+			});
+			reset(div_1);
+			var node_8 = sibling(div_1, 2);
+			var consequent_4 = ($$anchor) => {
+				var div_5 = root_6$16();
+				each(div_5, 23, () => get(chart).points, (p) => p.at, ($$anchor, p, i) => {
+					var span_4 = root_2$21();
+					let classes_4;
+					let styles_5;
+					template_effect(() => {
+						classes_4 = set_class(span_4, 1, "", null, classes_4, { on: get(hover) === get(i) || picked() === get(p).key });
+						styles_5 = set_style(span_4, "", styles_5, {
+							left: `${get(p).x ?? ""}%`,
+							height: `${get(p).count / get(chart).maxCount * 100}%`,
+							width: `${get(chart).barW ?? ""}%`
+						});
+					});
+					append($$anchor, span_4);
+				});
+				reset(div_5);
+				append($$anchor, div_5);
+			};
+			if_block(node_8, ($$render) => {
+				if (full()) $$render(consequent_4);
+			});
+			var div_6 = sibling(node_8, 2);
+			each(div_6, 21, () => get(chart).xTicks, index, ($$anchor, t) => {
+				var span_5 = root_7$15();
+				let styles_6;
+				var text_4 = only_child(span_5, true);
+				template_effect(() => {
+					styles_6 = set_style(span_5, "", styles_6, { left: `${get(t).x ?? ""}%` });
+					set_text(text_4, get(t).label);
+				});
+				append($$anchor, span_5);
+			});
+			reset(div_6);
+			reset(div);
+			template_effect(() => {
+				classes = set_class(div, 1, "pc", null, classes, { full: full() });
+				set_attribute(path_1, "d", get(chart).line);
+			});
+			append($$anchor, div);
+		};
+		if_block(node, ($$render) => {
+			if (get(chart)) $$render(consequent_5);
+		});
+		append($$anchor, fragment);
+		pop();
+	}
+	delegate(["click"]);
+	var root_1$25 = from_html(`<button role="radio"> </button>`);
+	var root_2$20 = from_html(`<div class="pill-picks ma-periods" role="radiogroup" aria-label="Période"></div>`);
+	var root_3$17 = from_html(`<div class="ma-fig"><span class="mk-h"> </span><b> </b></div>`);
+	var root_4$16 = from_html(`<span><i class="lg-avg"></i> </span>`);
+	var root_5$16 = from_html(`<span><i class="lg-out"></i> </span>`);
+	var root_6$15 = from_html(`<button class="ma-day" aria-label="Revenir à toutes les ventes de la période"> <!></button>`);
+	var root_7$14 = from_html(`<span class="ma-hint">un jour du graphique les filtre</span>`);
+	var root_8$13 = from_html(`<li><span class="ma-when"> </span> <span> </span> <b><span class="auc-coin"></span> </b></li>`);
+	var root_9$12 = from_html(`<p class="ma-note">Les 200 dernières ventes : tout ce que le jeu renvoie.</p>`);
+	var root_10$10 = from_html(`<section class="ma" role="dialog" aria-modal="true" aria-labelledby="wm-ma-title" tabindex="-1"><header class="tp-head ma-head"><button class="iconbtn ma-back" aria-label="Retour à la carte"><!></button> <div class="tp-title"><h2 id="wm-ma-title">Analyse du marché</h2> <span class="tp-sub"><span class="nowrap"> </span><span class="ma-rar"> </span></span></div></header> <div class="ma-body"><!> <div class="ma-figs"></div> <div class="ma-main"><section class="ma-chart"><!> <p class="ma-legend"><span><i class="lg-line"></i>tendance</span> <span><i class="lg-band"></i>la moitié des prix autour</span> <span><i class="lg-dot"></i>une vente</span> <!> <!></p></section> <section class="ma-sales" aria-label="Ventes"><div class="ma-sales-head"><h3 class="mk-h">Ventes <span> </span></h3> <!></div> <div class="ma-sort" role="radiogroup" aria-label="Trier les ventes"></div> <ol class="ma-list"></ol> <!></section></div> <section class="ma-live"><!></section></div></section>`);
+	function MarketAnalysis($$anchor, $$props) {
+		push($$props, true);
+		const all = user_derived(() => $$props.rm.series);
+		const periods = user_derived(() => PERIODS.map(([id, label, days]) => ({
+			id,
+			label,
+			days,
+			n: inPeriod(get(all), days, $$props.now).length
+		})).filter((p, i, list) => p.days == null || p.n > 1 && p.n < get(all).length && p.n !== list[i - 1]?.n));
+		let period = state("all");
+		const days = user_derived(() => get(periods).find((p) => p.id === get(period))?.days ?? null);
+		const series = user_derived(() => inPeriod(get(all), get(days), $$props.now));
+		const st = user_derived(() => saleStats(get(series)));
+		const outside = user_derived(() => priceChart(get(series), { avg: $$props.rm.avg })?.dots.filter((d) => d.out).length ?? 0);
+		const SORTS = [
+			["recent", "Récentes"],
+			["high", "Plus chères"],
+			["low", "Moins chères"]
+		];
+		let sort = state("recent");
+		let day = state(null);
+		user_effect(() => {
+			get(period);
+			set(day, null);
+		});
+		const listed = user_derived(() => get(day) ? get(series).filter((s) => groupStart(s.at, get(day).week) === get(day).key) : get(series));
+		const rows = user_derived(() => [...get(listed)].sort(get(sort) === "high" ? (a, b) => b.price - a.price : get(sort) === "low" ? (a, b) => a.price - b.price : (a, b) => b.at - a.at));
+		const dday = (g) => (g.week ? "semaine du " : "") + new Date(g.key).toLocaleDateString("fr", {
+			day: "numeric",
+			month: "short"
+		});
+		const vsMedian = (p) => get(st).median ? Math.round((p - get(st).median) / get(st).median * 100) : null;
+		const dtime = (t) => new Date(t).toLocaleString("fr", {
+			day: "numeric",
+			month: "short",
+			hour: "2-digit",
+			minute: "2-digit"
+		});
+		let root = state(void 0);
+		user_effect(() => {
+			get(root)?.focus();
+		});
+		const FIGURES = user_derived(() => [
+			["Ventes", nf(get(st).count)],
+			["Dernière", nf(get(st).last)],
+			["Médiane", nf(get(st).median)],
+			["Moyenne", nf(get(st).avg)],
+			["Min", nf(get(st).min)],
+			["Max", nf(get(st).max)]
+		]);
+		var section = root_10$10();
+		var header = child(section);
+		var button = child(header);
+		Icon(child(button), {
+			name: "prev",
+			width: 2
+		});
+		reset(button);
+		var div = sibling(button, 2);
+		var span = sibling(child(div), 2);
+		var span_1 = child(span);
+		var text = only_child(span_1, true);
+		var span_2 = sibling(span_1);
+		var text_1 = only_child(span_2, true);
+		reset(span);
+		reset(div);
+		reset(header);
+		var div_1 = sibling(header, 2);
+		var node_1 = child(div_1);
+		var consequent = ($$anchor) => {
+			var div_2 = root_2$20();
+			each(div_2, 21, () => get(periods), (p) => p.id, ($$anchor, p) => {
+				var button_1 = root_1$25();
+				let classes;
+				var text_2 = only_child(button_1, true);
+				template_effect(() => {
+					set_attribute(button_1, "aria-checked", get(period) === get(p).id);
+					classes = set_class(button_1, 1, "", null, classes, { on: get(period) === get(p).id });
+					set_text(text_2, get(p).label);
+				});
+				delegated("click", button_1, () => set(period, get(p).id, true));
+				append($$anchor, button_1);
+			});
+			reset(div_2);
+			append($$anchor, div_2);
+		};
+		if_block(node_1, ($$render) => {
+			if (get(periods).length > 1) $$render(consequent);
+		});
+		var div_3 = sibling(node_1, 2);
+		each(div_3, 21, () => get(FIGURES), ([label, value]) => label, ($$anchor, $$item) => {
+			var $$array = user_derived(() => to_array(get($$item), 2));
+			let label = () => get($$array)[0];
+			let value = () => get($$array)[1];
+			var div_4 = root_3$17();
+			var span_3 = child(div_4);
+			var text_3 = only_child(span_3, true);
+			var text_4 = only_child(sibling(span_3), true);
+			reset(div_4);
+			template_effect(() => {
+				set_text(text_3, label());
+				set_text(text_4, value());
+			});
+			append($$anchor, div_4);
+		});
+		reset(div_3);
+		var div_5 = sibling(div_3, 2);
+		var section_1 = child(div_5);
+		var node_2 = child(section_1);
+		{
+			let $0 = user_derived(() => get(day)?.key ?? null);
+			PriceChart(node_2, {
+				get series() {
+					return get(series);
+				},
+				get avg() {
+					return $$props.rm.avg;
+				},
+				full: true,
+				get picked() {
+					return get($0);
+				},
+				onpick: (g) => set(day, g, true)
+			});
+		}
+		var p_1 = sibling(node_2, 2);
+		var node_3 = sibling(child(p_1), 6);
+		var consequent_1 = ($$anchor) => {
+			var span_4 = root_4$16();
+			var text_5 = sibling(child(span_4));
+			reset(span_4);
+			template_effect(($0) => set_text(text_5, `prix du marché ${$0 ?? ""}`), [() => nf($$props.rm.avg)]);
+			append($$anchor, span_4);
+		};
+		if_block(node_3, ($$render) => {
+			if ($$props.rm.avg != null) $$render(consequent_1);
+		});
+		var node_4 = sibling(node_3, 2);
+		var consequent_2 = ($$anchor) => {
+			var span_5 = root_5$16();
+			var text_6 = sibling(child(span_5));
+			reset(span_5);
+			template_effect(() => set_text(text_6, `hors échelle (${get(outside) ?? ""})`));
+			append($$anchor, span_5);
+		};
+		if_block(node_4, ($$render) => {
+			if (get(outside)) $$render(consequent_2);
+		});
+		reset(p_1);
+		reset(section_1);
+		var section_2 = sibling(section_1, 2);
+		var div_6 = child(section_2);
+		var h3 = child(div_6);
+		var text_7 = only_child(sibling(child(h3)), true);
+		reset(h3);
+		var node_5 = sibling(h3, 2);
+		var consequent_3 = ($$anchor) => {
+			var button_2 = root_6$15();
+			var text_8 = child(button_2, true);
+			Icon(sibling(text_8), {
+				name: "close",
+				width: 2
+			});
+			reset(button_2);
+			template_effect(($0) => set_text(text_8, $0), [() => dday(get(day))]);
+			delegated("click", button_2, () => set(day, null));
+			append($$anchor, button_2);
+		};
+		var alternate = ($$anchor) => {
+			append($$anchor, root_7$14());
+		};
+		if_block(node_5, ($$render) => {
+			if (get(day)) $$render(consequent_3);
+			else $$render(alternate, -1);
+		});
+		reset(div_6);
+		var div_7 = sibling(div_6, 2);
+		each(div_7, 21, () => SORTS, ([id, label]) => id, ($$anchor, $$item) => {
+			var $$array_1 = user_derived(() => to_array(get($$item), 2));
+			let id = () => get($$array_1)[0];
+			let label = () => get($$array_1)[1];
+			var button_3 = root_1$25();
+			let classes_1;
+			var text_9 = only_child(button_3, true);
+			template_effect(() => {
+				set_attribute(button_3, "aria-checked", get(sort) === id());
+				classes_1 = set_class(button_3, 1, "", null, classes_1, { on: get(sort) === id() });
+				set_text(text_9, label());
+			});
+			delegated("click", button_3, () => set(sort, id(), true));
+			append($$anchor, button_3);
+		});
+		reset(div_7);
+		var ol = sibling(div_7, 2);
+		each(ol, 21, () => get(rows), (s) => s.id ?? s.at, ($$anchor, s) => {
+			const g = user_derived(() => vsMedian(get(s).price));
+			var li = root_8$13();
+			var span_8 = child(li);
+			var text_10 = only_child(span_8, true);
+			var span_9 = sibling(span_8, 2);
+			let classes_2;
+			var text_11 = only_child(span_9, true);
+			var b_2 = sibling(span_9, 2);
+			var text_12 = sibling(child(b_2), 1, true);
+			reset(b_2);
+			reset(li);
+			template_effect(($0, $1) => {
+				set_text(text_10, $0);
+				classes_2 = set_class(span_9, 1, "ma-gap", null, classes_2, {
+					up: get(g) > 0,
+					down: get(g) < 0
+				});
+				set_text(text_11, get(g) == null || get(g) === 0 ? "" : `${get(g) > 0 ? "+" : ""}${get(g)} %`);
+				set_text(text_12, $1);
+			}, [() => dtime(get(s).at), () => nf(get(s).price)]);
+			append($$anchor, li);
+		});
+		reset(ol);
+		var node_7 = sibling(ol, 2);
+		var consequent_4 = ($$anchor) => {
+			append($$anchor, root_9$12());
+		};
+		if_block(node_7, ($$render) => {
+			if (get(all).length >= 200 && !get(day)) $$render(consequent_4);
+		});
+		reset(section_2);
+		reset(div_5);
+		var section_3 = sibling(div_5, 2);
+		ListingCompare(child(section_3), {
+			get listings() {
+				return $$props.listings;
+			},
+			get soldAvg() {
+				return $$props.rm.avg;
+			},
+			get now() {
+				return $$props.now;
+			},
+			get onpick() {
+				return $$props.onpick;
+			}
+		});
+		reset(section_3);
+		reset(div_1);
+		reset(section);
+		bind_this(section, ($$value) => set(root, $$value), () => get(root));
+		template_effect(($0) => {
+			set_text(text, $$props.card.title);
+			set_attribute(span_2, "data-r", $$props.card.rarity);
+			set_text(text_1, RNAME[$$props.card.rarity] || $$props.card.rarity);
+			set_text(text_7, $0);
+		}, [() => nf(get(listed).length)]);
+		delegated("click", button, function(...$$args) {
+			$$props.onclose?.apply(this, $$args);
+		});
+		append($$anchor, section);
+		pop();
+	}
+	delegate(["click"]);
+	var COLORS = [
+		"#ef4444",
+		"#f97316",
+		"#eab308",
+		"#22c55e",
+		"#14b8a6",
+		"#3b82f6",
+		"#8b5cf6",
+		"#ec4899"
+	];
+	var Tags = class {
+		#list = state(null);
+		get list() {
+			return get(this.#list);
+		}
+		set list(value) {
+			set(this.#list, value);
+		}
+		#loading = null;
+		load() {
+			this.#loading ??= data.myTags().then((l) => this.list = l, () => {
+				this.#loading = null;
+				this.list ??= [];
+			});
+			return this.#loading;
+		}
+		async named(name) {
+			const clean = name.trim().slice(0, 48);
+			const have = (this.list ?? []).find((t) => t.name.toLocaleLowerCase("fr") === clean.toLocaleLowerCase("fr"));
+			if (have) return have;
+			const tag = await data.createTag(clean, COLORS[Math.floor(Math.random() * COLORS.length)]);
+			if (tag && !(this.list ?? []).some((t) => t.id === tag.id)) this.list = [...this.list ?? [], tag].sort((a, b) => a.name.localeCompare(b.name, "fr"));
+			return tag;
+		}
+	};
+	var tags = new Tags();
+	var root$25 = from_html(`<button><!></button>`);
+	var root_1$24 = from_html(`<div class="modal-cat"> </div>`);
+	var root_2$19 = from_html(`<p class="modal-sum muted">Chargement du résumé...</p>`);
+	var root_3$16 = from_html(`<p class="modal-sum"> </p>`);
+	var root_4$15 = from_html(`<div class="fact"><div class="fk">Valeur estimée</div><div class="fv val"> </div></div>`);
+	var root_5$15 = from_html(`<div class="fact"><div class="fk">Exemplaires</div><div class="fv"> <!></div></div>`);
+	var root_6$14 = from_html(`<div class="fact"><div class="fk" title="Vues de l'article Wikipédia sur 30 jours">Vues (30 j)</div><div class="fv"> </div></div>`);
+	var root_7$13 = from_html(`<div class="fact"><div class="fk">Attaque</div><div class="fv atk"> </div></div> <div class="fact"><div class="fk">Défense</div><div class="fv def"> </div></div>`, 1);
+	var root_8$12 = from_html(`<div class="modal-obtained"> </div>`);
+	var root_9$11 = from_html(`<span class="tag-chip"> <button><!></button></span>`);
+	var root_10$9 = from_html(`<option></option>`);
+	var root_11$9 = from_html(`<div class="modal-tags"><span class="mk-h">Étiquettes</span> <div class="tag-row"><!> <form class="tag-add"><input list="wm-tag-names" maxlength="48" aria-label="Ajouter une étiquette"/> <datalist id="wm-tag-names"></datalist></form></div></div>`);
+	var root_12$8 = from_html(`<a class="modal-wiki" target="_blank" rel="noopener noreferrer">Voir l'article Wikipédia</a>`);
+	var root_13$8 = from_html(`<div class="confirm"><div class="confirm-text">Défausser cette carte contre <b>1 point</b> ?</div> <div class="af-actions"><button class="btn">Annuler</button> <button class="btn danger">Défausser</button></div></div>`);
+	var root_14$6 = from_html(`<button type="button" class="sell2-suggest"> </button>`);
+	var root_15$6 = from_html(`<button type="button"> </button>`);
+	var root_16$6 = from_html(`<div class="sell2"><div class="sell2-head">Mettre en vente</div> <div class="sell2-block"><div class="sell2-lab"><span>Prix de départ</span> <!></div> <div class="af-input-row"><input class="af-input" type="number" min="1" step="1" inputmode="numeric" placeholder="0"/> <span class="af-unit">pts</span></div></div> <div class="sell2-block"><div class="sell2-lab"><span>Durée de l'enchère</span></div> <div class="sell2-durs"></div></div> <div class="af-actions"><button class="btn">Annuler</button> <button class="btn primary"> </button></div></div>`);
+	var root_17$6 = from_html(`<div class="actions"><button class="btn primary">Mettre en vente</button> <button class="btn danger">Défausser, +1 pt</button></div>`);
+	var root_18$6 = from_html(`<div role="tabpanel" class="modal-panel"><!> <div class="facts"><!> <!> <!> <!></div> <!> <!> <!> <!> <div class="modal-credit">Texte de l'article sous licence CC BY-SA 4.0</div></div>`);
+	var root_19$4 = from_html(`<p class="modal-sum muted">Analyse du marché...</p>`);
+	var root_20$4 = from_html(`<div class="modal-sum muted">Marché indisponible pour le moment. <button class="link-btn">Réessayer</button></div>`);
+	var root_21$4 = from_html(`<div class="mk-kpi"><span class="mk-h">Dernière vente</span> <b> </b> <small> </small></div>`);
+	var root_22$4 = from_html(`<button><span class="mk-h">En vente dès</span> <b> </b> <small> <!></small></button>`);
+	var root_23$3 = from_html(`<div class="mk-sell"><span>Pour vendre vite : <b> </b> </span> <button class="btn primary">Mettre en vente</button></div>`);
+	var root_24$3 = from_html(`<section class="mk-price"><div class="mk-price-head"><h3 class="mk-h">Évolution des prix</h3> <button class="link-btn">Analyse complète<!></button></div> <!></section>`);
+	var root_25$2 = from_html(`<div class="mk-kpis"><div class="mk-kpi"><span class="mk-h">Prix du marché</span> <b class="gold"> </b> <small> </small></div> <!> <!></div> <!> <!>`, 1);
+	var root_26$2 = from_html(`<p class="modal-sum muted">Aucune vente de cette carte pour le moment.</p>`);
+	var root_27$1 = from_html(`<button class="mk-all"><span>Toutes les ventes <b> </b></span><span class="mk-all-go">Analyse complète<!></span></button>`);
 	var root_28$1 = from_html(`<div role="tabpanel" class="modal-panel"><!> <!> <!></div>`);
 	var root_29$1 = from_html(`<div> </div>`);
-	var root_30$1 = from_html(`<div class="modal-backdrop" role="presentation"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-modal-title" tabindex="-1"><button class="modal-close" aria-label="Fermer"><!></button> <div class="modal-card"><!></div> <div class="modal-info"><span class="modal-rar"> </span> <h2 class="modal-name" id="wm-modal-title"> </h2> <!> <div class="modal-tabs" role="tablist" aria-label="Détails de la carte"><button role="tab">Détails</button> <button role="tab">Marché</button></div> <!> <!></div></div></div>`);
+	var root_30$1 = from_html(`<div class="modal-backdrop" role="presentation"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-modal-title" tabindex="-1"><button class="modal-close" aria-label="Fermer"><!></button> <div class="modal-card"><!> <!></div> <div class="modal-info"><span class="modal-rar"> </span> <h2 class="modal-name" id="wm-modal-title"> </h2> <!> <div class="modal-tabs" role="tablist" aria-label="Détails de la carte"><button role="tab">Détails</button> <button role="tab">Marché</button></div> <!> <!></div></div></div> <!>`, 1);
 	function CardModal($$anchor, $$props) {
 		push($$props, true);
 		let readonly = prop($$props, "readonly", 3, false);
@@ -6420,6 +7207,60 @@
 		let sellOpen = state(false);
 		let busy = state(false);
 		let done = state(false);
+		const owned = user_derived(() => !readonly() && !!$$props.item.id);
+		let starred = state(!!$$props.item.starred);
+		let cardTags = state($$props.item.tags ?? []);
+		let tagText = state("");
+		const changedRow = () => $$props.onchange?.({
+			...$$props.item,
+			starred: get(starred),
+			tags: get(cardTags)
+		});
+		user_effect(() => {
+			if (get(owned)) tags.load();
+		});
+		async function toggleStar() {
+			const was = get(starred);
+			set(starred, !was);
+			try {
+				await data.setStarred($$props.item.id, get(starred));
+				changedRow();
+			} catch (e) {
+				set(starred, was, true);
+				set(msgOk, false);
+				set(msg, e.message, true);
+			}
+		}
+		async function addTag() {
+			const name = get(tagText).trim();
+			if (!name || get(busy)) return;
+			set(busy, true);
+			try {
+				const tag = await tags.named(name);
+				if (!get(cardTags).some((t) => t.id === tag.id)) {
+					await data.tagCard($$props.item.id, tag.id);
+					set(cardTags, [...get(cardTags), tag]);
+					changedRow();
+				}
+				set(tagText, "");
+			} catch (e) {
+				set(msgOk, false);
+				set(msg, e.message, true);
+			}
+			set(busy, false);
+		}
+		async function removeTag(tag) {
+			const was = get(cardTags);
+			set(cardTags, get(cardTags).filter((t) => t.id !== tag.id));
+			try {
+				await data.untagCard($$props.item.id, tag.id);
+				changedRow();
+			} catch (e) {
+				set(cardTags, was);
+				set(msgOk, false);
+				set(msg, e.message, true);
+			}
+		}
 		let msg = state("");
 		let msgOk = state(false);
 		let modalEl;
@@ -6480,6 +7321,7 @@
 			if (!get(price) && get(mval) != null) set(price, String(get(mval)), true);
 		}
 		async function act(kind, action, okMsg) {
+			if (get(busy)) return;
 			set(busy, true);
 			set(msg, "");
 			try {
@@ -6490,7 +7332,14 @@
 				set(msg, okMsg, true);
 			} catch (e) {
 				set(msgOk, false);
-				set(msg, e.message, true);
+				if (e.status === 404) {
+					$$props.onaction?.(kind);
+					set(done, true);
+					set(msg, "Cette carte n'est déjà plus dans votre collection.");
+				} else {
+					set(msg, e.message, true);
+					if (e.uncertain) $$props.onaction?.("unsure");
+				}
 			}
 			set(busy, false);
 		}
@@ -6500,7 +7349,8 @@
 		})), "Carte mise en vente.");
 		const discard = () => act("discard", () => data.discard($$props.item.id), "Carte défaussée. +1 point.");
 		function onKey(e) {
-			if (e.key === "Escape") return $$props.onclose?.();
+			if (e.key === "Escape") return get(analysis) ? set(analysis, false) : $$props.onclose?.();
+			if (get(analysis)) return;
 			if (e.key !== "Tab" || !modalEl) return;
 			const f = [...modalEl.querySelectorAll("a[href],button:not([disabled]),input,[tabindex]:not([tabindex=\"-1\"])")].filter((el) => el.offsetParent !== null);
 			if (!f.length) return;
@@ -6518,10 +7368,6 @@
 			month: "long",
 			year: "numeric"
 		}) : "");
-		const dshort = (t) => t ? new Date(t).toLocaleDateString("fr", {
-			day: "numeric",
-			month: "short"
-		}) : "";
 		const rm = user_derived(() => rarityMarket(get(market), get(c).rarity));
 		const deal = user_derived(() => get(listings) ? compareListings(get(listings), get(now)).rows.find((r) => r.cheapest && !r.is_shiny) ?? null : null);
 		const v = user_derived(() => marketVerdict(get(rm), get(deal)?.price ?? null));
@@ -6531,34 +7377,7 @@
 			set(price, String(get(v).sellAt), true);
 			openSell();
 		}
-		let hover = state(null);
-		const dtime = (t) => new Date(t).toLocaleString("fr", {
-			day: "numeric",
-			month: "short",
-			hour: "2-digit",
-			minute: "2-digit"
-		});
-		const chart = user_derived(() => {
-			const s = get(rm).series;
-			if (!s || s.length < 2) return null;
-			const prices = s.map((p) => p.price);
-			const min = Math.min(...prices), span = Math.max(...prices) - min || 1, H = 40, pad = 3;
-			const pts = s.map((p, i) => [pad + i / (s.length - 1) * 94, pad + (1 - (p.price - min) / span) * 34]);
-			const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-			const avgY = get(rm).avg == null ? null : Math.min(H, Math.max(0, pad + (1 - (get(rm).avg - min) / span) * 34));
-			return {
-				d,
-				area: `${d} L${pts.at(-1)[0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z`,
-				first: dshort(s[0].at),
-				last: dshort(s.at(-1).at),
-				avgY: avgY == null ? null : avgY / H * 100,
-				points: s.map((p, i) => ({
-					...p,
-					x: pts[i][0],
-					y: pts[i][1] / H * 100
-				}))
-			};
-		});
+		let analysis = state(false);
 		user_effect(() => {
 			const html = document.documentElement;
 			const prev = html.style.overflow;
@@ -6579,8 +7398,9 @@
 			const t = setTimeout(() => $$props.onclose?.(), 1e3);
 			return () => clearTimeout(t);
 		});
-		var div = root_30$1();
+		var fragment = root_30$1();
 		event("keydown", $window, onKey);
+		var div = first_child(fragment);
 		var div_1 = child(div);
 		var button = child(div_1);
 		Icon(child(button), {
@@ -6590,108 +7410,136 @@
 		});
 		reset(button);
 		var div_2 = sibling(button, 2);
-		Card(child(div_2), {
-			get card() {
-				return get(c);
-			},
-			big: true,
-			caption: false,
-			get count() {
-				return $$props.item.count;
-			},
-			get shiny() {
-				return $$props.item.is_shiny;
-			},
-			get starred() {
-				return $$props.item.starred;
-			}
+		var node_1 = child(div_2);
+		{
+			let $0 = user_derived(() => get(owned) ? false : $$props.item.starred);
+			Card(node_1, {
+				get card() {
+					return get(c);
+				},
+				big: true,
+				caption: false,
+				get count() {
+					return $$props.item.count;
+				},
+				get shiny() {
+					return $$props.item.is_shiny;
+				},
+				get starred() {
+					return get($0);
+				}
+			});
+		}
+		var node_2 = sibling(node_1, 2);
+		var consequent = ($$anchor) => {
+			var button_1 = root$25();
+			let classes;
+			Icon(child(button_1), {
+				name: "star",
+				get filled() {
+					return get(starred);
+				},
+				width: 1.8
+			});
+			reset(button_1);
+			template_effect(() => {
+				classes = set_class(button_1, 1, "modal-star", null, classes, { on: get(starred) });
+				set_attribute(button_1, "aria-pressed", get(starred));
+				set_attribute(button_1, "aria-label", get(starred) ? "Retirer des favoris" : "Ajouter aux favoris");
+				set_attribute(button_1, "title", get(starred) ? "Retirer des favoris" : "Ajouter aux favoris");
+			});
+			delegated("click", button_1, toggleStar);
+			append($$anchor, button_1);
+		};
+		if_block(node_2, ($$render) => {
+			if (get(owned)) $$render(consequent);
 		});
 		reset(div_2);
 		var div_3 = sibling(div_2, 2);
-		var span_1 = child(div_3);
-		var text$4 = only_child(span_1, true);
-		var h2 = sibling(span_1, 2);
+		var span = child(div_3);
+		var text$6 = only_child(span, true);
+		var h2 = sibling(span, 2);
 		var text_1 = only_child(h2, true);
-		var node_2 = sibling(h2, 2);
-		var consequent = ($$anchor) => {
-			var div_4 = root$25();
+		var node_4 = sibling(h2, 2);
+		var consequent_1 = ($$anchor) => {
+			var div_4 = root_1$24();
 			var text_2 = only_child(div_4, true);
 			template_effect(() => set_text(text_2, get(c).category));
 			append($$anchor, div_4);
 		};
-		if_block(node_2, ($$render) => {
-			if (get(c).category) $$render(consequent);
+		if_block(node_4, ($$render) => {
+			if (get(c).category) $$render(consequent_1);
 		});
-		var div_5 = sibling(node_2, 2);
-		var button_1 = child(div_5);
-		let classes;
-		var button_2 = sibling(button_1, 2);
+		var div_5 = sibling(node_4, 2);
+		var button_2 = child(div_5);
 		let classes_1;
+		var button_3 = sibling(button_2, 2);
+		let classes_2;
 		reset(div_5);
-		var node_3 = sibling(div_5, 2);
-		var consequent_14 = ($$anchor) => {
-			var div_6 = root_14$5();
-			var node_4 = child(div_6);
-			var consequent_1 = ($$anchor) => {
-				append($$anchor, root_1$24());
-			};
+		var node_5 = sibling(div_5, 2);
+		var consequent_16 = ($$anchor) => {
+			var div_6 = root_18$6();
+			var node_6 = child(div_6);
 			var consequent_2 = ($$anchor) => {
-				var p_2 = root_2$19();
+				append($$anchor, root_2$19());
+			};
+			var consequent_3 = ($$anchor) => {
+				var p_2 = root_3$16();
 				var text_3 = only_child(p_2, true);
 				template_effect(() => set_text(text_3, get(summary)));
 				append($$anchor, p_2);
 			};
-			if_block(node_4, ($$render) => {
-				if (get(sumState) === "loading") $$render(consequent_1);
-				else if (get(summary)) $$render(consequent_2, 1);
+			if_block(node_6, ($$render) => {
+				if (get(sumState) === "loading") $$render(consequent_2);
+				else if (get(summary)) $$render(consequent_3, 1);
 			});
-			var div_7 = sibling(node_4, 2);
-			var node_5 = child(div_7);
-			var consequent_3 = ($$anchor) => {
-				var div_8 = root_3$16();
+			var div_7 = sibling(node_6, 2);
+			var node_7 = child(div_7);
+			var consequent_4 = ($$anchor) => {
+				var div_8 = root_4$15();
 				var text_4 = only_child(sibling(child(div_8)));
 				reset(div_8);
 				template_effect(($0) => set_text(text_4, `${$0 ?? ""} pts`), [() => nf(get(mval))]);
 				append($$anchor, div_8);
 			};
-			if_block(node_5, ($$render) => {
-				if (get(mval) != null) $$render(consequent_3);
+			if_block(node_7, ($$render) => {
+				if (get(mval) != null) $$render(consequent_4);
 			});
-			var node_6 = sibling(node_5, 2);
-			var consequent_5 = ($$anchor) => {
-				var div_10 = root_4$15();
+			var node_8 = sibling(node_7, 2);
+			var consequent_6 = ($$anchor) => {
+				var div_10 = root_5$15();
 				var div_11 = sibling(child(div_10));
 				var text_5 = child(div_11, true);
-				var node_7 = sibling(text_5);
-				var consequent_4 = ($$anchor) => {
+				var node_9 = sibling(text_5);
+				var consequent_5 = ($$anchor) => {
 					append($$anchor, text("· brillante"));
 				};
-				if_block(node_7, ($$render) => {
-					if ($$props.item.is_shiny) $$render(consequent_4);
+				if_block(node_9, ($$render) => {
+					if ($$props.item.is_shiny) $$render(consequent_5);
 				});
 				reset(div_11);
 				reset(div_10);
 				template_effect(() => set_text(text_5, $$props.item.count));
 				append($$anchor, div_10);
 			};
-			if_block(node_6, ($$render) => {
-				if (!readonly()) $$render(consequent_5);
+			if_block(node_8, ($$render) => {
+				if (!readonly()) $$render(consequent_6);
 			});
-			var node_8 = sibling(node_6, 2);
-			var consequent_6 = ($$anchor) => {
-				var div_12 = root_5$15();
+			var node_10 = sibling(node_8, 2);
+			var consequent_7 = ($$anchor) => {
+				var div_12 = root_6$14();
 				var text_7 = only_child(sibling(child(div_12)), true);
 				reset(div_12);
 				template_effect(($0) => set_text(text_7, $0), [() => nf(get(c).pageviews)]);
 				append($$anchor, div_12);
 			};
-			if_block(node_8, ($$render) => {
-				if (get(c).pageviews != null) $$render(consequent_6);
+			if_block(node_10, ($$render) => {
+				if (get(c).pageviews != null) $$render(consequent_7);
 			});
-			var node_9 = sibling(node_8, 2);
-			var consequent_7 = ($$anchor) => {
-				var fragment = root_6$14();
-				var div_14 = first_child(fragment);
+			var node_11 = sibling(node_10, 2);
+			var consequent_8 = ($$anchor) => {
+				var fragment_1 = root_7$13();
+				var div_14 = first_child(fragment_1);
 				var text_8 = only_child(sibling(child(div_14)), true);
 				reset(div_14);
 				var div_16 = sibling(div_14, 2);
@@ -6701,328 +7549,321 @@
 					set_text(text_8, $0);
 					set_text(text_9, $1);
 				}, [() => nf(get(c).atk), () => nf(get(c).def)]);
-				append($$anchor, fragment);
+				append($$anchor, fragment_1);
 			};
-			if_block(node_9, ($$render) => {
-				if (!settings.hideStats) $$render(consequent_7);
+			if_block(node_11, ($$render) => {
+				if (!settings.hideStats) $$render(consequent_8);
 			});
 			reset(div_7);
-			var node_10 = sibling(div_7, 2);
-			var consequent_8 = ($$anchor) => {
-				var div_18 = root_7$12();
+			var node_12 = sibling(div_7, 2);
+			var consequent_9 = ($$anchor) => {
+				var div_18 = root_8$12();
 				var text_10 = only_child(div_18);
 				template_effect(() => set_text(text_10, `Obtenue le ${get(obtained) ?? ""}`));
 				append($$anchor, div_18);
 			};
-			if_block(node_10, ($$render) => {
-				if (get(obtained)) $$render(consequent_8);
+			if_block(node_12, ($$render) => {
+				if (get(obtained)) $$render(consequent_9);
 			});
-			var node_11 = sibling(node_10, 2);
-			var consequent_9 = ($$anchor) => {
-				var a = root_8$10();
+			var node_13 = sibling(node_12, 2);
+			var consequent_10 = ($$anchor) => {
+				var div_19 = root_11$9();
+				var div_20 = sibling(child(div_19), 2);
+				var node_14 = child(div_20);
+				each(node_14, 17, () => get(cardTags), (t) => t.id, ($$anchor, t) => {
+					var span_1 = root_9$11();
+					let styles;
+					var text_11 = child(span_1, true);
+					var button_4 = sibling(text_11);
+					Icon(child(button_4), {
+						name: "close",
+						width: 2
+					});
+					reset(button_4);
+					reset(span_1);
+					template_effect(() => {
+						styles = set_style(span_1, "", styles, { "--tc": get(t).color });
+						set_text(text_11, get(t).name);
+						set_attribute(button_4, "aria-label", `Retirer l'étiquette ${get(t).name ?? ""}`);
+					});
+					delegated("click", button_4, () => removeTag(get(t)));
+					append($$anchor, span_1);
+				});
+				var form = sibling(node_14, 2);
+				var input = child(form);
+				remove_input_defaults(input);
+				var datalist = sibling(input, 2);
+				each(datalist, 21, () => (tags.list ?? []).filter((t) => !get(cardTags).some((x) => x.id === t.id)), (t) => t.id, ($$anchor, t) => {
+					var option = root_10$9();
+					var option_value = {};
+					template_effect(() => {
+						if (option_value !== (option_value = get(t).name)) option.value = (option.__value = option_value) ?? "";
+					});
+					append($$anchor, option);
+				});
+				reset(datalist);
+				reset(form);
+				reset(div_20);
+				reset(div_19);
+				template_effect(() => set_attribute(input, "placeholder", get(cardTags).length ? "Ajouter..." : "Ajouter une étiquette..."));
+				event("submit", form, (e) => {
+					e.preventDefault();
+					addTag();
+				});
+				bind_value(input, () => get(tagText), ($$value) => set(tagText, $$value));
+				append($$anchor, div_19);
+			};
+			if_block(node_13, ($$render) => {
+				if (get(owned)) $$render(consequent_10);
+			});
+			var node_16 = sibling(node_13, 2);
+			var consequent_11 = ($$anchor) => {
+				var a = root_12$8();
 				template_effect(() => set_attribute(a, "href", get(c).wikipedia_url));
 				append($$anchor, a);
 			};
-			if_block(node_11, ($$render) => {
-				if (get(c).wikipedia_url) $$render(consequent_9);
+			if_block(node_16, ($$render) => {
+				if (get(c).wikipedia_url) $$render(consequent_11);
 			});
-			var node_12 = sibling(node_11, 2);
-			var consequent_13 = ($$anchor) => {
-				var fragment_1 = comment();
-				var node_13 = first_child(fragment_1);
-				var consequent_10 = ($$anchor) => {
-					var div_19 = root_9$9();
-					var div_20 = sibling(child(div_19), 2);
-					var button_3 = child(div_20);
-					var button_4 = sibling(button_3, 2);
-					reset(div_20);
-					reset(div_19);
-					template_effect(() => {
-						button_3.disabled = get(busy);
-						button_4.disabled = get(busy);
-					});
-					delegated("click", button_3, () => set(confirmDiscard, false));
-					delegated("click", button_4, discard);
-					append($$anchor, div_19);
-				};
+			var node_17 = sibling(node_16, 2);
+			var consequent_15 = ($$anchor) => {
+				var fragment_2 = comment();
+				var node_18 = first_child(fragment_2);
 				var consequent_12 = ($$anchor) => {
-					var div_21 = root_12$7();
+					var div_21 = root_13$8();
 					var div_22 = sibling(child(div_21), 2);
-					var div_23 = child(div_22);
-					var node_14 = sibling(child(div_23), 2);
-					var consequent_11 = ($$anchor) => {
-						var button_5 = root_10$8();
-						var text_11 = only_child(button_5);
-						template_effect(($0) => set_text(text_11, `Estimé ${$0 ?? ""}`), [() => nf(get(mval))]);
-						delegated("click", button_5, () => set(price, String(get(mval)), true));
-						append($$anchor, button_5);
-					};
-					if_block(node_14, ($$render) => {
-						if (get(mval) != null) $$render(consequent_11);
-					});
-					reset(div_23);
-					var div_24 = sibling(div_23, 2);
-					var input = child(div_24);
-					remove_input_defaults(input);
-					next(2);
-					reset(div_24);
+					var button_5 = child(div_22);
+					var button_6 = sibling(button_5, 2);
 					reset(div_22);
-					var div_25 = sibling(div_22, 2);
-					var div_26 = sibling(child(div_25), 2);
-					each(div_26, 21, () => DURATIONS, index, ($$anchor, h) => {
-						var button_6 = root_11$7();
-						let classes_2;
-						var text_12 = only_child(button_6);
-						template_effect(() => {
-							classes_2 = set_class(button_6, 1, "sell2-dur", null, classes_2, { on: get(durationH) === get(h) });
-							set_text(text_12, `${get(h) ?? ""} h`);
-						});
-						delegated("click", button_6, () => set(durationH, get(h), true));
-						append($$anchor, button_6);
-					});
-					reset(div_26);
-					reset(div_25);
-					var div_27 = sibling(div_25, 2);
-					var button_7 = child(div_27);
-					var button_8 = sibling(button_7, 2);
-					var text_13 = only_child(button_8, true);
-					reset(div_27);
 					reset(div_21);
-					template_effect(($0) => {
-						button_7.disabled = get(busy);
-						button_8.disabled = $0;
-						set_text(text_13, get(busy) ? "Mise en vente..." : "Mettre en vente");
-					}, [() => get(busy) || !(Number(get(price)) >= 1)]);
-					bind_value(input, () => get(price), ($$value) => set(price, $$value));
-					delegated("click", button_7, () => set(sellOpen, false));
-					delegated("click", button_8, sell);
+					template_effect(() => {
+						button_5.disabled = get(busy);
+						button_6.disabled = get(busy);
+					});
+					delegated("click", button_5, () => set(confirmDiscard, false));
+					delegated("click", button_6, discard);
 					append($$anchor, div_21);
 				};
-				var alternate = ($$anchor) => {
-					var div_28 = root_13$6();
-					var button_9 = child(div_28);
-					var button_10 = sibling(button_9, 2);
+				var consequent_14 = ($$anchor) => {
+					var div_23 = root_16$6();
+					var div_24 = sibling(child(div_23), 2);
+					var div_25 = child(div_24);
+					var node_19 = sibling(child(div_25), 2);
+					var consequent_13 = ($$anchor) => {
+						var button_7 = root_14$6();
+						var text_12 = only_child(button_7);
+						template_effect(($0) => set_text(text_12, `Estimé ${$0 ?? ""}`), [() => nf(get(mval))]);
+						delegated("click", button_7, () => set(price, String(get(mval)), true));
+						append($$anchor, button_7);
+					};
+					if_block(node_19, ($$render) => {
+						if (get(mval) != null) $$render(consequent_13);
+					});
+					reset(div_25);
+					var div_26 = sibling(div_25, 2);
+					var input_1 = child(div_26);
+					remove_input_defaults(input_1);
+					next(2);
+					reset(div_26);
+					reset(div_24);
+					var div_27 = sibling(div_24, 2);
+					var div_28 = sibling(child(div_27), 2);
+					each(div_28, 21, () => DURATIONS, index, ($$anchor, h) => {
+						var button_8 = root_15$6();
+						let classes_3;
+						var text_13 = only_child(button_8);
+						template_effect(() => {
+							classes_3 = set_class(button_8, 1, "sell2-dur", null, classes_3, { on: get(durationH) === get(h) });
+							set_text(text_13, `${get(h) ?? ""} h`);
+						});
+						delegated("click", button_8, () => set(durationH, get(h), true));
+						append($$anchor, button_8);
+					});
 					reset(div_28);
-					delegated("click", button_9, openSell);
-					delegated("click", button_10, () => set(confirmDiscard, true));
-					append($$anchor, div_28);
+					reset(div_27);
+					var div_29 = sibling(div_27, 2);
+					var button_9 = child(div_29);
+					var button_10 = sibling(button_9, 2);
+					var text_14 = only_child(button_10, true);
+					reset(div_29);
+					reset(div_23);
+					template_effect(($0) => {
+						button_9.disabled = get(busy);
+						button_10.disabled = $0;
+						set_text(text_14, get(busy) ? "Mise en vente..." : "Mettre en vente");
+					}, [() => get(busy) || !(Number(get(price)) >= 1)]);
+					bind_value(input_1, () => get(price), ($$value) => set(price, $$value));
+					delegated("click", button_9, () => set(sellOpen, false));
+					delegated("click", button_10, sell);
+					append($$anchor, div_23);
 				};
-				if_block(node_13, ($$render) => {
-					if (get(confirmDiscard)) $$render(consequent_10);
-					else if (get(sellOpen)) $$render(consequent_12, 1);
+				var alternate = ($$anchor) => {
+					var div_30 = root_17$6();
+					var button_11 = child(div_30);
+					var button_12 = sibling(button_11, 2);
+					reset(div_30);
+					delegated("click", button_11, openSell);
+					delegated("click", button_12, () => set(confirmDiscard, true));
+					append($$anchor, div_30);
+				};
+				if_block(node_18, ($$render) => {
+					if (get(confirmDiscard)) $$render(consequent_12);
+					else if (get(sellOpen)) $$render(consequent_14, 1);
 					else $$render(alternate, -1);
 				});
-				append($$anchor, fragment_1);
+				append($$anchor, fragment_2);
 			};
-			if_block(node_12, ($$render) => {
-				if (!readonly() && !get(done)) $$render(consequent_13);
+			if_block(node_17, ($$render) => {
+				if (!readonly() && !get(done)) $$render(consequent_15);
 			});
 			next(2);
 			reset(div_6);
 			append($$anchor, div_6);
 		};
 		var alternate_2 = ($$anchor) => {
-			var div_29 = root_28$1();
-			var node_15 = child(div_29);
-			var consequent_15 = ($$anchor) => {
-				append($$anchor, root_15$5());
+			var div_31 = root_28$1();
+			var node_20 = child(div_31);
+			var consequent_17 = ($$anchor) => {
+				append($$anchor, root_19$4());
 			};
-			var consequent_16 = ($$anchor) => {
-				var div_30 = root_16$5();
-				var button_11 = sibling(child(div_30));
-				reset(div_30);
-				delegated("click", button_11, () => set(marketState, "idle"));
-				append($$anchor, div_30);
+			var consequent_18 = ($$anchor) => {
+				var div_32 = root_20$4();
+				var button_13 = sibling(child(div_32));
+				reset(div_32);
+				delegated("click", button_13, () => set(marketState, "idle"));
+				append($$anchor, div_32);
 			};
 			var consequent_24 = ($$anchor) => {
-				var fragment_2 = comment();
-				var node_16 = first_child(fragment_2);
+				var fragment_3 = comment();
+				var node_21 = first_child(fragment_3);
 				var consequent_23 = ($$anchor) => {
-					var fragment_3 = root_24$2();
-					var div_31 = first_child(fragment_3);
-					var div_32 = child(div_31);
-					var b = sibling(child(div_32), 2);
-					var text_14 = only_child(b, true);
-					var text_15 = only_child(sibling(b, 2), true);
-					reset(div_32);
-					var node_17 = sibling(div_32, 2);
-					var consequent_17 = ($$anchor) => {
-						var div_33 = root_17$5();
-						var b_1 = sibling(child(div_33), 2);
-						var text_16 = only_child(b_1, true);
+					var fragment_4 = root_25$2();
+					var div_33 = first_child(fragment_4);
+					var div_34 = child(div_33);
+					var b = sibling(child(div_34), 2);
+					var text_15 = only_child(b, true);
+					var text_16 = only_child(sibling(b, 2), true);
+					reset(div_34);
+					var node_22 = sibling(div_34, 2);
+					var consequent_19 = ($$anchor) => {
+						var div_35 = root_21$4();
+						var b_1 = sibling(child(div_35), 2);
+						var text_17 = only_child(b_1, true);
 						var small_1 = sibling(b_1, 2);
-						let classes_3;
-						var text_17 = only_child(small_1, true);
-						reset(div_33);
+						let classes_4;
+						var text_18 = only_child(small_1, true);
+						reset(div_35);
 						template_effect(($0, $1) => {
-							set_text(text_16, $0);
-							classes_3 = set_class(small_1, 1, "", null, classes_3, {
+							set_text(text_17, $0);
+							classes_4 = set_class(small_1, 1, "", null, classes_4, {
 								up: get(v).lastPct > 0,
 								down: get(v).lastPct < 0
 							});
-							set_text(text_17, $1);
+							set_text(text_18, $1);
 						}, [() => nf(get(v).last), () => gap(get(v).lastPct)]);
-						append($$anchor, div_33);
+						append($$anchor, div_35);
 					};
-					if_block(node_17, ($$render) => {
-						if (get(v).last != null) $$render(consequent_17);
+					if_block(node_22, ($$render) => {
+						if (get(v).last != null) $$render(consequent_19);
 					});
-					var node_18 = sibling(node_17, 2);
-					var consequent_18 = ($$anchor) => {
-						var button_12 = root_18$4();
-						let classes_4;
-						var b_2 = sibling(child(button_12), 2);
-						var text_18 = only_child(b_2, true);
+					var node_23 = sibling(node_22, 2);
+					var consequent_20 = ($$anchor) => {
+						var button_14 = root_22$4();
+						let classes_5;
+						var b_2 = sibling(child(button_14), 2);
+						var text_19 = only_child(b_2, true);
 						var small_2 = sibling(b_2, 2);
-						var text_19 = child(small_2, true);
-						Icon(sibling(text_19), {
+						var text_20 = child(small_2, true);
+						Icon(sibling(text_20), {
 							name: "next",
 							width: 2
 						});
 						reset(small_2);
-						reset(button_12);
+						reset(button_14);
 						template_effect(($0, $1, $2) => {
-							classes_4 = set_class(button_12, 1, "mk-kpi buy", null, classes_4, { good: get(v).cheapestPct < 0 });
-							set_attribute(button_12, "aria-label", `Voir la vente la moins chère, ${$0 ?? ""} WikiBidous`);
-							set_text(text_18, $1);
-							set_text(text_19, $2);
+							classes_5 = set_class(button_14, 1, "mk-kpi buy", null, classes_5, { good: get(v).cheapestPct < 0 });
+							set_attribute(button_14, "aria-label", `Voir la vente la moins chère, ${$0 ?? ""} WikiBidous`);
+							set_text(text_19, $1);
+							set_text(text_20, $2);
 						}, [
 							() => nf(get(deal).price),
 							() => nf(get(deal).price),
 							() => gap(get(v).cheapestPct)
 						]);
-						delegated("click", button_12, () => openListing(get(deal)));
-						append($$anchor, button_12);
+						delegated("click", button_14, () => openListing(get(deal)));
+						append($$anchor, button_14);
 					};
-					if_block(node_18, ($$render) => {
-						if (get(deal)) $$render(consequent_18);
+					if_block(node_23, ($$render) => {
+						if (get(deal)) $$render(consequent_20);
 					});
-					reset(div_31);
-					var node_20 = sibling(div_31, 2);
-					var consequent_19 = ($$anchor) => {
-						var div_34 = root_19$4();
-						var span_2 = child(div_34);
+					reset(div_33);
+					var node_25 = sibling(div_33, 2);
+					var consequent_21 = ($$anchor) => {
+						var div_36 = root_23$3();
+						var span_2 = child(div_36);
 						var b_3 = sibling(child(span_2));
-						var text_20 = only_child(b_3);
-						var text_21 = sibling(b_3, 1, true);
+						var text_21 = only_child(b_3);
+						var text_22 = sibling(b_3, 1, true);
 						reset(span_2);
-						var button_13 = sibling(span_2, 2);
-						reset(div_34);
+						var button_15 = sibling(span_2, 2);
+						reset(div_36);
 						template_effect(($0) => {
-							set_text(text_20, `${$0 ?? ""} pts`);
-							set_text(text_21, get(deal) ? ", juste sous l'offre la moins chère" : ", le prix du marché");
+							set_text(text_21, `${$0 ?? ""} pts`);
+							set_text(text_22, get(deal) ? ", juste sous l'offre la moins chère" : ", le prix du marché");
 						}, [() => nf(get(v).sellAt)]);
-						delegated("click", button_13, sellNow);
-						append($$anchor, div_34);
+						delegated("click", button_15, sellNow);
+						append($$anchor, div_36);
 					};
-					if_block(node_20, ($$render) => {
-						if (!readonly() && !get(done) && $$props.item.count && get(v).sellAt) $$render(consequent_19);
+					if_block(node_25, ($$render) => {
+						if (!readonly() && !get(done) && $$props.item.count && get(v).sellAt) $$render(consequent_21);
 					});
-					var node_21 = sibling(node_20, 2);
+					var node_26 = sibling(node_25, 2);
 					var consequent_22 = ($$anchor) => {
-						const pt = user_derived(() => get(hover) != null ? get(chart).points[get(hover)] : null);
-						var section = root_23$3();
-						var div_35 = sibling(child(section), 2);
-						var svg = child(div_35);
-						var path = child(svg);
-						var path_1 = sibling(path);
-						reset(svg);
-						var node_22 = sibling(svg, 2);
-						var consequent_20 = ($$anchor) => {
-							var div_36 = root_20$4();
-							let styles;
-							template_effect(() => styles = set_style(div_36, "", styles, { top: `${get(chart).avgY ?? ""}%` }));
-							append($$anchor, div_36);
-						};
-						if_block(node_22, ($$render) => {
-							if (get(chart).avgY != null) $$render(consequent_20);
+						var section = root_24$3();
+						var div_37 = child(section);
+						var button_16 = sibling(child(div_37), 2);
+						Icon(sibling(child(button_16)), {
+							name: "next",
+							width: 2
 						});
-						var node_23 = sibling(node_22, 2);
-						each(node_23, 19, () => get(chart).points, (p) => p.id ?? p.at, ($$anchor, p, i) => {
-							var button_14 = root_21$4();
-							let classes_5;
-							let styles_1;
-							template_effect(($0, $1) => {
-								classes_5 = set_class(button_14, 1, "mk-slice", null, classes_5, { on: get(hover) === get(i) });
-								set_attribute(button_14, "aria-label", `${$0 ?? ""} : ${$1 ?? ""} points`);
-								styles_1 = set_style(button_14, "", styles_1, {
-									left: `${get(p).x ?? ""}%`,
-									width: `${100 / get(chart).points.length}%`,
-									"--y": `${get(p).y ?? ""}%`
-								});
-							}, [() => dtime(get(p).at), () => nf(get(p).price)]);
-							event("pointerenter", button_14, () => set(hover, get(i), true));
-							event("pointerleave", button_14, () => get(hover) === get(i) && set(hover, null));
-							event("focus", button_14, () => set(hover, get(i), true));
-							event("blur", button_14, () => set(hover, null));
-							append($$anchor, button_14);
+						reset(button_16);
+						reset(div_37);
+						PriceChart(sibling(div_37, 2), {
+							get series() {
+								return get(rm).series;
+							},
+							get avg() {
+								return get(rm).avg;
+							}
 						});
-						var node_24 = sibling(node_23, 2);
-						var consequent_21 = ($$anchor) => {
-							var div_37 = root_22$4();
-							let classes_6;
-							let styles_2;
-							var b_4 = child(div_37);
-							var text_22 = sibling(child(b_4), 1, true);
-							reset(b_4);
-							var text_23 = sibling(b_4, 1, true);
-							reset(div_37);
-							template_effect(($0, $1) => {
-								classes_6 = set_class(div_37, 1, "mk-tip", null, classes_6, {
-									flip: get(pt).x > 70,
-									flop: get(pt).x < 30
-								});
-								styles_2 = set_style(div_37, "", styles_2, {
-									left: `${get(pt).x ?? ""}%`,
-									top: `${get(pt).y ?? ""}%`
-								});
-								set_text(text_22, $0);
-								set_text(text_23, $1);
-							}, [() => nf(get(pt).price), () => dtime(get(pt).at)]);
-							append($$anchor, div_37);
-						};
-						if_block(node_24, ($$render) => {
-							if (get(pt)) $$render(consequent_21);
-						});
-						reset(div_35);
-						var div_38 = sibling(div_35, 2);
-						var span_3 = child(div_38);
-						var text_24 = only_child(span_3, true);
-						var text_25 = only_child(sibling(span_3), true);
-						reset(div_38);
 						reset(section);
-						template_effect(() => {
-							set_attribute(path, "d", get(chart).area);
-							set_attribute(path_1, "d", get(chart).d);
-							set_text(text_24, get(chart).first);
-							set_text(text_25, get(chart).last);
-						});
+						delegated("click", button_16, () => set(analysis, true));
 						append($$anchor, section);
 					};
-					if_block(node_21, ($$render) => {
-						if (get(chart)) $$render(consequent_22);
+					if_block(node_26, ($$render) => {
+						if (get(rm).count > 1) $$render(consequent_22);
 					});
 					template_effect(($0, $1) => {
-						set_text(text_14, $0);
-						set_text(text_15, $1);
+						set_text(text_15, $0);
+						set_text(text_16, $1);
 					}, [() => nf(get(rm).avg), () => get(rm).count ? `${get(rm).count} vente${get(rm).count > 1 ? "s" : ""}, de ${nf(get(rm).min)} à ${nf(get(rm).max)}` : "moyenne des ventes"]);
-					append($$anchor, fragment_3);
+					append($$anchor, fragment_4);
 				};
 				var alternate_1 = ($$anchor) => {
-					append($$anchor, root_25$1());
+					append($$anchor, root_26$2());
 				};
-				if_block(node_16, ($$render) => {
+				if_block(node_21, ($$render) => {
 					if (get(rm).avg != null) $$render(consequent_23);
 					else $$render(alternate_1, -1);
 				});
-				append($$anchor, fragment_2);
+				append($$anchor, fragment_3);
 			};
-			if_block(node_15, ($$render) => {
-				if (get(marketState) === "loading") $$render(consequent_15);
-				else if (get(marketState) === "error") $$render(consequent_16, 1);
+			if_block(node_20, ($$render) => {
+				if (get(marketState) === "loading") $$render(consequent_17);
+				else if (get(marketState) === "error") $$render(consequent_18, 1);
 				else if (get(market)) $$render(consequent_24, 2);
 			});
-			var node_25 = sibling(node_15, 2);
+			var node_29 = sibling(node_20, 2);
 			var consequent_25 = ($$anchor) => {
 				ListingCompare($$anchor, {
 					get listings() {
@@ -7037,57 +7878,48 @@
 					onpick: openListing
 				});
 			};
-			if_block(node_25, ($$render) => {
+			if_block(node_29, ($$render) => {
 				if (get(marketState) !== "error") $$render(consequent_25);
 			});
-			var node_26 = sibling(node_25, 2);
+			var node_30 = sibling(node_29, 2);
 			var consequent_26 = ($$anchor) => {
-				var details = root_27$1();
-				var summary_1 = child(details);
-				var text_26 = only_child(sibling(child(summary_1)));
-				reset(summary_1);
-				var ol = sibling(summary_1, 2);
-				each(ol, 21, () => get(rm).recent, (sale) => sale.id ?? sale.at, ($$anchor, sale) => {
-					var li = root_26$1();
-					var span_6 = child(li);
-					var text_27 = only_child(span_6, true);
-					var b_5 = sibling(span_6);
-					var text_28 = sibling(child(b_5), 1, true);
-					reset(b_5);
-					reset(li);
-					template_effect(($0, $1) => {
-						set_text(text_27, $0);
-						set_text(text_28, $1);
-					}, [() => dtime(get(sale).at), () => nf(get(sale).price)]);
-					append($$anchor, li);
+				var button_17 = root_27$1();
+				var span_3 = child(button_17);
+				var text_23 = only_child(sibling(child(span_3)), true);
+				reset(span_3);
+				var span_4 = sibling(span_3);
+				Icon(sibling(child(span_4)), {
+					name: "next",
+					width: 2
 				});
-				reset(ol);
-				reset(details);
-				template_effect(() => set_text(text_26, `${get(rm).recent.length ?? ""}${get(rm).count > get(rm).recent.length ? ` sur ${get(rm).count}` : ""}`));
-				append($$anchor, details);
+				reset(span_4);
+				reset(button_17);
+				template_effect(($0) => set_text(text_23, $0), [() => nf(get(rm).count)]);
+				delegated("click", button_17, () => set(analysis, true));
+				append($$anchor, button_17);
 			};
-			if_block(node_26, ($$render) => {
-				if (get(market) && get(rm).count) $$render(consequent_26);
+			if_block(node_30, ($$render) => {
+				if (get(market) && get(rm).count > 1) $$render(consequent_26);
 			});
-			reset(div_29);
-			append($$anchor, div_29);
+			reset(div_31);
+			append($$anchor, div_31);
 		};
-		if_block(node_3, ($$render) => {
-			if (get(tab) === "details") $$render(consequent_14);
+		if_block(node_5, ($$render) => {
+			if (get(tab) === "details") $$render(consequent_16);
 			else $$render(alternate_2, -1);
 		});
-		var node_27 = sibling(node_3, 2);
+		var node_32 = sibling(node_5, 2);
 		var consequent_27 = ($$anchor) => {
-			var div_39 = root_29$1();
-			let classes_7;
-			var text_29 = only_child(div_39, true);
+			var div_38 = root_29$1();
+			let classes_6;
+			var text_24 = only_child(div_38, true);
 			template_effect(() => {
-				classes_7 = set_class(div_39, 1, "modal-msg", null, classes_7, { ok: get(msgOk) });
-				set_text(text_29, get(msg));
+				classes_6 = set_class(div_38, 1, "modal-msg", null, classes_6, { ok: get(msgOk) });
+				set_text(text_24, get(msg));
 			});
-			append($$anchor, div_39);
+			append($$anchor, div_38);
 		};
-		if_block(node_27, ($$render) => {
+		if_block(node_32, ($$render) => {
 			if (get(msg)) $$render(consequent_27);
 		});
 		reset(div_3);
@@ -7095,24 +7927,46 @@
 		bind_this(div_1, ($$value) => modalEl = $$value, () => modalEl);
 		action(div_1, ($$node) => anchorCentered?.($$node));
 		reset(div);
+		var node_33 = sibling(div, 2);
+		var consequent_28 = ($$anchor) => {
+			MarketAnalysis($$anchor, {
+				get card() {
+					return get(c);
+				},
+				get rm() {
+					return get(rm);
+				},
+				get listings() {
+					return get(listings);
+				},
+				get now() {
+					return get(now);
+				},
+				onclose: () => set(analysis, false),
+				onpick: openListing
+			});
+		};
+		if_block(node_33, ($$render) => {
+			if (get(analysis)) $$render(consequent_28);
+		});
 		template_effect(() => {
-			set_attribute(span_1, "data-r", get(c).rarity);
-			set_text(text$4, RNAME[get(c).rarity] || get(c).rarity);
+			set_attribute(span, "data-r", get(c).rarity);
+			set_text(text$6, RNAME[get(c).rarity] || get(c).rarity);
 			set_text(text_1, get(c).title);
-			set_attribute(button_1, "aria-selected", get(tab) === "details");
-			classes = set_class(button_1, 1, "", null, classes, { on: get(tab) === "details" });
-			set_attribute(button_2, "aria-selected", get(tab) === "market");
-			classes_1 = set_class(button_2, 1, "", null, classes_1, { on: get(tab) === "market" });
+			set_attribute(button_2, "aria-selected", get(tab) === "details");
+			classes_1 = set_class(button_2, 1, "", null, classes_1, { on: get(tab) === "details" });
+			set_attribute(button_3, "aria-selected", get(tab) === "market");
+			classes_2 = set_class(button_3, 1, "", null, classes_2, { on: get(tab) === "market" });
 		});
 		delegated("click", div, (e) => e.target === e.currentTarget && $$props.onclose?.());
 		delegated("click", button, () => $$props.onclose?.());
-		delegated("click", button_1, () => set(tab, "details"));
-		delegated("click", button_2, () => set(tab, "market"));
-		append($$anchor, div);
+		delegated("click", button_2, () => set(tab, "details"));
+		delegated("click", button_3, () => set(tab, "market"));
+		append($$anchor, fragment);
 		pop();
 	}
 	delegate(["click"]);
-	var root$24 = from_html(`<div class="rg-card"><div class="rg-aura"></div> <button class="card-btn"><!></button></div>`);
+	var root$24 = from_html(`<div><div class="rg-aura"></div> <button class="card-btn"><!></button></div>`);
 	var root_1$23 = from_html(`<div class="reveal reveal-all"><div class="reveal-all-head"><h2>Votre paquet</h2> <div class="sub"> </div></div> <div class="reveal-grid"></div> <button class="btn primary">Terminé</button></div>`);
 	var root_2$18 = from_html(`<div class="stage-aura"></div> <div class="flip-in"><button class="card-btn"><!></button></div>`, 1);
 	var root_3$15 = from_html(`<div class="reveal-rarity"> </div>`);
@@ -7121,14 +7975,41 @@
 	var root_6$13 = from_html(`<!> <!>`, 1);
 	function Reveal($$anchor, $$props) {
 		push($$props, true);
+		let copies = prop($$props, "copies", 3, null);
 		let i = state(0);
 		let showAll = state(false);
 		let selected = state(null);
-		user_effect(() => reveal(get(showAll) ? rarest($$props.cards) : $$props.cards[get(i)].rarity));
+		const STING = new Set([
+			"R",
+			"SR",
+			"UR",
+			"L"
+		]);
+		let from = state(0);
+		const step = user_derived(() => Math.round(Math.min(260, Math.max(130, 2200 / Math.max(1, $$props.cards.length - get(from))))));
+		user_effect(() => {
+			if (!get(showAll)) return reveal($$props.cards[get(i)].rarity);
+			untrack(() => $$props.cards.slice(get(from)).forEach((c, k) => {
+				const t = k * get(step) / 1e3;
+				play("flip", t);
+				if (STING.has(c.rarity)) play(c.rarity, t + .1);
+			}));
+		});
+		function revealAll() {
+			set(from, get(i) + 1);
+			set(showAll, true);
+			document.scrollingElement?.scrollTo({ top: 0 });
+		}
 		let last = user_derived(() => get(i) === $$props.cards.length - 1);
 		let newCount = user_derived(() => $$props.cards.filter((c) => c.is_new).length);
+		let left = state(copies() ?? []);
+		let gone = state(new Set());
 		function openCard(c) {
-			set(selected, {
+			const copy = pickCopy(get(left), c);
+			set(selected, copy ? {
+				...copy,
+				count: 1
+			} : {
 				id: null,
 				card: c,
 				count: 0,
@@ -7137,6 +8018,21 @@
 				obtained_at: null,
 				tags: []
 			}, true);
+			if (copy || copies()) return;
+			data.myCopy(c).then((found) => {
+				if (found && !get(gone).has(found.id) && get(selected)?.card === c && !get(selected).id) set(selected, {
+					...found,
+					count: 1
+				}, true);
+			}, () => {});
+		}
+		function acted(kind) {
+			if (kind === "unsure") return $$props.onaction?.(kind);
+			const id = get(selected).id;
+			set(gone, new Set([...get(gone), id]));
+			set(left, get(left).filter((r) => r.id !== id));
+			collectionRemove([id]);
+			$$props.onaction?.(kind);
 		}
 		function onKey(e) {
 			if (get(selected)) return;
@@ -7181,6 +8077,8 @@
 			let styles;
 			each(div_3, 21, () => $$props.cards, index, ($$anchor, c, k) => {
 				var div_4 = root$24();
+				let classes;
+				let styles_1;
 				var div_5 = child(div_4);
 				var button = sibling(div_5, 2);
 				Card(child(button), {
@@ -7197,10 +8095,11 @@
 				reset(button);
 				reset(div_4);
 				template_effect(($0) => {
-					set_style(div_4, `animation-delay:${$0 ?? ""}ms`);
+					classes = set_class(div_4, 1, "rg-card", null, classes, { dealt: k >= get(from) });
+					styles_1 = set_style(div_4, "", styles_1, { "--d": $0 });
 					set_attribute(div_5, "data-r", get(c).rarity);
 					set_attribute(button, "aria-label", get(c).title);
-				}, [() => Math.min(k, 20) * 50]);
+				}, [() => `${Math.max(0, k - get(from)) * get(step)}ms`]);
 				delegated("click", button, () => openCard(get(c)));
 				append($$anchor, div_4);
 			});
@@ -7265,8 +8164,8 @@
 			var div_12 = sibling(node_4, 2);
 			each(div_12, 21, () => $$props.cards, index, ($$anchor, _, k) => {
 				var span = root_4$14();
-				let classes;
-				template_effect(() => classes = set_class(span, 1, "d", null, classes, {
+				let classes_1;
+				template_effect(() => classes_1 = set_class(span, 1, "d", null, classes_1, {
 					on: k === get(i),
 					seen: k < get(i)
 				}));
@@ -7305,7 +8204,7 @@
 			delegated("click", button_3, () => get(i) > 0 && set(i, get(i) - 1));
 			delegated("click", button_4, () => get(last) ? $$props.ondone?.() : set(i, get(i) + 1));
 			delegated("click", button_5, () => !get(last) && set(i, get(i) + 1));
-			delegated("click", button_6, () => set(showAll, true));
+			delegated("click", button_6, revealAll);
 			append($$anchor, div_6);
 		};
 		if_block(node, ($$render) => {
@@ -7314,13 +8213,19 @@
 		});
 		var node_7 = sibling(node, 2);
 		var consequent_1 = ($$anchor) => {
-			CardModal($$anchor, {
-				get item() {
-					return get(selected);
-				},
-				readonly: true,
-				onclose: () => set(selected, null)
-			});
+			{
+				let $0 = user_derived(() => !get(selected).id);
+				CardModal($$anchor, {
+					get item() {
+						return get(selected);
+					},
+					get readonly() {
+						return get($0);
+					},
+					onclose: () => set(selected, null),
+					onaction: acted
+				});
+			}
 		};
 		if_block(node_7, ($$render) => {
 			if (get(selected)) $$render(consequent_1);
@@ -7410,26 +8315,26 @@
 	var root_4$13 = from_html(`<h1>Packs spéciaux</h1> <div class="sub"> </div>`, 1);
 	var root_5$13 = from_html(`<h1>Ouvrir un paquet</h1> <div class="sub">Découvrez 5 nouvelles cartes Wikipédia</div>`, 1);
 	var root_6$12 = from_html(`<span class="booster-back b2"></span>`);
-	var root_7$11 = from_html(`<span class="booster-back b1"></span>`);
-	var root_8$9 = from_html(`<span class="booster-mark"> </span>`);
-	var root_9$8 = from_html(`<div class="pull-actions"><button class="btn primary big"> </button></div>`);
-	var root_10$7 = from_html(`<div class="pack-wait"><span class="pw-time"> </span> <span class="pw-lbl">avant le prochain pack PRO</span> <span class="pw-sub">Ouvert aujourd'hui</span></div>`);
-	var root_11$6 = from_html(`<button role="radio"> </button>`);
-	var root_12$6 = from_html(`<div class="pill-picks" role="radiogroup" aria-label="Pack spécial"></div>`);
-	var root_13$5 = from_html(`<div class="pull-actions"><button class="btn primary big"> </button></div> <div class="regen-line"> </div>`, 1);
-	var root_14$4 = from_html(`<span class="pw-time"> </span><span class="pw-lbl">avant le prochain pack spécial</span>`, 1);
-	var root_15$4 = from_html(`<span class="pw-lbl">Aucun pack spécial pour le moment</span>`);
-	var root_16$4 = from_html(`<div class="pack-wait"><!></div>`);
-	var root_17$4 = from_html(`<!> <!>`, 1);
-	var root_18$3 = from_html(`<span class="pw-time"> </span> <span class="pw-lbl"> </span>`, 1);
+	var root_7$12 = from_html(`<span class="booster-back b1"></span>`);
+	var root_8$11 = from_html(`<span class="booster-mark"> </span>`);
+	var root_9$10 = from_html(`<div class="pull-actions"><button class="btn primary big"> </button></div>`);
+	var root_10$8 = from_html(`<div class="pack-wait"><span class="pw-time"> </span> <span class="pw-lbl">avant le prochain pack PRO</span> <span class="pw-sub">Ouvert aujourd'hui</span></div>`);
+	var root_11$8 = from_html(`<button role="radio"> </button>`);
+	var root_12$7 = from_html(`<div class="pill-picks" role="radiogroup" aria-label="Pack spécial"></div>`);
+	var root_13$7 = from_html(`<div class="pull-actions"><button class="btn primary big"> </button></div> <div class="regen-line"> </div>`, 1);
+	var root_14$5 = from_html(`<span class="pw-time"> </span><span class="pw-lbl">avant le prochain pack spécial</span>`, 1);
+	var root_15$5 = from_html(`<span class="pw-lbl">Aucun pack spécial pour le moment</span>`);
+	var root_16$5 = from_html(`<div class="pack-wait"><!></div>`);
+	var root_17$5 = from_html(`<!> <!>`, 1);
+	var root_18$5 = from_html(`<span class="pw-time"> </span> <span class="pw-lbl"> </span>`, 1);
 	var root_19$3 = from_html(`<span class="pw-lbl">Plus de paquets pour le moment</span>`);
 	var root_20$3 = from_html(`<span class="pw-sub"> </span>`);
 	var root_21$3 = from_html(`<div class="pull-actions"><button class="btn">Demander des paquets (V.I.P.)</button></div>`);
 	var root_22$3 = from_html(`<div class="pack-wait"><!> <!></div> <!>`, 1);
 	var root_23$2 = from_html(`Prochain paquet dans <b> </b>`, 1);
-	var root_24$1 = from_html(`Prochain paquet <b>prêt</b>`, 1);
-	var root_25 = from_html(`<div class="regen-line"><!></div>`);
-	var root_26 = from_html(`<div class="pack-count"><span class="pc-num"> </span> <span class="pc-lbl"> </span></div> <div class="pull-actions"><button class="btn primary big"> </button></div> <!>`, 1);
+	var root_24$2 = from_html(`Prochain paquet <b>prêt</b>`, 1);
+	var root_25$1 = from_html(`<div class="regen-line"><!></div>`);
+	var root_26$1 = from_html(`<div class="pack-count"><span class="pc-num"> </span> <span class="pc-lbl"> </span></div> <div class="pull-actions"><button class="btn primary big"> </button></div> <!>`, 1);
 	var root_27 = from_html(`<div class="special-note">Vérification humaine requise par le jeu. <button class="link-btn">Ouvrir la version originale pour valider</button></div>`);
 	var root_28 = from_html(`<div class="regen-line err"> </div>`);
 	var root_29 = from_html(`<div class="session-recap"> </div>`);
@@ -7439,6 +8344,7 @@
 		push($$props, true);
 		let phase = state("ready");
 		let cards = state(proxy([]));
+		let copies = state(null);
 		let busy = state(false);
 		let opening = state(false);
 		let error = state("");
@@ -7457,8 +8363,9 @@
 				const [d] = await Promise.all([withHumanCheck(opener), new Promise((r) => setTimeout(r, 900))]);
 				if (!d?.cards?.length) throw new Error("Aucune carte reçue. Réessayez dans un instant.");
 				recordPull(d.cards);
-				d.copies ? collectionAdd(d.copies) : forgetCollection();
+				collectionAdd();
 				set(cards, d.cards, true);
+				set(copies, d.copies, true);
 				set(phase, "revealing");
 				$$props.onchanged?.();
 			} catch (e) {
@@ -7563,7 +8470,11 @@
 				get cards() {
 					return get(cards);
 				},
-				ondone: done
+				get copies() {
+					return get(copies);
+				},
+				ondone: done,
+				onaction: (kind) => kind === "discard" && $$props.onprofile?.()
 			});
 		};
 		var alternate_7 = ($$anchor) => {
@@ -7633,7 +8544,7 @@
 			});
 			var node_5 = sibling(node_4, 2);
 			var consequent_6 = ($$anchor) => {
-				append($$anchor, root_7$11());
+				append($$anchor, root_7$12());
 			};
 			if_block(node_5, ($$render) => {
 				if (get(kind) === "normal" && !get(opening) && get(stackDepth) > 1) $$render(consequent_6);
@@ -7641,7 +8552,7 @@
 			var span_3 = sibling(node_5, 2);
 			var node_6 = sibling(child(span_3), 4);
 			var consequent_7 = ($$anchor) => {
-				var span_4 = root_8$9();
+				var span_4 = root_8$11();
 				var text_2 = only_child(span_4, true);
 				template_effect(() => set_text(text_2, get(kind) === "pro" ? "PRO" : "SR+"));
 				append($$anchor, span_4);
@@ -7657,7 +8568,7 @@
 				var fragment_4 = comment();
 				var node_8 = first_child(fragment_4);
 				var consequent_8 = ($$anchor) => {
-					var div_5 = root_9$8();
+					var div_5 = root_9$10();
 					var button_2 = child(div_5);
 					var text_3 = only_child(button_2, true);
 					reset(div_5);
@@ -7669,7 +8580,7 @@
 					append($$anchor, div_5);
 				};
 				var alternate_1 = ($$anchor) => {
-					var div_6 = root_10$7();
+					var div_6 = root_10$8();
 					var text_4 = only_child(child(div_6), true);
 					next(4);
 					reset(div_6);
@@ -7683,12 +8594,12 @@
 				append($$anchor, fragment_4);
 			};
 			var consequent_13 = ($$anchor) => {
-				var fragment_5 = root_17$4();
+				var fragment_5 = root_17$5();
 				var node_9 = first_child(fragment_5);
 				var consequent_10 = ($$anchor) => {
-					var div_7 = root_12$6();
+					var div_7 = root_12$7();
 					each(div_7, 21, () => get(special).packs, (sp) => sp.id, ($$anchor, sp) => {
-						var button_3 = root_11$6();
+						var button_3 = root_11$8();
 						let classes_3;
 						var text_5 = only_child(button_3, true);
 						template_effect(() => {
@@ -7708,7 +8619,7 @@
 				});
 				var node_10 = sibling(node_9, 2);
 				var consequent_11 = ($$anchor) => {
-					var fragment_6 = root_13$5();
+					var fragment_6 = root_13$7();
 					var div_8 = first_child(fragment_6);
 					var button_4 = child(div_8);
 					var text_6 = only_child(button_4, true);
@@ -7723,17 +8634,17 @@
 					append($$anchor, fragment_6);
 				};
 				var alternate_3 = ($$anchor) => {
-					var div_10 = root_16$4();
+					var div_10 = root_16$5();
 					var node_11 = child(div_10);
 					var consequent_12 = ($$anchor) => {
-						var fragment_7 = root_14$4();
+						var fragment_7 = root_14$5();
 						var text_8 = only_child(first_child(fragment_7), true);
 						next();
 						template_effect(($0) => set_text(text_8, $0), [() => countdown(get(specialSecs))]);
 						append($$anchor, fragment_7);
 					};
 					var alternate_2 = ($$anchor) => {
-						append($$anchor, root_15$4());
+						append($$anchor, root_15$5());
 					};
 					if_block(node_11, ($$render) => {
 						if (get(specialSecs)) $$render(consequent_12);
@@ -7753,7 +8664,7 @@
 				var div_11 = first_child(fragment_8);
 				var node_12 = child(div_11);
 				var consequent_14 = ($$anchor) => {
-					var fragment_9 = root_18$3();
+					var fragment_9 = root_18$5();
 					var span_8 = first_child(fragment_9);
 					var text_9 = only_child(span_8, true);
 					var text_10 = only_child(sibling(span_8, 2), true);
@@ -7795,7 +8706,7 @@
 				append($$anchor, fragment_8);
 			};
 			var alternate_6 = ($$anchor) => {
-				var fragment_10 = root_26();
+				var fragment_10 = root_26$1();
 				var div_13 = first_child(fragment_10);
 				var span_12 = child(div_13);
 				var text_12 = only_child(span_12, true);
@@ -7807,7 +8718,7 @@
 				reset(div_14);
 				var node_15 = sibling(div_14, 2);
 				var consequent_19 = ($$anchor) => {
-					var div_15 = root_25();
+					var div_15 = root_25$1();
 					var node_16 = child(div_15);
 					var consequent_18 = ($$anchor) => {
 						var fragment_11 = root_23$2();
@@ -7816,7 +8727,7 @@
 						append($$anchor, fragment_11);
 					};
 					var alternate_5 = ($$anchor) => {
-						var fragment_12 = root_24$1();
+						var fragment_12 = root_24$2();
 						next();
 						append($$anchor, fragment_12);
 					};
@@ -8329,101 +9240,266 @@
 			}
 		};
 	}
-	var root$19 = from_html(`<div class="empty"><b> </b><div>Vérifiez que vous êtes connecté, puis réessayez.</div><button class="btn">Réessayer</button></div>`);
-	var root_1$19 = from_html(`<div class="wc skeleton"></div>`);
-	var root_2$14 = from_html(`<div class="grid"></div>`);
-	var root_3$12 = from_html(`<span class="sync"><span class="spin"></span> </span>`);
-	var root_4$12 = from_html(`<option>Attaque</option> <option>Défense</option>`, 1);
-	var root_5$12 = from_html(`<button class="iconbtn"> </button>`);
-	var root_6$11 = from_html(`<div class="sort-hint"><!></div>`);
-	var root_7$10 = from_html(`<div class="sort-hint"> </div>`);
-	var root_8$8 = from_html(`<button title="Cartes favorites"><!><span class="rl-name">Favoris</span><span class="rl-n"> </span></button>`);
-	var root_9$7 = from_html(`<button title="Cartes brillantes"><!><span class="rl-name">Brillantes</span><span class="rl-n"> </span></button>`);
-	var root_10$6 = from_html(`<!> <!>`, 1);
-	var root_11$5 = from_html(`<button></button>`);
-	var root_12$5 = from_html(`<div class="rarity-panel"><div class="rarity-meter" role="img" aria-label="Répartition par rareté"></div> <!></div>`);
-	var root_13$4 = from_html(`<b>Aucune carte ne correspond</b><div>Essayez un autre filtre ou une autre recherche.</div>`, 1);
-	var root_14$3 = from_html(`<b>Rien ici pour l'instant</b><div>Ouvrez un paquet pour commencer votre collection.</div>`, 1);
-	var root_15$3 = from_html(`<div class="empty"><!></div>`);
-	var root_16$3 = from_html(`<button><!> <!></button>`);
-	var root_17$3 = from_html(`<div class="grid-more" aria-hidden="true"></div>`);
-	var root_18$2 = from_html(`<div class="grid"></div> <!>`, 1);
-	var root_19$2 = from_html(`<div class="coll-head"><div><h1>Ma collection</h1> <div class="meta"> <!><!></div></div> <div class="coll-tools"><!> <div class="tool-actions"><div class="isel" title="Trier les cartes"><!> <select aria-label="Trier"><option>Rareté</option><option>Valeur estimée</option><!><option>Nom</option></select></div> <!> <button><!><span> </span></button></div></div></div> <!> <!> <!> <!>`, 1);
-	var root_20$2 = from_html(`<span class="bulk-text"> <b> </b> ?</span> <button class="btn">Annuler</button> <button class="btn danger"> </button>`, 1);
-	var root_21$2 = from_html(`<span class="bulk-text"> </span> <button class="btn danger"> </button>`, 1);
-	var root_22$2 = from_html(`<div class="bulk-bar"><!></div>`);
-	var root_23$1 = from_html(`<!> <!> <!>`, 1);
+	var PagedList = class {
+		#page = state(0);
+		get page() {
+			return get(this.#page);
+		}
+		set page(value) {
+			set(this.#page, value, true);
+		}
+		#data = state(null);
+		get data() {
+			return get(this.#data);
+		}
+		set data(value) {
+			set(this.#data, value, true);
+		}
+		#loaded = state(-1);
+		get loaded() {
+			return get(this.#loaded);
+		}
+		set loaded(value) {
+			set(this.#loaded, value, true);
+		}
+		#loading = state(false);
+		get loading() {
+			return get(this.#loading);
+		}
+		set loading(value) {
+			set(this.#loading, value, true);
+		}
+		#error = state(false);
+		get error() {
+			return get(this.#error);
+		}
+		set error(value) {
+			set(this.#error, value, true);
+		}
+		#token = 0;
+		constructor(fetchPage) {
+			this.fetchPage = fetchPage;
+		}
+		async refresh(merge = (old, fresh) => fresh) {
+			const token = this.#token;
+			try {
+				const d = await this.fetchPage(this.loaded);
+				if (token === this.#token) this.data = merge(this.data, d);
+			} catch {}
+		}
+		async go(page = this.page) {
+			const token = ++this.#token;
+			this.page = page;
+			this.loading = true;
+			this.error = false;
+			try {
+				const d = await this.fetchPage(page);
+				if (token === this.#token) {
+					this.loaded = page;
+					this.data = d;
+				}
+			} catch {
+				if (token === this.#token) this.error = true;
+			} finally {
+				if (token === this.#token) this.loading = false;
+			}
+		}
+	};
+	function debouncedSearch(read, apply) {
+		user_effect(() => {
+			const q = read().trim();
+			const t = setTimeout(() => apply(q), 350);
+			return () => clearTimeout(t);
+		});
+	}
+	var PageStream = class {
+		#items = state([]);
+		get items() {
+			return get(this.#items);
+		}
+		set items(value) {
+			set(this.#items, value);
+		}
+		#meta = state(null);
+		get meta() {
+			return get(this.#meta);
+		}
+		set meta(value) {
+			set(this.#meta, value);
+		}
+		#hasMore = state(false);
+		get hasMore() {
+			return get(this.#hasMore);
+		}
+		set hasMore(value) {
+			set(this.#hasMore, value, true);
+		}
+		#loading = state(false);
+		get loading() {
+			return get(this.#loading);
+		}
+		set loading(value) {
+			set(this.#loading, value, true);
+		}
+		#error = state(false);
+		get error() {
+			return get(this.#error);
+		}
+		set error(value) {
+			set(this.#error, value, true);
+		}
+		#started = state(false);
+		get started() {
+			return get(this.#started);
+		}
+		set started(value) {
+			set(this.#started, value, true);
+		}
+		#first = state(false);
+		get first() {
+			return get(this.#first);
+		}
+		set first(value) {
+			set(this.#first, value, true);
+		}
+		#page = -1;
+		#token = 0;
+		#ids = new Set();
+		constructor(fetchPage) {
+			this.fetchPage = fetchPage;
+		}
+		show({ items, hasMore, ...meta }) {
+			this.items = items;
+			this.#ids = new Set(items.map((r) => r.id));
+			this.meta = meta;
+			this.hasMore = !!hasMore;
+			this.started = true;
+		}
+		reset() {
+			this.#token++;
+			this.#page = -1;
+			this.hasMore = false;
+			return this.#load(0);
+		}
+		more() {
+			if (this.loading || !this.hasMore) return;
+			return this.#load(this.#page + 1);
+		}
+		async #load(page) {
+			const token = this.#token;
+			this.loading = true;
+			this.first = !page;
+			this.error = false;
+			try {
+				const { items, hasMore, ...meta } = await this.fetchPage(page);
+				if (token !== this.#token) return;
+				if (!page) this.#ids = new Set();
+				const fresh = items.filter((r) => !this.#ids.has(r.id));
+				for (const r of fresh) this.#ids.add(r.id);
+				this.items = page ? [...this.items, ...fresh] : fresh;
+				if (!page) this.meta = meta;
+				this.#page = page;
+				this.hasMore = !!hasMore;
+				this.started = true;
+			} catch {
+				if (token === this.#token) this.error = true;
+			} finally {
+				if (token === this.#token) this.loading = false;
+			}
+		}
+		update(row) {
+			this.items = this.items.map((r) => r.id === row.id ? row : r);
+		}
+		drop(ids) {
+			const gone = new Set(ids);
+			this.items = this.items.filter((r) => !gone.has(r.id));
+		}
+	};
+	var root$19 = from_html(`<div class="empty"><b>Impossible de charger la collection.</b><div>Vérifiez que vous êtes connecté, puis réessayez.</div><button class="btn">Réessayer</button></div>`);
+	var root_1$19 = from_html(`<span class="sync"><span class="spin"></span>Chargement de votre collection</span>`);
+	var root_2$14 = from_html(`<option> </option>`);
+	var root_3$12 = from_html(`<div class="isel" title="Étiquette"><!> <select aria-label="Étiquette"><option>Étiquettes</option><option>Sans étiquette</option><!></select></div>`);
+	var root_4$12 = from_html(`<button class="iconbtn"> </button>`);
+	var root_5$12 = from_html(`<div class="sort-hint"> </div>`);
+	var root_6$11 = from_html(`<button title="Cartes favorites"><!><span class="rl-name">Favoris</span></button>`);
+	var root_7$11 = from_html(`<button></button>`);
+	var root_8$10 = from_html(`<div class="rarity-panel"><div class="rarity-meter" role="img" aria-label="Répartition par rareté"></div> <!></div>`);
+	var root_9$9 = from_html(`<div class="wc skeleton"></div>`);
+	var root_10$7 = from_html(`<div class="grid"></div>`);
+	var root_11$7 = from_html(`<b>Aucune carte ne correspond</b><div>Essayez un autre filtre ou une autre recherche.</div>`, 1);
+	var root_12$6 = from_html(`<b>Rien ici pour l'instant</b><div>Ouvrez un paquet pour commencer votre collection.</div>`, 1);
+	var root_13$6 = from_html(`<div class="empty"><!></div>`);
+	var root_14$4 = from_html(`<button><!> <!></button>`);
+	var root_15$4 = from_html(`<div class="grid-more" aria-hidden="true"></div>`);
+	var root_16$4 = from_html(`<div class="empty"><span class="modal-msg">Impossible de charger la suite.</span><button class="btn">Réessayer</button></div>`);
+	var root_17$4 = from_html(`<div></div> <!>`, 1);
+	var root_18$4 = from_html(`<div class="coll-head"><div><h1>Ma collection</h1> <div class="meta"><!></div></div> <div class="coll-tools"><!> <div class="tool-actions"><div class="isel" title="Trier les cartes"><!> <select aria-label="Trier"></select></div> <!> <!> <button><!><span> </span></button></div></div></div> <!> <!> <!>`, 1);
+	var root_19$2 = from_html(`<span class="bulk-text"> <b> </b> ?</span> <button class="btn">Annuler</button> <button class="btn danger"> </button>`, 1);
+	var root_20$2 = from_html(`<span class="bulk-text"> </span> <button class="btn danger"> </button>`, 1);
+	var root_21$2 = from_html(`<div class="bulk-bar"><!></div>`);
+	var root_22$2 = from_html(`<!> <!> <!>`, 1);
 	function Collection($$anchor, $$props) {
 		push($$props, true);
-		let items = state(null);
-		let stats = state(null);
-		let error = state("");
+		const SORTS = [
+			["rarity", "Rareté"],
+			["recent", "Récentes"],
+			["name", "Nom"]
+		];
 		const prefs = settings.collection;
 		let filter = state(proxy(prefs.filter));
 		let search = state("");
-		let sort = state(proxy(prefs.sort));
-		let favOnly = state(proxy(prefs.favOnly));
-		let shinyOnly = state(proxy(prefs.shinyOnly));
+		let sort = state(proxy(SORTS.some(([id]) => id === prefs.sort) ? prefs.sort : "rarity"));
+		let favOnly = state(!!prefs.favOnly);
+		let tagFilter = state("");
 		user_effect(() => Object.assign(prefs, {
 			filter: get(filter),
 			sort: get(sort),
-			favOnly: get(favOnly),
-			shinyOnly: get(shinyOnly)
+			favOnly: get(favOnly)
 		}));
+		tags.load();
 		let selected = state(null);
-		let values = proxy({});
-		let lanePaused = state(false);
-		user_effect(() => backgroundLane.subscribe((st) => set(lanePaused, st === "paused")));
-		let loaded = state(0);
-		let tick = state(0);
-		const sortVals = new Map();
-		let tickTimer = null;
-		const lazy = lazyValues((id, v) => {
-			values[id] = v;
-			sortVals.set(id, v ?? -1);
-			update(loaded);
-			tickTimer ??= setTimeout(() => {
-				tickTimer = null;
-				update(tick);
-			}, 200);
-		});
-		user_effect(() => () => {
-			lazy.destroy();
-			clearTimeout(tickTimer);
-		});
-		user_effect(() => {
-			if (get(sort) === "value" && get(items)) for (const it of get(items)) lazy.load(it.card);
-		});
-		user_effect(() => {
-			if (settings.hideStats && (get(sort) === "atk" || get(sort) === "def")) set(sort, "rarity");
-		});
-		async function load(force = false) {
-			set(error, "");
-			const show = (d, loading) => {
-				set(items, d.items, true);
-				set(stats, {
-					...d.stats,
-					loading
-				}, true);
+		let query = state("");
+		debouncedSearch(() => get(search), (q) => set(query, q, true));
+		const serverSort = user_derived(() => get(favOnly) ? "starred" : get(sort));
+		const stream = new PageStream(async (page) => {
+			const d = await myCardsPage({
+				page,
+				q: get(query) || void 0,
+				rarity: get(filter) === "ALL" ? void 0 : get(filter),
+				sort: get(serverSort),
+				tag: get(tagFilter) || void 0
+			});
+			if (get(serverSort) !== "starred") return d;
+			const items = d.items.filter((it) => it.starred);
+			return {
+				...d,
+				items,
+				hasMore: d.hasMore && items.length === d.items.length
 			};
-			try {
-				show(await loadCollection({
-					force,
-					onCached: (d) => show(d, true),
-					onPartial: (d) => show(d, true)
-				}), false);
-			} catch {
-				if (!get(items)) set(error, "Impossible de charger la collection.");
-				else set(stats, {
-					...get(stats),
-					loading: false
-				}, true);
+		});
+		const first = savedFirstPage();
+		if (first && get(filter) === "ALL" && get(sort) === "rarity" && !get(favOnly) && !get(tagFilter)) stream.show(first);
+		user_effect(() => {
+			get(query), get(filter), get(serverSort), get(tagFilter);
+			untrack(() => stream.reset());
+		});
+		const counts = user_derived(() => stream.meta?.counts ?? {});
+		const total = user_derived(() => Object.values(get(counts)).reduce((a, b) => a + b, 0));
+		let values = proxy({});
+		const lazy = lazyValues((id, v) => values[id] = v);
+		user_effect(() => () => lazy.destroy());
+		function changed(gone = null) {
+			if (gone) {
+				collectionRemove(gone);
+				stream.drop(gone);
+			} else {
+				forgetCollection();
+				stream.reset();
 			}
 		}
-		load();
-		function changed(discarded = null) {
-			discarded ? collectionRemove(discarded) : forgetCollection();
-			load();
+		function rowChanged(row) {
+			(!get(favOnly) || row.starred) && (!get(tagFilter) || (get(tagFilter) === "none" ? !row.tags.length : row.tags.some((t) => t.id === get(tagFilter)))) ? stream.update(row) : stream.drop([row.id]);
+			collectionRemove();
 		}
 		let selecting = state(false);
 		let picked = state(proxy(new Set()));
@@ -8446,13 +9522,14 @@
 			set(bulkConfirm, false);
 		}
 		async function bulkDiscard() {
+			if (get(bulkBusy)) return;
 			set(bulkBusy, true);
 			try {
 				const r = await data.bulkDiscard([...get(picked)]);
-				const failed = r.failed?.length || 0;
 				const kept = new Set(r.failed || []);
 				changed([...get(picked)].filter((id) => !kept.has(id)));
-				set(bulkMsg, `${r.discarded_count} carte${r.discarded_count > 1 ? "s" : ""} défaussée${r.discarded_count > 1 ? "s" : ""}` + (failed ? `, ${failed} en échec` : ""));
+				if (kept.size) changed([...kept]);
+				set(bulkMsg, `${r.discarded_count} carte${r.discarded_count > 1 ? "s" : ""} défaussée${r.discarded_count > 1 ? "s" : ""}` + (kept.size ? `, ${kept.size} déjà partie${kept.size > 1 ? "s" : ""} ailleurs` : ""));
 			} catch (e) {
 				set(bulkMsg, e.message || "La défausse a échoué.", true);
 				changed();
@@ -8461,306 +9538,245 @@
 			toggleSelecting();
 			$$props.onwallet?.();
 		}
-		const RANK = Object.fromEntries(RARITIES_DESC.map((r, i) => [r, -i]));
-		const SORTS = {
-			rarity: (a, b) => RANK[b.card.rarity] - RANK[a.card.rarity] || b.count - a.count,
-			value: (a, b) => (sortVals.get(b.card.id) ?? -1) - (sortVals.get(a.card.id) ?? -1) || RANK[b.card.rarity] - RANK[a.card.rarity],
-			atk: (a, b) => b.card.atk - a.card.atk,
-			def: (a, b) => b.card.def - a.card.def,
-			name: (a, b) => a.card.title.localeCompare(b.card.title, "fr")
-		};
-		let shown = user_derived(() => {
-			if (!get(items)) return [];
-			get(tick);
-			const q = normSearch(get(search));
-			return get(items).filter((it) => (get(filter) === "ALL" || it.card.rarity === get(filter)) && (!get(favOnly) || it.starred) && (!get(shinyOnly) || it.is_shiny) && (!q || it._s.includes(q))).sort(SORTS[get(sort)]);
-		});
-		const STEP = 96;
-		let limit = state(STEP);
-		user_effect(() => {
-			get(filter), get(favOnly), get(shinyOnly), get(sort), get(search);
-			set(limit, STEP);
-		});
-		let starredCount = user_derived(() => get(items)?.filter((it) => it.starred).length ?? 0);
-		let shinyCount = user_derived(() => get(items)?.filter((it) => it.is_shiny).length ?? 0);
-		let allPicked = user_derived(() => get(shown).length > 0 && get(shown).every((it) => get(picked).has(it.id)));
-		const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
-		var fragment = root_23$1();
+		const rows = user_derived(() => stream.items);
+		const allPicked = user_derived(() => get(rows).length > 0 && get(rows).every((it) => get(picked).has(it.id)));
+		const plural = (n, word) => `${n.toLocaleString("fr")} ${word}${n > 1 ? "s" : ""}`;
+		var fragment = root_22$2();
 		var node = first_child(fragment);
 		var consequent = ($$anchor) => {
 			var div = root$19();
-			var b_1 = child(div);
-			var text = only_child(b_1, true);
-			var button = sibling(b_1, 2);
+			var button = sibling(child(div), 2);
 			reset(div);
-			template_effect(() => set_text(text, get(error)));
-			delegated("click", button, () => load(true));
+			delegated("click", button, () => stream.reset());
 			append($$anchor, div);
 		};
-		var consequent_1 = ($$anchor) => {
-			var div_1 = root_2$14();
-			each(div_1, 20, () => Array(10), index, ($$anchor, _) => {
-				append($$anchor, root_1$19());
-			});
-			reset(div_1);
-			append($$anchor, div_1);
-		};
 		var alternate_3 = ($$anchor) => {
-			var fragment_1 = root_19$2();
-			var div_3 = first_child(fragment_1);
-			var div_4 = child(div_3);
-			var div_5 = sibling(child(div_4), 2);
-			var text_1 = child(div_5, true);
-			var node_1 = sibling(text_1);
-			var consequent_2 = ($$anchor) => {
-				var text_2 = text();
-				template_effect(() => set_text(text_2, `· ${get(stats).copies ?? ""} exemplaires`));
-				append($$anchor, text_2);
+			var fragment_1 = root_18$4();
+			var div_1 = first_child(fragment_1);
+			var div_2 = child(div_1);
+			var div_3 = sibling(child(div_2), 2);
+			var node_1 = child(div_3);
+			var consequent_1 = ($$anchor) => {
+				append($$anchor, root_1$19());
+			};
+			var alternate = ($$anchor) => {
+				var text$5 = text();
+				template_effect(($0) => set_text(text$5, $0), [() => plural(get(total), "carte") + (get(query) ? ` pour « ${get(query)} »` : "")]);
+				append($$anchor, text$5);
 			};
 			if_block(node_1, ($$render) => {
-				if (get(stats).copies !== get(stats).unique) $$render(consequent_2);
+				if (!stream.started) $$render(consequent_1);
+				else $$render(alternate, -1);
 			});
-			var node_2 = sibling(node_1);
-			var consequent_3 = ($$anchor) => {
-				var span = root_3$12();
-				var text_3 = sibling(child(span));
-				reset(span);
-				template_effect(() => set_text(text_3, `Mise à jour ${get(items).length ?? ""} / ${get(stats).copies ?? ""}`));
-				append($$anchor, span);
-			};
-			if_block(node_2, ($$render) => {
-				if (get(stats).loading) $$render(consequent_3);
-			});
-			reset(div_5);
-			reset(div_4);
-			var div_6 = sibling(div_4, 2);
+			reset(div_3);
+			reset(div_2);
+			var div_4 = sibling(div_2, 2);
+			var node_2 = child(div_4);
+			{
+				let $0 = user_derived(() => get(search).trim() !== get(query) || stream.loading && !stream.items.length);
+				SearchBox(node_2, {
+					get loading() {
+						return get($0);
+					},
+					placeholder: "Rechercher une carte...",
+					get value() {
+						return get(search);
+					},
+					set value($$value) {
+						set(search, $$value, true);
+					}
+				});
+			}
+			var div_5 = sibling(node_2, 2);
+			var div_6 = child(div_5);
 			var node_3 = child(div_6);
-			SearchBox(node_3, {
-				placeholder: "Rechercher une carte...",
-				get value() {
-					return get(search);
-				},
-				set value($$value) {
-					set(search, $$value, true);
-				}
+			Icon(node_3, { name: "sort" });
+			var select = sibling(node_3, 2);
+			each(select, 21, () => SORTS, ([id, label]) => id, ($$anchor, $$item) => {
+				var $$array = user_derived(() => to_array(get($$item), 2));
+				let id = () => get($$array)[0];
+				let label = () => get($$array)[1];
+				var option = root_2$14();
+				var text_1 = only_child(option, true);
+				var option_value = {};
+				template_effect(() => {
+					set_text(text_1, label());
+					if (option_value !== (option_value = id())) option.value = (option.__value = option_value) ?? "";
+				});
+				append($$anchor, option);
 			});
-			var div_7 = sibling(node_3, 2);
-			var div_8 = child(div_7);
-			var node_4 = child(div_8);
-			Icon(node_4, { name: "sort" });
-			var select = sibling(node_4, 2);
-			var option = child(select);
-			option.value = option.__value = "rarity";
-			var option_1 = sibling(option);
-			option_1.value = option_1.__value = "value";
-			var node_5 = sibling(option_1);
-			var consequent_4 = ($$anchor) => {
-				var fragment_3 = root_4$12();
-				var option_2 = first_child(fragment_3);
-				option_2.value = option_2.__value = "atk";
-				var option_3 = sibling(option_2, 2);
-				option_3.value = option_3.__value = "def";
-				append($$anchor, fragment_3);
-			};
-			if_block(node_5, ($$render) => {
-				if (!settings.hideStats) $$render(consequent_4);
-			});
-			var option_4 = sibling(node_5);
-			option_4.value = option_4.__value = "name";
 			reset(select);
 			init_select(select);
-			reset(div_8);
-			var node_6 = sibling(div_8, 2);
-			var consequent_5 = ($$anchor) => {
-				var button_1 = root_5$12();
-				var text_4 = only_child(button_1, true);
-				template_effect(() => set_text(text_4, get(allPicked) ? "Tout désélectionner" : "Tout sélectionner"));
+			reset(div_6);
+			var node_4 = sibling(div_6, 2);
+			var consequent_2 = ($$anchor) => {
+				var div_7 = root_3$12();
+				var node_5 = child(div_7);
+				Icon(node_5, { name: "tag" });
+				var select_1 = sibling(node_5, 2);
+				var option_1 = child(select_1);
+				option_1.value = option_1.__value = "";
+				var option_2 = sibling(option_1);
+				option_2.value = option_2.__value = "none";
+				each(sibling(option_2), 17, () => tags.list, (t) => t.id, ($$anchor, t) => {
+					var option_3 = root_2$14();
+					var text_2 = only_child(option_3, true);
+					var option_3_value = {};
+					template_effect(() => {
+						set_text(text_2, get(t).name);
+						if (option_3_value !== (option_3_value = get(t).id)) option_3.value = (option_3.__value = option_3_value) ?? "";
+					});
+					append($$anchor, option_3);
+				});
+				reset(select_1);
+				init_select(select_1);
+				reset(div_7);
+				bind_select_value(select_1, () => get(tagFilter), ($$value) => set(tagFilter, $$value));
+				append($$anchor, div_7);
+			};
+			if_block(node_4, ($$render) => {
+				if (tags.list?.length) $$render(consequent_2);
+			});
+			var node_7 = sibling(node_4, 2);
+			var consequent_3 = ($$anchor) => {
+				var button_1 = root_4$12();
+				var text_3 = only_child(button_1, true);
+				template_effect(() => set_text(text_3, get(allPicked) ? "Tout désélectionner" : "Tout sélectionner"));
 				delegated("click", button_1, () => {
 					pickSound(get(allPicked));
-					set(picked, get(allPicked) ? new Set() : new Set(get(shown).map((it) => it.id)), true);
+					set(picked, get(allPicked) ? new Set() : new Set(get(rows).map((it) => it.id)), true);
 				});
 				append($$anchor, button_1);
 			};
-			if_block(node_6, ($$render) => {
-				if (get(selecting)) $$render(consequent_5);
+			if_block(node_7, ($$render) => {
+				if (get(selecting)) $$render(consequent_3);
 			});
-			var button_2 = sibling(node_6, 2);
+			var button_2 = sibling(node_7, 2);
 			let classes;
-			var node_7 = child(button_2);
-			Icon(node_7, { name: "select" });
-			var text_5 = only_child(sibling(node_7), true);
+			var node_8 = child(button_2);
+			Icon(node_8, { name: "select" });
+			var text_4 = only_child(sibling(node_8), true);
 			reset(button_2);
-			reset(div_7);
-			reset(div_6);
-			reset(div_3);
-			var node_8 = sibling(div_3, 2);
-			var consequent_7 = ($$anchor) => {
-				var div_9 = root_6$11();
-				var node_9 = child(div_9);
-				var consequent_6 = ($$anchor) => {
-					var text_6 = text();
-					template_effect(() => set_text(text_6, `Le jeu limite les requêtes : estimation en pause une minute, reprise automatique (${get(loaded) ?? ""} / ${get(items).length ?? ""}).`));
-					append($$anchor, text_6);
-				};
-				var alternate = ($$anchor) => {
-					var text_7 = text();
-					template_effect(() => set_text(text_7, `Estimation des valeurs... ${get(loaded) ?? ""} / ${get(items).length ?? ""}. Le tri s'affine au fur et à mesure.`));
-					append($$anchor, text_7);
-				};
-				if_block(node_9, ($$render) => {
-					if (get(lanePaused)) $$render(consequent_6);
-					else $$render(alternate, -1);
-				});
-				reset(div_9);
-				append($$anchor, div_9);
+			reset(div_5);
+			reset(div_4);
+			reset(div_1);
+			var node_9 = sibling(div_1, 2);
+			var consequent_4 = ($$anchor) => {
+				var div_8 = root_5$12();
+				var text_5 = only_child(div_8, true);
+				template_effect(() => set_text(text_5, get(bulkMsg)));
+				append($$anchor, div_8);
 			};
-			if_block(node_8, ($$render) => {
-				if (get(sort) === "value" && get(loaded) < get(items).length) $$render(consequent_7);
+			if_block(node_9, ($$render) => {
+				if (get(bulkMsg)) $$render(consequent_4);
 			});
-			var node_10 = sibling(node_8, 2);
-			var consequent_8 = ($$anchor) => {
-				var div_10 = root_7$10();
-				var text_8 = only_child(div_10, true);
-				template_effect(() => set_text(text_8, get(bulkMsg)));
-				append($$anchor, div_10);
-			};
-			if_block(node_10, ($$render) => {
-				if (get(bulkMsg)) $$render(consequent_8);
-			});
-			var node_11 = sibling(node_10, 2);
-			var consequent_12 = ($$anchor) => {
-				var div_11 = root_12$5();
+			var node_10 = sibling(node_9, 2);
+			var consequent_6 = ($$anchor) => {
+				var div_9 = root_8$10();
 				{
 					const extras = ($$anchor) => {
-						var fragment_6 = root_10$6();
-						var node_12 = first_child(fragment_6);
-						var consequent_9 = ($$anchor) => {
-							var button_3 = root_8$8();
-							let classes_1;
-							var node_13 = child(button_3);
-							Icon(node_13, {
-								name: "star",
-								width: 1.7,
-								class: "rl-ico"
-							});
-							var text_9 = only_child(sibling(node_13, 2), true);
-							reset(button_3);
-							template_effect(() => {
-								classes_1 = set_class(button_3, 1, "rl special fav", null, classes_1, { on: get(favOnly) });
-								set_text(text_9, get(starredCount));
-							});
-							delegated("click", button_3, () => set(favOnly, !get(favOnly)));
-							append($$anchor, button_3);
-						};
-						if_block(node_12, ($$render) => {
-							if (get(starredCount)) $$render(consequent_9);
+						var button_3 = root_6$11();
+						let classes_1;
+						Icon(child(button_3), {
+							name: "star",
+							width: 1.7,
+							class: "rl-ico"
 						});
-						var node_14 = sibling(node_12, 2);
-						var consequent_10 = ($$anchor) => {
-							var button_4 = root_9$7();
-							let classes_2;
-							var node_15 = child(button_4);
-							Icon(node_15, {
-								name: "sparkle",
-								filled: true,
-								width: 0,
-								class: "rl-ico"
-							});
-							var text_10 = only_child(sibling(node_15, 2), true);
-							reset(button_4);
-							template_effect(() => {
-								classes_2 = set_class(button_4, 1, "rl special shiny", null, classes_2, { on: get(shinyOnly) });
-								set_text(text_10, get(shinyCount));
-							});
-							delegated("click", button_4, () => set(shinyOnly, !get(shinyOnly)));
-							append($$anchor, button_4);
-						};
-						if_block(node_14, ($$render) => {
-							if (get(shinyCount)) $$render(consequent_10);
-						});
-						append($$anchor, fragment_6);
+						next();
+						reset(button_3);
+						template_effect(() => classes_1 = set_class(button_3, 1, "rl special fav", null, classes_1, { on: get(favOnly) }));
+						delegated("click", button_3, () => set(favOnly, !get(favOnly)));
+						append($$anchor, button_3);
 					};
-					var div_12 = child(div_11);
-					each(div_12, 21, () => RARITIES_DESC, index, ($$anchor, r) => {
-						var fragment_7 = comment();
-						var node_16 = first_child(fragment_7);
-						var consequent_11 = ($$anchor) => {
-							var button_5 = root_11$5();
-							let classes_3;
+					var div_10 = child(div_9);
+					each(div_10, 21, () => RARITIES_DESC, index, ($$anchor, r) => {
+						var fragment_3 = comment();
+						var node_12 = first_child(fragment_3);
+						var consequent_5 = ($$anchor) => {
+							var button_4 = root_7$11();
+							let classes_2;
 							template_effect(($0) => {
-								classes_3 = set_class(button_5, 1, "rm-seg", null, classes_3, {
+								classes_2 = set_class(button_4, 1, "rm-seg", null, classes_2, {
 									sel: get(filter) === get(r),
 									dim: get(filter) !== "ALL" && get(filter) !== get(r)
 								});
-								set_style(button_5, `--rc:var(--r-${$0 ?? ""}); flex-grow:${get(stats).counts[get(r)] ?? ""}`);
-								set_attribute(button_5, "title", `${RNAME[get(r)] ?? ""} : ${get(stats).counts[get(r)] ?? ""}`);
-								set_attribute(button_5, "aria-label", `${RNAME[get(r)] ?? ""} : ${get(stats).counts[get(r)] ?? ""}`);
+								set_style(button_4, `--rc:var(--r-${$0 ?? ""}); flex-grow:${get(counts)[get(r)] ?? ""}`);
+								set_attribute(button_4, "title", `${RNAME[get(r)] ?? ""} : ${get(counts)[get(r)] ?? ""}`);
+								set_attribute(button_4, "aria-label", `${RNAME[get(r)] ?? ""} : ${get(counts)[get(r)] ?? ""}`);
 							}, [() => get(r).toLowerCase()]);
-							delegated("click", button_5, () => set(filter, get(filter) === get(r) ? "ALL" : get(r), true));
-							append($$anchor, button_5);
+							delegated("click", button_4, () => set(filter, get(filter) === get(r) ? "ALL" : get(r), true));
+							append($$anchor, button_4);
 						};
-						if_block(node_16, ($$render) => {
-							if (get(stats).counts[get(r)]) $$render(consequent_11);
+						if_block(node_12, ($$render) => {
+							if (get(counts)[get(r)]) $$render(consequent_5);
 						});
-						append($$anchor, fragment_7);
+						append($$anchor, fragment_3);
 					});
-					reset(div_12);
-					var node_17 = sibling(div_12, 2);
+					reset(div_10);
+					var node_13 = sibling(div_10, 2);
 					{
 						let $0 = user_derived(() => get(filter) === "ALL" ? "" : get(filter));
-						let $1 = user_derived(() => get(starredCount) || get(shinyCount) ? extras : void 0);
-						RarityChips(node_17, {
+						RarityChips(node_13, {
 							get value() {
 								return get($0);
 							},
 							get counts() {
-								return get(stats).counts;
+								return get(counts);
 							},
 							get total() {
-								return get(stats).copies;
+								return get(total);
 							},
 							onchange: (r) => set(filter, r || "ALL", true),
 							get children() {
-								return get($1);
+								return extras;
 							}
 						});
 					}
-					reset(div_11);
+					reset(div_9);
 				}
+				append($$anchor, div_9);
+			};
+			if_block(node_10, ($$render) => {
+				if (get(total) > 0) $$render(consequent_6);
+			});
+			var node_14 = sibling(node_10, 2);
+			var consequent_7 = ($$anchor) => {
+				var div_11 = root_10$7();
+				each(div_11, 20, () => Array(10), index, ($$anchor, _) => {
+					append($$anchor, root_9$9());
+				});
+				reset(div_11);
 				append($$anchor, div_11);
 			};
-			if_block(node_11, ($$render) => {
-				if (get(stats).copies > 0) $$render(consequent_12);
-			});
-			var node_18 = sibling(node_11, 2);
-			var consequent_14 = ($$anchor) => {
-				var div_13 = root_15$3();
-				var node_19 = child(div_13);
-				var consequent_13 = ($$anchor) => {
-					var fragment_8 = root_13$4();
+			var consequent_9 = ($$anchor) => {
+				var div_13 = root_13$6();
+				var node_15 = child(div_13);
+				var consequent_8 = ($$anchor) => {
+					var fragment_4 = root_11$7();
 					next();
-					append($$anchor, fragment_8);
+					append($$anchor, fragment_4);
 				};
 				var alternate_1 = ($$anchor) => {
-					var fragment_9 = root_14$3();
+					var fragment_5 = root_12$6();
 					next();
-					append($$anchor, fragment_9);
+					append($$anchor, fragment_5);
 				};
-				if_block(node_19, ($$render) => {
-					if (get(search) || get(filter) !== "ALL") $$render(consequent_13);
+				if_block(node_15, ($$render) => {
+					if (get(query) || get(filter) !== "ALL" || get(favOnly) || get(tagFilter)) $$render(consequent_8);
 					else $$render(alternate_1, -1);
 				});
 				reset(div_13);
 				append($$anchor, div_13);
 			};
 			var alternate_2 = ($$anchor) => {
-				var fragment_10 = root_18$2();
-				var div_14 = first_child(fragment_10);
-				each(div_14, 21, () => get(shown).slice(0, get(limit)), (it) => it.id, ($$anchor, it) => {
-					var button_6 = root_16$3();
+				var fragment_6 = root_17$4();
+				var div_14 = first_child(fragment_6);
+				let classes_3;
+				each(div_14, 21, () => get(rows), (it) => it.id, ($$anchor, it) => {
+					var button_5 = root_14$4();
 					let classes_4;
-					var node_20 = child(button_6);
-					Card(node_20, {
+					var node_16 = child(button_5);
+					Card(node_16, {
 						get card() {
 							return get(it).card;
 						},
@@ -8777,8 +9793,8 @@
 							return values[get(it).card.id];
 						}
 					});
-					var node_21 = sibling(node_20, 2);
-					var consequent_15 = ($$anchor) => {
+					var node_17 = sibling(node_16, 2);
+					var consequent_10 = ($$anchor) => {
 						{
 							let $0 = user_derived(() => get(picked).has(get(it).id));
 							PickMark($$anchor, { get on() {
@@ -8786,117 +9802,126 @@
 							} });
 						}
 					};
-					if_block(node_21, ($$render) => {
-						if (get(selecting)) $$render(consequent_15);
+					if_block(node_17, ($$render) => {
+						if (get(selecting)) $$render(consequent_10);
 					});
-					reset(button_6);
-					action(button_6, ($$node, $$action_arg) => lazy.watch?.($$node, $$action_arg), () => get(it).card);
+					reset(button_5);
+					action(button_5, ($$node, $$action_arg) => lazy.watch?.($$node, $$action_arg), () => get(it).card);
 					template_effect(($0) => {
-						classes_4 = set_class(button_6, 1, "card-btn", null, classes_4, {
+						classes_4 = set_class(button_5, 1, "card-btn", null, classes_4, {
 							picking: get(selecting),
 							picked: $0
 						});
-						set_attribute(button_6, "aria-label", get(it).card.title);
+						set_attribute(button_5, "aria-label", get(it).card.title);
 					}, [() => get(selecting) && get(picked).has(get(it).id)]);
-					delegated("click", button_6, () => onCardClick(get(it)));
-					append($$anchor, button_6);
+					delegated("click", button_5, () => onCardClick(get(it)));
+					append($$anchor, button_5);
 				});
 				reset(div_14);
-				var node_22 = sibling(div_14, 2);
-				var consequent_16 = ($$anchor) => {
-					var div_15 = root_17$3();
+				var node_18 = sibling(div_14, 2);
+				var consequent_11 = ($$anchor) => {
+					var div_15 = root_15$4();
 					action(div_15, ($$node, $$action_arg) => inView?.($$node, $$action_arg), () => ({
-						onEnter: () => set(limit, get(limit) + STEP),
-						key: get(limit)
+						onEnter: () => stream.more(),
+						key: `${get(rows).length}:${stream.loading}`
 					}));
 					append($$anchor, div_15);
 				};
-				if_block(node_22, ($$render) => {
-					if (get(shown).length > get(limit)) $$render(consequent_16);
+				var consequent_12 = ($$anchor) => {
+					var div_16 = root_16$4();
+					var button_6 = sibling(child(div_16));
+					reset(div_16);
+					delegated("click", button_6, () => stream.more());
+					append($$anchor, div_16);
+				};
+				if_block(node_18, ($$render) => {
+					if (stream.hasMore && !stream.error) $$render(consequent_11);
+					else if (stream.error) $$render(consequent_12, 1);
 				});
-				append($$anchor, fragment_10);
+				template_effect(() => classes_3 = set_class(div_14, 1, "grid", null, classes_3, { dim: stream.loading && stream.first }));
+				append($$anchor, fragment_6);
 			};
-			if_block(node_18, ($$render) => {
-				if (get(shown).length === 0) $$render(consequent_14);
+			if_block(node_14, ($$render) => {
+				if (!stream.started) $$render(consequent_7);
+				else if (!get(rows).length && !stream.loading) $$render(consequent_9, 1);
 				else $$render(alternate_2, -1);
 			});
-			template_effect(($0) => {
-				set_text(text_1, $0);
+			template_effect(() => {
 				classes = set_class(button_2, 1, "iconbtn", null, classes, { on: get(selecting) });
-				set_text(text_5, get(selecting) ? "Annuler" : "Sélectionner");
-			}, [() => plural(get(stats).unique, "carte")]);
+				set_text(text_4, get(selecting) ? "Annuler" : "Sélectionner");
+			});
 			bind_select_value(select, () => get(sort), ($$value) => set(sort, $$value));
 			delegated("click", button_2, toggleSelecting);
 			append($$anchor, fragment_1);
 		};
 		if_block(node, ($$render) => {
-			if (get(error)) $$render(consequent);
-			else if (!get(items)) $$render(consequent_1, 1);
+			if (stream.error && !stream.started) $$render(consequent);
 			else $$render(alternate_3, -1);
 		});
-		var node_23 = sibling(node, 2);
-		var consequent_18 = ($$anchor) => {
-			var div_16 = root_22$2();
-			var node_24 = child(div_16);
-			var consequent_17 = ($$anchor) => {
-				var fragment_12 = root_20$2();
-				var span_4 = first_child(fragment_12);
-				var text_11 = child(span_4);
-				var text_12 = only_child(sibling(text_11), true);
+		var node_19 = sibling(node, 2);
+		var consequent_14 = ($$anchor) => {
+			var div_17 = root_21$2();
+			var node_20 = child(div_17);
+			var consequent_13 = ($$anchor) => {
+				var fragment_8 = root_19$2();
+				var span_2 = first_child(fragment_8);
+				var text_6 = child(span_2);
+				var text_7 = only_child(sibling(text_6), true);
 				next();
-				reset(span_4);
-				var button_7 = sibling(span_4, 2);
+				reset(span_2);
+				var button_7 = sibling(span_2, 2);
 				var button_8 = sibling(button_7, 2);
-				var text_13 = only_child(button_8, true);
+				var text_8 = only_child(button_8, true);
 				template_effect(($0, $1) => {
-					set_text(text_11, `Défausser ${$0 ?? ""} contre `);
-					set_text(text_12, $1);
+					set_text(text_6, `Défausser ${$0 ?? ""} contre `);
+					set_text(text_7, $1);
 					button_7.disabled = get(bulkBusy);
 					button_8.disabled = get(bulkBusy);
-					set_text(text_13, get(bulkBusy) ? "Défausse..." : "Confirmer");
+					set_text(text_8, get(bulkBusy) ? "Défausse..." : "Confirmer");
 				}, [() => plural(get(picked).size, "carte"), () => plural(get(picked).size, "point")]);
 				delegated("click", button_7, () => set(bulkConfirm, false));
 				delegated("click", button_8, bulkDiscard);
-				append($$anchor, fragment_12);
+				append($$anchor, fragment_8);
 			};
 			var alternate_4 = ($$anchor) => {
-				var fragment_13 = root_21$2();
-				var span_5 = first_child(fragment_13);
-				var text_14 = only_child(span_5);
-				var button_9 = sibling(span_5, 2);
-				var text_15 = only_child(button_9);
+				var fragment_9 = root_20$2();
+				var span_3 = first_child(fragment_9);
+				var text_9 = only_child(span_3);
+				var button_9 = sibling(span_3, 2);
+				var text_10 = only_child(button_9);
 				template_effect(() => {
-					set_text(text_14, `${get(picked).size ?? ""} sélectionnée${get(picked).size > 1 ? "s" : ""}`);
-					set_text(text_15, `Défausser · +${get(picked).size ?? ""} pts`);
+					set_text(text_9, `${get(picked).size ?? ""} sélectionnée${get(picked).size > 1 ? "s" : ""}`);
+					set_text(text_10, `Défausser · +${get(picked).size ?? ""} pts`);
 				});
 				delegated("click", button_9, () => set(bulkConfirm, true));
-				append($$anchor, fragment_13);
+				append($$anchor, fragment_9);
 			};
-			if_block(node_24, ($$render) => {
-				if (get(bulkConfirm)) $$render(consequent_17);
+			if_block(node_20, ($$render) => {
+				if (get(bulkConfirm)) $$render(consequent_13);
 				else $$render(alternate_4, -1);
 			});
-			reset(div_16);
-			append($$anchor, div_16);
+			reset(div_17);
+			append($$anchor, div_17);
 		};
-		if_block(node_23, ($$render) => {
-			if (get(selecting) && get(picked).size > 0) $$render(consequent_18);
+		if_block(node_19, ($$render) => {
+			if (get(selecting) && get(picked).size > 0) $$render(consequent_14);
 		});
-		var node_25 = sibling(node_23, 2);
-		var consequent_19 = ($$anchor) => {
+		var node_21 = sibling(node_19, 2);
+		var consequent_15 = ($$anchor) => {
 			CardModal($$anchor, {
 				get item() {
 					return get(selected);
 				},
 				onclose: () => set(selected, null),
 				onaction: (kind) => {
-					changed(kind === "discard" ? [get(selected).id] : null);
+					changed(kind === "unsure" ? null : [get(selected).id]);
 					$$props.onwallet?.();
-				}
+				},
+				onchange: rowChanged
 			});
 		};
-		if_block(node_25, ($$render) => {
-			if (get(selected)) $$render(consequent_19);
+		if_block(node_21, ($$render) => {
+			if (get(selected)) $$render(consequent_15);
 		});
 		append($$anchor, fragment);
 		pop();
@@ -8960,71 +9985,6 @@
 		pop();
 	}
 	delegate(["click"]);
-	var PagedList = class {
-		#page = state(0);
-		get page() {
-			return get(this.#page);
-		}
-		set page(value) {
-			set(this.#page, value, true);
-		}
-		#data = state(null);
-		get data() {
-			return get(this.#data);
-		}
-		set data(value) {
-			set(this.#data, value, true);
-		}
-		#loaded = state(-1);
-		get loaded() {
-			return get(this.#loaded);
-		}
-		set loaded(value) {
-			set(this.#loaded, value, true);
-		}
-		#loading = state(false);
-		get loading() {
-			return get(this.#loading);
-		}
-		set loading(value) {
-			set(this.#loading, value, true);
-		}
-		#error = state(false);
-		get error() {
-			return get(this.#error);
-		}
-		set error(value) {
-			set(this.#error, value, true);
-		}
-		#token = 0;
-		constructor(fetchPage) {
-			this.fetchPage = fetchPage;
-		}
-		async go(page = this.page) {
-			const token = ++this.#token;
-			this.page = page;
-			this.loading = true;
-			this.error = false;
-			try {
-				const d = await this.fetchPage(page);
-				if (token === this.#token) {
-					this.loaded = page;
-					this.data = d;
-				}
-			} catch {
-				if (token === this.#token) this.error = true;
-			} finally {
-				if (token === this.#token) this.loading = false;
-			}
-		}
-	};
-	function debouncedSearch(read, apply) {
-		user_effect(() => {
-			const q = read().trim();
-			const t = setTimeout(() => apply(q), 350);
-			return () => clearTimeout(t);
-		});
-	}
 	var root$17 = from_html(`<option> </option>`);
 	var root_1$17 = from_html(`<button></button>`);
 	var root_2$13 = from_html(`<div class="rarity-panel"><div class="rarity-meter" role="group" aria-label="Filtrer par rareté"></div> <!></div>`);
@@ -9032,9 +9992,9 @@
 	var root_4$11 = from_html(`<div class="wc skeleton"></div>`);
 	var root_5$11 = from_html(`<div class="grid"></div>`);
 	var root_6$10 = from_html(`<div class="empty"><b>Aucune carte ne correspond</b><div>Essayez un autre terme de recherche.</div></div>`);
-	var root_7$9 = from_html(`<button class="card-btn"><!></button>`);
-	var root_8$7 = from_html(`<div></div> <!>`, 1);
-	var root_9$6 = from_html(`<div class="coll-head"><div><h1>Toutes les cartes</h1> <div class="meta"><!> <!></div></div> <div class="coll-tools"><!> <div class="tool-actions"><div class="isel" title="Trier"><!> <select aria-label="Trier"></select></div> <button title="N'afficher que ma liste de souhaits"><!><span>Souhaits</span></button> <button title="Afficher ou flouter les images sensibles"><!><span>Sensible</span></button></div></div></div> <!> <!> <!>`, 1);
+	var root_7$10 = from_html(`<button class="card-btn"><!></button>`);
+	var root_8$9 = from_html(`<div></div> <!>`, 1);
+	var root_9$8 = from_html(`<div class="coll-head"><div><h1>Toutes les cartes</h1> <div class="meta"><!> <!></div></div> <div class="coll-tools"><!> <div class="tool-actions"><div class="isel" title="Trier"><!> <select aria-label="Trier"></select></div> <button title="N'afficher que ma liste de souhaits"><!><span>Souhaits</span></button> <button title="Afficher ou flouter les images sensibles"><!><span>Sensible</span></button></div></div></div> <!> <!> <!>`, 1);
 	function Catalog($$anchor, $$props) {
 		push($$props, true);
 		const SORTS = [
@@ -9084,15 +10044,15 @@
 		const cards = user_derived(() => list.data?.cards);
 		const hasNext = user_derived(() => !!list.data?.hasMore);
 		const catalogTotal = user_derived(() => get(rarityCounts) ? Object.values(get(rarityCounts)).reduce((a, b) => a + b, 0) : null);
-		var fragment = root_9$6();
+		var fragment = root_9$8();
 		var div = first_child(fragment);
 		var div_1 = child(div);
 		var div_2 = sibling(child(div_1), 2);
 		var node = child(div_2);
 		var consequent = ($$anchor) => {
-			var text$3 = text();
-			template_effect(($0) => set_text(text$3, `${$0 ?? ""} cartes dans le jeu`), [() => nf(get(catalogTotal))]);
-			append($$anchor, text$3);
+			var text$4 = text();
+			template_effect(($0) => set_text(text$4, `${$0 ?? ""} cartes dans le jeu`), [() => nf(get(catalogTotal))]);
+			append($$anchor, text$4);
 		};
 		if_block(node, ($$render) => {
 			if (get(catalogTotal)) $$render(consequent);
@@ -9242,11 +10202,11 @@
 			append($$anchor, root_6$10());
 		};
 		var alternate = ($$anchor) => {
-			var fragment_4 = root_8$7();
+			var fragment_4 = root_8$9();
 			var div_12 = first_child(fragment_4);
 			let classes_3;
 			each(div_12, 21, () => get(cards), (c) => c.id, ($$anchor, c) => {
-				var button_4 = root_7$9();
+				var button_4 = root_7$10();
 				Card(child(button_4), {
 					get card() {
 						return get(c);
@@ -9326,24 +10286,24 @@
 	var root_4$10 = from_html(`<div class="auc-row"><div><div class="auc-k"> </div> <div class="auc-price"><span class="auc-coin"></span> </div></div> <div class="auc-clock"><div class="auc-k"> </div> <div class="auc-time"> </div></div></div> <div class="auc-sub"> <!></div>`, 1);
 	var root_5$10 = from_html(`<div class="auc-flag lead">Vous êtes en tête</div>`);
 	var root_6$9 = from_html(`<div class="auc-flag out">Enchère dépassée</div>`);
-	var root_7$8 = from_html(`<button class="btn primary auc-cta">Finaliser l'enchère</button>`);
-	var root_8$6 = from_html(`<div class="auc-note">En attente de finalisation.</div>`);
-	var root_9$5 = from_html(`<div class="auc-inline"><div class="af-input-row"><input class="af-input" type="number" min="1" step="1" placeholder="Nouvelle mise de départ"/> <span class="af-unit">pts</span></div> <button class="btn">Baisser</button></div>`);
-	var root_10$5 = from_html(`<div class="auc-note"> </div>`);
-	var root_11$4 = from_html(`<div class="af-actions"><button class="btn">Garder</button> <button class="btn danger">Confirmer l'annulation</button></div>`);
-	var root_12$4 = from_html(`<button class="btn danger auc-cta">Annuler la vente</button>`);
-	var root_13$3 = from_html(`<!> <!>`, 1);
-	var root_14$2 = from_html(`<button> </button>`);
-	var root_15$2 = from_html(`<div> </div>`);
-	var root_16$2 = from_html(`<div class="auc-inline"><div class="af-input-row"><input class="af-input" type="number" step="1" aria-label="Montant de l'enchère"/> <span class="af-unit">pts</span></div> <button class="btn primary"> </button></div> <div class="auc-quick"><button> </button> <!></div> <!>`, 1);
-	var root_17$2 = from_html(`<span class="auc-pt"></span>`);
-	var root_18$1 = from_html(`<div class="auc-chart"><div class="mc-y"><span> </span><span> </span></div> <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Évolution du prix"><path fill="var(--accent)" fill-opacity="0.1"></path><path fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke"></path></svg> <!></div> <div class="auc-axis"><span> </span><span> </span></div>`, 1);
+	var root_7$9 = from_html(`<button class="btn primary auc-cta">Finaliser l'enchère</button>`);
+	var root_8$8 = from_html(`<div class="auc-note">En attente de finalisation.</div>`);
+	var root_9$7 = from_html(`<div class="auc-inline"><div class="af-input-row"><input class="af-input" type="number" min="1" step="1" placeholder="Nouvelle mise de départ"/> <span class="af-unit">pts</span></div> <button class="btn">Baisser</button></div>`);
+	var root_10$6 = from_html(`<div class="auc-note"> </div>`);
+	var root_11$6 = from_html(`<div class="af-actions"><button class="btn">Garder</button> <button class="btn danger">Confirmer l'annulation</button></div>`);
+	var root_12$5 = from_html(`<button class="btn danger auc-cta">Annuler la vente</button>`);
+	var root_13$5 = from_html(`<!> <!>`, 1);
+	var root_14$3 = from_html(`<button> </button>`);
+	var root_15$3 = from_html(`<div> </div>`);
+	var root_16$3 = from_html(`<div class="auc-inline"><div class="af-input-row"><input class="af-input" type="number" step="1" aria-label="Montant de l'enchère"/> <span class="af-unit">pts</span></div> <button class="btn primary"> </button></div> <div class="auc-quick"><button> </button> <!></div> <!>`, 1);
+	var root_17$3 = from_html(`<span class="auc-pt"></span>`);
+	var root_18$3 = from_html(`<div class="auc-chart"><div class="mc-y"><span> </span><span> </span></div> <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Évolution du prix"><path fill="var(--accent)" fill-opacity="0.1"></path><path fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke"></path></svg> <!></div> <div class="auc-axis"><span> </span><span> </span></div>`, 1);
 	var root_19$1 = from_html(`<div class="auc-empty"> </div>`);
 	var root_20$1 = from_html(`<div class="auc-empty">Aucune enchère.</div>`);
 	var root_21$1 = from_html(`<span class="tag"> </span>`);
 	var root_22$1 = from_html(`<li><span class="who"> </span> <!> <span class="amt"> </span> <span class="when"> </span></li>`);
-	var root_23 = from_html(`<ol class="auc-feed"></ol>`);
-	var root_24 = from_html(`<div class="modal-backdrop" role="presentation"><div class="auc" role="dialog" aria-modal="true" aria-labelledby="wm-auc-title" tabindex="-1"><button class="modal-close" aria-label="Fermer"><!></button> <div class="auc-top"><div class="auc-card"><!></div> <div class="auc-body"><div class="auc-id"><span class="modal-rar"> </span> <h2 class="auc-name" id="wm-auc-title"> </h2> <!> <div class="auc-by"> </div></div> <div class="auc-state"><!></div> <!> <div class="auc-act"><!> <!></div></div></div> <!> <div class="auc-bottom"><section class="auc-panel"><h3>Évolution du prix</h3> <!></section> <section class="auc-panel"><h3>Activité</h3> <!></section></div></div></div>`);
+	var root_23$1 = from_html(`<ol class="auc-feed"></ol>`);
+	var root_24$1 = from_html(`<div class="modal-backdrop" role="presentation"><div class="auc" role="dialog" aria-modal="true" aria-labelledby="wm-auc-title" tabindex="-1"><button class="modal-close" aria-label="Fermer"><!></button> <div class="auc-top"><div class="auc-card"><!></div> <div class="auc-body"><div class="auc-id"><span class="modal-rar"> </span> <h2 class="auc-name" id="wm-auc-title"> </h2> <!> <div class="auc-by"> </div></div> <div class="auc-state"><!></div> <!> <div class="auc-act"><!> <!></div></div></div> <!> <div class="auc-bottom"><section class="auc-panel"><h3>Évolution du prix</h3> <!></section> <section class="auc-panel"><h3>Activité</h3> <!></section></div></div></div>`);
 	function AuctionModal($$anchor, $$props) {
 		push($$props, true);
 		let balance = prop($$props, "balance", 3, null);
@@ -9450,7 +10410,7 @@
 				html.style.overflow = prev;
 			};
 		});
-		var div = root_24();
+		var div = root_24$1();
 		event("keydown", $window, (e) => e.key === "Escape" && $$props.onclose?.());
 		var div_1 = child(div);
 		var button = child(div_1);
@@ -9582,13 +10542,13 @@
 			var fragment_3 = comment();
 			var node_7 = first_child(fragment_3);
 			var consequent_6 = ($$anchor) => {
-				var button_1 = root_7$8();
+				var button_1 = root_7$9();
 				template_effect(() => button_1.disabled = get(busy));
 				delegated("click", button_1, settle);
 				append($$anchor, button_1);
 			};
 			var alternate_1 = ($$anchor) => {
-				append($$anchor, root_8$6());
+				append($$anchor, root_8$8());
 			};
 			if_block(node_7, ($$render) => {
 				if (get(mine) || get(leading)) $$render(consequent_6);
@@ -9597,10 +10557,10 @@
 			append($$anchor, fragment_3);
 		};
 		var consequent_11 = ($$anchor) => {
-			var fragment_4 = root_13$3();
+			var fragment_4 = root_13$5();
 			var node_8 = first_child(fragment_4);
 			var consequent_8 = ($$anchor) => {
-				var div_27 = root_9$5();
+				var div_27 = root_9$7();
 				var div_28 = child(div_27);
 				var input = child(div_28);
 				remove_input_defaults(input);
@@ -9617,7 +10577,7 @@
 				append($$anchor, div_27);
 			};
 			var consequent_9 = ($$anchor) => {
-				var div_29 = root_10$5();
+				var div_29 = root_10$6();
 				var text_15 = only_child(div_29);
 				template_effect(($0) => set_text(text_15, `Baisse du prix possible dans ${$0 ?? ""}.`), [() => countdown(Math.round((get(repriceAt) - get(now)) / 1e3))]);
 				append($$anchor, div_29);
@@ -9628,7 +10588,7 @@
 			});
 			var node_9 = sibling(node_8, 2);
 			var consequent_10 = ($$anchor) => {
-				var div_30 = root_11$4();
+				var div_30 = root_11$6();
 				var button_3 = child(div_30);
 				var button_4 = sibling(button_3, 2);
 				reset(div_30);
@@ -9641,7 +10601,7 @@
 				append($$anchor, div_30);
 			};
 			var alternate_2 = ($$anchor) => {
-				var button_5 = root_12$4();
+				var button_5 = root_12$5();
 				template_effect(() => button_5.disabled = get(busy));
 				delegated("click", button_5, () => set(confirmCancel, true));
 				append($$anchor, button_5);
@@ -9653,7 +10613,7 @@
 			append($$anchor, fragment_4);
 		};
 		var consequent_13 = ($$anchor) => {
-			var fragment_5 = root_16$2();
+			var fragment_5 = root_16$3();
 			var div_31 = first_child(fragment_5);
 			var div_32 = child(div_31);
 			var input_1 = child(div_32);
@@ -9671,7 +10631,7 @@
 				25,
 				100
 			], index, ($$anchor, step) => {
-				var button_8 = root_14$2();
+				var button_8 = root_14$3();
 				var text_18 = only_child(button_8);
 				template_effect(() => set_text(text_18, `+${step ?? ""}`));
 				delegated("click", button_8, () => set(amount, String(Math.max(get(minBid), Number(get(amount)) + step))));
@@ -9680,7 +10640,7 @@
 			reset(div_33);
 			var node_11 = sibling(div_33, 2);
 			var consequent_12 = ($$anchor) => {
-				var div_34 = root_15$2();
+				var div_34 = root_15$3();
 				let classes;
 				var text_19 = only_child(div_34);
 				template_effect(($0) => {
@@ -9710,7 +10670,7 @@
 		});
 		var node_12 = sibling(node_6, 2);
 		var consequent_14 = ($$anchor) => {
-			var div_35 = root_15$2();
+			var div_35 = root_15$3();
 			let classes_1;
 			var text_20 = only_child(div_35, true);
 			template_effect(() => {
@@ -9745,7 +10705,7 @@
 		var section = child(div_36);
 		var node_14 = sibling(child(section), 2);
 		var consequent_15 = ($$anchor) => {
-			var fragment_6 = root_18$1();
+			var fragment_6 = root_18$3();
 			var div_37 = first_child(fragment_6);
 			var div_38 = child(div_37);
 			var span_3 = child(div_38);
@@ -9760,7 +10720,7 @@
 				var $$array = user_derived(() => to_array(get($$item), 2));
 				let x = () => get($$array)[0];
 				let y = () => get($$array)[1];
-				var span_5 = root_17$2();
+				var span_5 = root_17$3();
 				template_effect(() => set_style(span_5, `left:${x() ?? ""}%;top:${y() / 40 * 100}%`));
 				append($$anchor, span_5);
 			});
@@ -9801,7 +10761,7 @@
 			append($$anchor, root_20$1());
 		};
 		var alternate_4 = ($$anchor) => {
-			var ol = root_23();
+			var ol = root_23$1();
 			each(ol, 23, () => get(bids), (b) => b.id, ($$anchor, b, i) => {
 				var li = root_22$1();
 				let classes_2;
@@ -9857,6 +10817,13 @@
 		pop();
 	}
 	delegate(["click"]);
+	function reuse(old = [], fresh = []) {
+		const before = new Map((old ?? []).map((r) => [r.id, r]));
+		return fresh.map((r) => {
+			const o = before.get(r.id);
+			return o && JSON.stringify(o) === JSON.stringify(r) ? o : r;
+		});
+	}
 	var root$15 = from_html(`<option> </option>`);
 	var root_1$15 = from_html(`<div class="coll-tools"><!> <div class="tool-actions"><div class="isel" title="Trier"><!> <select aria-label="Trier"></select></div></div></div>`);
 	var root_2$11 = from_html(`<button role="tab"><span class="lbl-long"> </span><span class="lbl-short"> </span></button>`);
@@ -9864,10 +10831,11 @@
 	var root_4$9 = from_html(`<div class="wc skeleton"></div>`);
 	var root_5$9 = from_html(`<div class="grid"></div>`);
 	var root_6$8 = from_html(`<div class="empty"><b> </b></div>`);
-	var root_7$7 = from_html(`<span class="auc-dup"> </span>`);
-	var root_8$5 = from_html(`<div class="auc-item"><button class="card-btn"><!></button> <div class="auc-meta"><span class="auc-bid"><span class="auc-coin"></span> </span> <span> </span></div> <div class="auc-foot"><span> </span> <!></div></div>`);
-	var root_9$4 = from_html(`<div></div> <!>`, 1);
-	var root_10$4 = from_html(`<div class="coll-head"><div><h1>Marché</h1> <div class="meta lead">Enchérissez sur des cartes ou vendez les vôtres contre des WikiBidous</div></div> <!></div> <div class="tabs" role="tablist"></div> <!> <!> <!>`, 1);
+	var root_7$8 = from_html(`<span class="auc-dup"> </span>`);
+	var root_8$7 = from_html(`<div class="auc-item"><button class="card-btn"><!></button> <div class="auc-meta"><span class="auc-bid"><span class="auc-coin"></span> </span> <span> </span></div> <div class="auc-foot"><span> </span> <!></div></div>`);
+	var root_9$6 = from_html(`<p class="mine-cap"></p>`);
+	var root_10$5 = from_html(`<div></div> <!> <!>`, 1);
+	var root_11$5 = from_html(`<div class="coll-head"><div><h1>Marché</h1> <div class="meta lead">Enchérissez sur des cartes ou vendez les vôtres contre des WikiBidous</div></div> <!></div> <div class="tabs" role="tablist"></div> <!> <!> <!>`, 1);
 	function Marketplace($$anchor, $$props) {
 		push($$props, true);
 		let openId = prop($$props, "openId", 3, null);
@@ -9889,11 +10857,13 @@
 			rarity: get(rarity)
 		}));
 		let selected = state(null);
+		let quiet = false;
 		const list = new PagedList((page) => data.marketplace({
 			page,
 			sort: get(sort),
 			q: get(query),
-			rarity: get(rarity)
+			rarity: get(rarity),
+			quiet
 		}));
 		list.go(0);
 		debouncedSearch(() => get(search), (q) => {
@@ -9904,9 +10874,15 @@
 		});
 		let mine = state(null);
 		let mineError = state(false);
-		const loadMine = () => {
+		const loadMine = (quiet = false) => {
 			set(mineError, false);
-			return data.myMarket().then((m) => set(mine, m, true), () => set(mineError, !get(mine)));
+			return data.myMarket({ quiet }).then((m) => set(mine, {
+				...m,
+				selling: reuse(get(mine)?.selling, m.selling),
+				bidding: reuse(get(mine)?.bidding, m.bidding),
+				won: reuse(get(mine)?.won, m.won),
+				history: reuse(get(mine)?.history, m.history)
+			}, true), () => set(mineError, !get(mine)));
 		};
 		loadMine();
 		let now = state(proxy(Date.now()));
@@ -9924,8 +10900,12 @@
 		function closeModal() {
 			set(selected, null);
 			if (openId()) history.replaceState({}, "", "/marketplace");
-			loadMine();
-			list.go();
+			loadMine(true);
+			quiet = true;
+			list.refresh((old, fresh) => ({
+				...fresh,
+				auctions: reuse(old?.auctions, fresh.auctions)
+			})).finally(() => quiet = false);
 			$$props.onwallet?.();
 		}
 		function statusLabel(a) {
@@ -9933,6 +10913,9 @@
 			if (a.status === "sold") return a.finalPrice != null ? `Vendue ${nf(a.finalPrice)}` : "Vendue";
 			return a.status === "cancelled" ? "Annulée" : "Invendue";
 		}
+		const MINE_CAP = 50;
+		const count = (l) => !l?.length ? "" : l.length >= MINE_CAP ? `${MINE_CAP}+` : `${l.length}`;
+		const capped = user_derived(() => (get(tab) === "won" || get(tab) === "history") && (get(mine)?.[get(tab)]?.length ?? 0) >= MINE_CAP);
 		const tabs = user_derived(() => [
 			[
 				"browse",
@@ -9945,7 +10928,7 @@
 				`Mes enchères ${get(mine)?.bidding.length || ""}`,
 				`Enchères ${get(mine)?.bidding.length || ""}`
 			],
-			["won", `Remportées ${get(mine)?.won.length || ""}`],
+			["won", `Remportées ${count(get(mine)?.won)}`],
 			["history", "Historique"]
 		]);
 		const shown = user_derived(() => get(tab) === "browse" ? list.data?.auctions : get(mine)?.[get(tab)]);
@@ -9957,7 +10940,7 @@
 			won: "Aucune enchère remportée.",
 			history: "Aucune vente terminée."
 		};
-		var fragment = root_10$4();
+		var fragment = root_11$5();
 		var div = first_child(fragment);
 		var node = sibling(child(div), 2);
 		var consequent = ($$anchor) => {
@@ -10072,11 +11055,11 @@
 			append($$anchor, div_8);
 		};
 		var alternate = ($$anchor) => {
-			var fragment_2 = root_9$4();
+			var fragment_2 = root_10$5();
 			var div_9 = first_child(fragment_2);
 			let classes_1;
 			each(div_9, 21, () => get(shown), (a) => a.id, ($$anchor, a) => {
-				var div_10 = root_8$5();
+				var div_10 = root_8$7();
 				var button_2 = child(div_10);
 				Card(child(button_2), {
 					get card() {
@@ -10101,7 +11084,7 @@
 				var text_6 = only_child(span_4, true);
 				var node_6 = sibling(span_4, 2);
 				var consequent_5 = ($$anchor) => {
-					var span_5 = root_7$7();
+					var span_5 = root_7$8();
 					var text_7 = only_child(span_5);
 					template_effect(($0, $1) => {
 						set_attribute(span_5, "title", `Cette carte est en vente ${$0 ?? ""} fois sur cette page`);
@@ -10134,6 +11117,15 @@
 			reset(div_9);
 			var node_7 = sibling(div_9, 2);
 			var consequent_6 = ($$anchor) => {
+				var p_1 = root_9$6();
+				p_1.textContent = "Le jeu ne renvoie que les 50 plus récentes.";
+				append($$anchor, p_1);
+			};
+			if_block(node_7, ($$render) => {
+				if (get(capped)) $$render(consequent_6);
+			});
+			var node_8 = sibling(node_7, 2);
+			var consequent_7 = ($$anchor) => {
 				Pager($$anchor, {
 					get page() {
 						return list.page;
@@ -10147,8 +11139,8 @@
 					ongo: (p) => list.go(p)
 				});
 			};
-			if_block(node_7, ($$render) => {
-				if (get(tab) === "browse") $$render(consequent_6);
+			if_block(node_8, ($$render) => {
+				if (get(tab) === "browse") $$render(consequent_7);
 			});
 			template_effect(() => classes_1 = set_class(div_9, 1, "grid", null, classes_1, { dim: get(tab) === "browse" && list.loading }));
 			append($$anchor, fragment_2);
@@ -10159,8 +11151,8 @@
 			else if (get(shown).length === 0) $$render(consequent_4, 2);
 			else $$render(alternate, -1);
 		});
-		var node_8 = sibling(node_4, 2);
-		var consequent_7 = ($$anchor) => {
+		var node_9 = sibling(node_4, 2);
+		var consequent_8 = ($$anchor) => {
 			var fragment_4 = comment();
 			key(first_child(fragment_4), () => get(selected).id, ($$anchor) => {
 				{
@@ -10182,8 +11174,8 @@
 			});
 			append($$anchor, fragment_4);
 		};
-		if_block(node_8, ($$render) => {
-			if (get(selected)) $$render(consequent_7);
+		if_block(node_9, ($$render) => {
+			if (get(selected)) $$render(consequent_8);
 		});
 		append($$anchor, fragment);
 		pop();
@@ -10203,9 +11195,9 @@
 			append($$anchor, img);
 		};
 		var alternate = ($$anchor) => {
-			var text$2 = text();
-			template_effect(($0) => set_text(text$2, $0), [() => ($$props.user?.username || "?")[0].toUpperCase()]);
-			append($$anchor, text$2);
+			var text$3 = text();
+			template_effect(($0) => set_text(text$3, $0), [() => ($$props.user?.username || "?")[0].toUpperCase()]);
+			append($$anchor, text$3);
 		};
 		if_block(node, ($$render) => {
 			if ($$props.user?.avatar) $$render(consequent);
@@ -10216,32 +11208,87 @@
 		append($$anchor, span);
 		pop();
 	}
-	var root$13 = from_html(`<span class="tside-total is-none">Non estimé</span>`);
-	var root_1$13 = from_html(`<span class="tside-total"> </span>`);
-	var root_2$10 = from_html(`<div class="tside-none"> </div>`);
-	var root_3$8 = from_html(`<button class="card-btn"><!></button>`);
-	var root_4$8 = from_html(`<div class="tside-coins"><!><b> </b><span>WikiBidous</span></div>`);
-	var root_5$8 = from_html(`<div class="tside-chip"><!><span>+ <b> </b> </span></div>`);
-	var root_6$7 = from_html(`<div class="tside-cards"><!> <!></div> <!>`, 1);
-	var root_7$6 = from_html(`<section class="tside"><header class="tside-head"><span> </span><!></header> <!></section>`);
+	var root$13 = from_html(`<img alt="" loading="lazy" crossorigin="anonymous"/>`);
+	var root_1$13 = from_html(`<img alt="" loading="lazy"/>`);
+	var root_2$10 = from_html(`<span aria-hidden="true"><!> <span class="cthumb-r"> </span></span>`);
+	function CardThumb($$anchor, $$props) {
+		push($$props, true);
+		let shiny = prop($$props, "shiny", 3, false);
+		let failed = state(false);
+		let paper = state(false);
+		const photo = user_derived(() => $$props.card.image_url && !get(failed) && !(settings.hideSensitive && $$props.card.nsfw_image));
+		var span = root_2$10();
+		let classes;
+		var node = child(span);
+		var consequent = ($$anchor) => {
+			var img = root$13();
+			template_effect(() => set_attribute(img, "src", $$props.card.image_url));
+			event("load", img, (e) => set(paper, seeThrough(e.currentTarget), true));
+			event("error", img, () => set(failed, true));
+			replay_events(img);
+			append($$anchor, img);
+		};
+		var alternate = ($$anchor) => {
+			var img_1 = root_1$13();
+			template_effect(($0) => set_attribute(img_1, "src", $0), [() => rarityArt($$props.card, shiny())]);
+			append($$anchor, img_1);
+		};
+		if_block(node, ($$render) => {
+			if (get(photo)) $$render(consequent);
+			else $$render(alternate, -1);
+		});
+		var text = only_child(sibling(node, 2), true);
+		reset(span);
+		template_effect(() => {
+			classes = set_class(span, 1, "cthumb", null, classes, {
+				paper: get(paper),
+				art: !get(photo),
+				shiny: shiny()
+			});
+			set_attribute(span, "data-r", $$props.card.rarity);
+			set_text(text, $$props.card.rarity);
+		});
+		append($$anchor, span);
+		pop();
+	}
+	var root$12 = from_html(`<span class="tside-total is-none">Non estimé</span>`);
+	var root_1$12 = from_html(`<span class="tside-total"> </span>`);
+	var root_2$9 = from_html(`<div class="tside-none"> </div>`);
+	var root_3$8 = from_html(`<span> </span>`);
+	var root_4$8 = from_html(`<button class="tmini"><!> <span class="tmini-t"> </span> <span class="tmini-v"> </span></button>`);
+	var root_5$8 = from_html(`<span class="tmini-more"></span>`);
+	var root_6$7 = from_html(`<button class="btn tmini-all"> </button>`);
+	var root_7$7 = from_html(`<div class="tside-minis"><!> <!></div> <!>`, 1);
+	var root_8$6 = from_html(`<div class="tside-sum"><b> </b><!> <span class="tside-rar"></span></div> <!>`, 1);
+	var root_9$5 = from_html(`<button class="card-btn"><!></button>`);
+	var root_10$4 = from_html(`<div class="tside-coins"><!><b> </b><span>WikiBidous</span></div>`);
+	var root_11$4 = from_html(`<div class="tside-chip"><!><span>+ <b> </b> </span></div>`);
+	var root_12$4 = from_html(`<div class="tside-cards"><!> <!></div> <!>`, 1);
+	var root_13$4 = from_html(`<section class="tside"><header class="tside-head"><span> </span><!></header> <!></section>`);
 	function TradeSide($$anchor, $$props) {
 		push($$props, true);
-		let coins = prop($$props, "coins", 3, 0), cols = prop($$props, "cols", 3, 1), narrow = prop($$props, "narrow", 3, false), empty = prop($$props, "empty", 3, "Rien");
+		let coins = prop($$props, "coins", 3, 0), cols = prop($$props, "cols", 3, 1), narrow = prop($$props, "narrow", 3, false), empty = prop($$props, "empty", 3, "Rien"), compact = prop($$props, "compact", 3, false);
+		const byRarity = user_derived(() => RARITIES_DESC.map((r) => [r, $$props.items.filter((it) => it.card.rarity === r).length]).filter(([, n]) => n));
+		const STEP = 120;
+		const PREVIEW = 8;
+		let open = state(!(typeof matchMedia === "function" && matchMedia("(max-width:900px)").matches));
+		let limit = state(STEP);
+		const shown = user_derived(() => get(open) ? $$props.items.slice(0, get(limit)) : $$props.items.slice(0, PREVIEW));
 		const value = user_derived(() => sideValue($$props.items, coins(), $$props.values));
 		const none = user_derived(() => get(value).unknown > 0 && get(value).unknown === $$props.items.length && !coins());
 		const missing = user_derived(() => get(value).unknown ? `${get(value).unknown} carte${get(value).unknown > 1 ? "s" : ""} sans valeur estimée` : null);
-		var section = root_7$6();
+		var section = root_13$4();
 		var header = child(section);
 		var span = child(header);
-		var text = only_child(span, true);
+		var text$2 = only_child(span, true);
 		var node = sibling(span);
 		var consequent = ($$anchor) => {
-			var span_1 = root$13();
+			var span_1 = root$12();
 			template_effect(() => set_attribute(span_1, "title", get(missing)));
 			append($$anchor, span_1);
 		};
 		var alternate = ($$anchor) => {
-			var span_2 = root_1$13();
+			var span_2 = root_1$12();
 			var text_1 = only_child(span_2);
 			template_effect(($0) => {
 				set_attribute(span_2, "title", get(missing));
@@ -10256,22 +11303,112 @@
 		reset(header);
 		var node_1 = sibling(header, 2);
 		var consequent_1 = ($$anchor) => {
-			var div = root_2$10();
+			var div = root_2$9();
 			var text_2 = only_child(div, true);
 			template_effect(() => set_text(text_2, empty()));
 			append($$anchor, div);
 		};
-		var alternate_1 = ($$anchor) => {
-			var fragment = root_6$7();
+		var consequent_6 = ($$anchor) => {
+			var fragment = root_8$6();
 			var div_1 = first_child(fragment);
+			var b = child(div_1);
+			var text_3 = only_child(b);
+			var node_2 = sibling(b);
+			var consequent_2 = ($$anchor) => {
+				var text_4 = text();
+				template_effect(($0) => set_text(text_4, `+ ${$0 ?? ""} WikiBidous`), [() => nf(coins())]);
+				append($$anchor, text_4);
+			};
+			if_block(node_2, ($$render) => {
+				if (coins()) $$render(consequent_2);
+			});
+			var span_3 = sibling(node_2, 2);
+			each(span_3, 21, () => get(byRarity), ([r, n]) => r, ($$anchor, $$item) => {
+				var $$array = user_derived(() => to_array(get($$item), 2));
+				let r = () => get($$array)[0];
+				let n = () => get($$array)[1];
+				var span_4 = root_3$8();
+				var text_5 = only_child(span_4);
+				template_effect(() => {
+					set_attribute(span_4, "data-r", r());
+					set_text(text_5, `${r() ?? ""} ${n() ?? ""}`);
+				});
+				append($$anchor, span_4);
+			});
+			reset(span_3);
+			reset(div_1);
+			var node_3 = sibling(div_1, 2);
+			var consequent_5 = ($$anchor) => {
+				var fragment_2 = root_7$7();
+				var div_2 = first_child(fragment_2);
+				var node_4 = child(div_2);
+				each(node_4, 17, () => get(shown), (it) => it.itemId ?? it.userCardId, ($$anchor, it) => {
+					const val = user_derived(() => $$props.values.get(get(it).card.id));
+					var button = root_4$8();
+					var node_5 = child(button);
+					CardThumb(node_5, {
+						get card() {
+							return get(it).card;
+						},
+						get shiny() {
+							return get(it).is_shiny;
+						}
+					});
+					var span_5 = sibling(node_5, 2);
+					var text_6 = only_child(span_5, true);
+					var text_7 = only_child(sibling(span_5, 2), true);
+					reset(button);
+					template_effect(($0) => {
+						set_attribute(button, "title", get(it).card.title);
+						set_text(text_6, get(it).card.title);
+						set_text(text_7, $0);
+					}, [() => get(val) != null ? `${nf(get(val))} pts` : ""]);
+					delegated("click", button, () => $$props.onopen?.(get(it)));
+					append($$anchor, button);
+				});
+				var node_6 = sibling(node_4, 2);
+				var consequent_3 = ($$anchor) => {
+					var span_7 = root_5$8();
+					action(span_7, ($$node, $$action_arg) => inView?.($$node, $$action_arg), () => ({
+						onEnter: () => set(limit, get(limit) + STEP),
+						key: get(limit)
+					}));
+					append($$anchor, span_7);
+				};
+				if_block(node_6, ($$render) => {
+					if (get(open) && $$props.items.length > get(limit)) $$render(consequent_3);
+				});
+				reset(div_2);
+				var node_7 = sibling(div_2, 2);
+				var consequent_4 = ($$anchor) => {
+					var button_1 = root_6$7();
+					var text_8 = only_child(button_1);
+					template_effect(() => set_text(text_8, `Voir les ${$$props.items.length ?? ""} cartes`));
+					delegated("click", button_1, () => set(open, true));
+					append($$anchor, button_1);
+				};
+				if_block(node_7, ($$render) => {
+					if (!get(open) && $$props.items.length > PREVIEW) $$render(consequent_4);
+				});
+				append($$anchor, fragment_2);
+			};
+			if_block(node_3, ($$render) => {
+				if ($$props.items.length) $$render(consequent_5);
+			});
+			template_effect(() => set_text(text_3, `${$$props.items.length ?? ""} carte${$$props.items.length > 1 ? "s" : ""}`));
+			append($$anchor, fragment);
+		};
+		var alternate_1 = ($$anchor) => {
+			var fragment_3 = root_12$4();
+			var div_3 = first_child(fragment_3);
 			let styles;
-			var node_2 = child(div_1);
-			each(node_2, 17, () => $$props.items, (it) => it.itemId ?? it.userCardId, ($$anchor, it) => {
-				var button = root_3$8();
-				var node_3 = child(button);
+			var node_8 = child(div_3);
+			each(node_8, 17, () => $$props.items, (it) => it.itemId ?? it.userCardId, ($$anchor, it) => {
+				var button_2 = root_9$5();
+				var node_9 = child(button_2);
 				{
 					let $0 = user_derived(() => $$props.values.get(get(it).card.id));
-					Card(node_3, {
+					Card(node_9, {
 						get card() {
 							return get(it).card;
 						},
@@ -10284,70 +11421,71 @@
 						}
 					});
 				}
-				reset(button);
-				template_effect(() => set_attribute(button, "aria-label", get(it).card.title));
-				delegated("click", button, () => $$props.onopen?.(get(it)));
-				append($$anchor, button);
+				reset(button_2);
+				template_effect(() => set_attribute(button_2, "aria-label", get(it).card.title));
+				delegated("click", button_2, () => $$props.onopen?.(get(it)));
+				append($$anchor, button_2);
 			});
-			var node_4 = sibling(node_2, 2);
-			var consequent_2 = ($$anchor) => {
-				var div_2 = root_4$8();
-				var node_5 = child(div_2);
-				Icon(node_5, { name: "coin" });
-				var text_3 = only_child(sibling(node_5), true);
+			var node_10 = sibling(node_8, 2);
+			var consequent_7 = ($$anchor) => {
+				var div_4 = root_10$4();
+				var node_11 = child(div_4);
+				Icon(node_11, { name: "coin" });
+				var text_9 = only_child(sibling(node_11), true);
 				next();
-				reset(div_2);
-				template_effect(($0) => set_text(text_3, $0), [() => nf(coins())]);
-				append($$anchor, div_2);
+				reset(div_4);
+				template_effect(($0) => set_text(text_9, $0), [() => nf(coins())]);
+				append($$anchor, div_4);
 			};
-			if_block(node_4, ($$render) => {
-				if (coins() && !$$props.items.length) $$render(consequent_2);
+			if_block(node_10, ($$render) => {
+				if (coins() && !$$props.items.length) $$render(consequent_7);
 			});
-			reset(div_1);
-			var node_6 = sibling(div_1, 2);
-			var consequent_3 = ($$anchor) => {
-				var div_3 = root_5$8();
-				var node_7 = child(div_3);
-				Icon(node_7, { name: "coin" });
-				var span_3 = sibling(node_7);
-				var b_1 = sibling(child(span_3));
-				var text_4 = only_child(b_1, true);
-				var text_5 = sibling(b_1);
-				reset(span_3);
-				reset(div_3);
+			reset(div_3);
+			var node_12 = sibling(div_3, 2);
+			var consequent_8 = ($$anchor) => {
+				var div_5 = root_11$4();
+				var node_13 = child(div_5);
+				Icon(node_13, { name: "coin" });
+				var span_8 = sibling(node_13);
+				var b_2 = sibling(child(span_8));
+				var text_10 = only_child(b_2, true);
+				var text_11 = sibling(b_2);
+				reset(span_8);
+				reset(div_5);
 				template_effect(($0) => {
-					set_text(text_4, $0);
-					set_text(text_5, ` ${narrow() ? "wb" : "WikiBidous"}`);
+					set_text(text_10, $0);
+					set_text(text_11, ` ${narrow() ? "wb" : "WikiBidous"}`);
 				}, [() => nf(coins())]);
-				append($$anchor, div_3);
+				append($$anchor, div_5);
 			};
-			if_block(node_6, ($$render) => {
-				if (coins() && $$props.items.length) $$render(consequent_3);
+			if_block(node_12, ($$render) => {
+				if (coins() && $$props.items.length) $$render(consequent_8);
 			});
-			template_effect(() => styles = set_style(div_1, "", styles, { "--cols": cols() }));
-			append($$anchor, fragment);
+			template_effect(() => styles = set_style(div_3, "", styles, { "--cols": cols() }));
+			append($$anchor, fragment_3);
 		};
 		if_block(node_1, ($$render) => {
 			if (!$$props.items.length && !coins()) $$render(consequent_1);
+			else if (compact()) $$render(consequent_6, 1);
 			else $$render(alternate_1, -1);
 		});
 		reset(section);
-		template_effect(() => set_text(text, $$props.label));
+		template_effect(() => set_text(text$2, $$props.label));
 		append($$anchor, section);
 		pop();
 	}
 	delegate(["click"]);
-	var root$12 = from_html(`<b> </b>`);
-	var root_1$12 = from_html(`<span> </span>`);
-	var root_2$9 = from_html(`<div class="tm-verdict"><!> <!> <!></div>`);
+	var root$11 = from_html(`<b> </b>`);
+	var root_1$11 = from_html(`<span> </span>`);
+	var root_2$8 = from_html(`<div class="tm-verdict"><!> <!> <!></div>`);
 	function TradeVerdict($$anchor, $$props) {
 		push($$props, true);
-		var div = root_2$9();
+		var div = root_2$8();
 		var node = child(div);
 		Icon(node, { name: "trades" });
 		var node_1 = sibling(node, 2);
 		var consequent = ($$anchor) => {
-			var b = root$12();
+			var b = root$11();
 			var text = only_child(b, true);
 			template_effect(($0) => set_text(text, $0), [() => verdictTitle($$props.v)]);
 			append($$anchor, b);
@@ -10357,7 +11495,7 @@
 		});
 		var node_2 = sibling(node_1, 2);
 		var consequent_1 = ($$anchor) => {
-			var span = root_1$12();
+			var span = root_1$11();
 			var text_1 = only_child(span);
 			template_effect(($0) => set_text(text_1, `${$$props.v.diff > 0 ? "+" : ""}${$0 ?? ""} pts`), [() => nf($$props.v.diff)]);
 			append($$anchor, span);
@@ -10370,13 +11508,15 @@
 		append($$anchor, div);
 		pop();
 	}
-	var root$11 = from_html(`<div class="empty"><b> </b><button class="btn">Réessayer</button></div>`);
-	var root_1$11 = from_html(`<div class="loading-more"><span class="spin"></span></div>`);
-	var root_2$8 = from_html(`<div class="empty"><b>Aucun message.</b><span> </span></div>`);
-	var root_3$7 = from_html(`<div><span> </span><time class="nowrap"> </time></div>`);
-	var root_4$7 = from_html(`<button class="chat-trade"><!> </button>`);
-	var root_5$7 = from_html(`<div class="modal-msg chat-msg"> </div>`);
-	var root_6$6 = from_html(`<div class="chat"><div class="chat-feed" aria-live="polite"><!></div> <form class="chat-form"><input class="search chat-input" maxlength="500"/> <button class="btn primary">Envoyer</button></form> <!></div>`);
+	var root$10 = from_html(`<div class="empty"><b> </b><button class="btn">Réessayer</button></div>`);
+	var root_1$10 = from_html(`<div class="loading-more"><span class="spin"></span></div>`);
+	var root_2$7 = from_html(`<div class="empty"><b>Aucun message.</b><span> </span></div>`);
+	var root_3$7 = from_html(`<button class="link-btn chat-older"> </button>`);
+	var root_4$7 = from_html(`<div><span> </span><time class="nowrap"> </time></div>`);
+	var root_5$7 = from_html(`<button class="chat-trade"><!> </button>`);
+	var root_6$6 = from_html(`<!> <!>`, 1);
+	var root_7$6 = from_html(`<div class="modal-msg chat-msg"> </div>`);
+	var root_8$5 = from_html(`<div class="chat"><div class="chat-feed" aria-live="polite"><!></div> <form class="chat-form"><input class="search chat-input" maxlength="500"/> <button class="btn primary">Envoyer</button></form> <!></div>`);
 	function TradeChat($$anchor, $$props) {
 		push($$props, true);
 		let conv = state(null);
@@ -10405,6 +11545,9 @@
 			at: t.createdAt,
 			t
 		}))].sort((a, b) => String(a.at).localeCompare(String(b.at))) : null);
+		const STEP = 80;
+		let back = state(STEP);
+		const drawn = user_derived(() => get(feed) ? get(feed).slice(-get(back)) : null);
 		let stick = true;
 		const onScroll = () => stick = get(list).scrollHeight - get(list).scrollTop - get(list).clientHeight < 40;
 		user_effect(() => {
@@ -10427,11 +11570,11 @@
 				set(busy, false);
 			}
 		}
-		var div = root_6$6();
+		var div = root_8$5();
 		var div_1 = child(div);
 		var node = child(div_1);
 		var consequent = ($$anchor) => {
-			var div_2 = root$11();
+			var div_2 = root$10();
 			var b_1 = child(div_2);
 			var text_1 = only_child(b_1, true);
 			var button = sibling(b_1);
@@ -10441,46 +11584,60 @@
 			append($$anchor, div_2);
 		};
 		var consequent_1 = ($$anchor) => {
-			append($$anchor, root_1$11());
+			append($$anchor, root_1$10());
 		};
 		var consequent_2 = ($$anchor) => {
-			var div_4 = root_2$8();
+			var div_4 = root_2$7();
 			var text_2 = only_child(sibling(child(div_4)));
 			reset(div_4);
 			template_effect(() => set_text(text_2, `Écrivez à ${$$props.friend.username ?? ""} pour négocier.`));
 			append($$anchor, div_4);
 		};
 		var alternate_1 = ($$anchor) => {
-			var fragment = comment();
-			each(first_child(fragment), 17, () => get(feed), (f) => f.kind + (f.m?.id ?? f.t.id), ($$anchor, f) => {
+			var fragment = root_6$6();
+			var node_1 = first_child(fragment);
+			var consequent_3 = ($$anchor) => {
+				var button_1 = root_3$7();
+				var text_3 = only_child(button_1);
+				template_effect(() => set_text(text_3, `Messages précédents (${get(feed).length - get(back)})`));
+				delegated("click", button_1, () => {
+					stick = false;
+					set(back, get(back) + STEP);
+				});
+				append($$anchor, button_1);
+			};
+			if_block(node_1, ($$render) => {
+				if (get(feed).length > get(back)) $$render(consequent_3);
+			});
+			each(sibling(node_1, 2), 17, () => get(drawn), (f) => f.kind + (f.m?.id ?? f.t.id), ($$anchor, f) => {
 				var fragment_1 = comment();
-				var node_2 = first_child(fragment_1);
-				var consequent_3 = ($$anchor) => {
-					var div_5 = root_3$7();
+				var node_3 = first_child(fragment_1);
+				var consequent_4 = ($$anchor) => {
+					var div_5 = root_4$7();
 					let classes;
 					var span_1 = child(div_5);
-					var text_3 = only_child(span_1, true);
-					var text_4 = only_child(sibling(span_1), true);
+					var text_4 = only_child(span_1, true);
+					var text_5 = only_child(sibling(span_1), true);
 					reset(div_5);
 					template_effect(($0) => {
 						classes = set_class(div_5, 1, "bubble", null, classes, { mine: get(f).m.mine });
-						set_text(text_3, get(f).m.content);
-						set_text(text_4, $0);
+						set_text(text_4, get(f).m.content);
+						set_text(text_5, $0);
 					}, [() => ago(get(f).m.at)]);
 					append($$anchor, div_5);
 				};
 				var alternate = ($$anchor) => {
-					var button_1 = root_4$7();
-					var node_3 = child(button_1);
-					Icon(node_3, { name: "trades" });
-					var text_5 = sibling(node_3);
-					reset(button_1);
-					template_effect(($0) => set_text(text_5, ` Échange · ${$0 ?? ""} · ${get(f).t.give.length ?? ""} contre ${get(f).t.get.length ?? ""}`), [() => statusLabel(get(f).t.status)]);
-					delegated("click", button_1, () => $$props.onopentrade?.(get(f).t));
-					append($$anchor, button_1);
+					var button_2 = root_5$7();
+					var node_4 = child(button_2);
+					Icon(node_4, { name: "trades" });
+					var text_6 = sibling(node_4);
+					reset(button_2);
+					template_effect(($0) => set_text(text_6, ` Échange · ${$0 ?? ""} · ${get(f).t.give.length ?? ""} contre ${get(f).t.get.length ?? ""}`), [() => statusLabel(get(f).t.status)]);
+					delegated("click", button_2, () => $$props.onopentrade?.(get(f).t));
+					append($$anchor, button_2);
 				};
-				if_block(node_2, ($$render) => {
-					if (get(f).kind === "msg") $$render(consequent_3);
+				if_block(node_3, ($$render) => {
+					if (get(f).kind === "msg") $$render(consequent_4);
 					else $$render(alternate, -1);
 				});
 				append($$anchor, fragment_1);
@@ -10498,23 +11655,23 @@
 		var form = sibling(div_1, 2);
 		var input = child(form);
 		remove_input_defaults(input);
-		var button_2 = sibling(input, 2);
+		var button_3 = sibling(input, 2);
 		reset(form);
-		var node_4 = sibling(form, 2);
-		var consequent_4 = ($$anchor) => {
-			var div_6 = root_5$7();
-			var text_6 = only_child(div_6, true);
-			template_effect(() => set_text(text_6, get(msg)));
+		var node_5 = sibling(form, 2);
+		var consequent_5 = ($$anchor) => {
+			var div_6 = root_7$6();
+			var text_7 = only_child(div_6, true);
+			template_effect(() => set_text(text_7, get(msg)));
 			append($$anchor, div_6);
 		};
-		if_block(node_4, ($$render) => {
-			if (get(msg)) $$render(consequent_4);
+		if_block(node_5, ($$render) => {
+			if (get(msg)) $$render(consequent_5);
 		});
 		reset(div);
 		template_effect(($0) => {
 			set_attribute(div, "aria-label", `Conversation avec ${$$props.friend.username ?? ""}`);
 			set_attribute(input, "placeholder", `Écrire à ${$$props.friend.username ?? ""}...`);
-			button_2.disabled = $0;
+			button_3.disabled = $0;
 		}, [() => get(busy) || !get(text).trim()]);
 		event("scroll", div_1, onScroll);
 		event("submit", form, (e) => {
@@ -10622,23 +11779,24 @@
 			fits: !!fit
 		};
 	}
-	var root_1$10 = from_html(`<button class="iconbtn tp-back" aria-label="Retour à la liste"><!></button>`);
-	var root_2$7 = from_html(`<p class="tp-earlier"><span><b> </b> </span><button class="btn">Voir la dernière offre</button></p>`);
-	var root_3$6 = from_html(`<button><span class="tp-chain-what"><b> </b> <span class="tp-step-deal"> </span></span> <span class="nowrap tp-chain-when"> </span></button>`);
-	var root_4$6 = from_html(`<span class="nowrap tp-chain-when"> </span>`);
-	var root_5$6 = from_html(`<span class="tp-chain-what"><b> </b> </span> <!>`, 1);
-	var root_6$5 = from_html(`<li><!></li>`);
-	var root_7$5 = from_html(`<section class="tp-chain"><h3>Négociation</h3> <ol></ol></section>`);
-	var root_8$4 = from_html(`Accepter l'échange ? Vous donnez <b> </b> et recevez <b> </b>.`, 1);
-	var root_9$3 = from_html(`<div class="tp-confirm" role="alertdialog" aria-label="Confirmation"><p class="confirm-text"><!></p> <div class="tp-actions"><button class="btn">Retour</button> <button> </button></div></div>`);
-	var root_10$3 = from_html(`<div class="modal-msg tp-msg" role="alert"> </div>`);
-	var root_11$3 = from_html(`<button class="btn">Contre-offre</button>`);
-	var root_12$3 = from_html(`<div class="tp-actions"><button class="btn danger">Refuser</button> <!> <button class="btn primary">Accepter</button></div>`);
-	var root_13$2 = from_html(`<div class="tp-actions"><button class="btn danger">Annuler l'offre</button></div>`);
-	var root_14$1 = from_html(`<!> <!>`, 1);
-	var root_15$1 = from_html(`<footer class="tp-foot"><!></footer>`);
-	var root_16$1 = from_html(`<div class="tp-body"><!> <div><!> <!> <!></div> <!></div> <!>`, 1);
-	var root_17$1 = from_html(`<section class="tp" aria-labelledby="wm-tp-title"><header class="tp-head"><!> <!> <div class="tp-title"><h2 id="wm-tp-title"> </h2> <span class="tp-sub"><span class="trade-status"> </span><span class="nowrap"> </span></span></div> <div class="modal-tabs tp-mode" role="tablist" aria-label="Affichage"><button role="tab"><!>Échange</button> <button role="tab"><!>Discussion</button></div></header> <!></section> <!>`, 1);
+	var root_1$9 = from_html(`<button class="iconbtn tp-back" aria-label="Retour à la liste"><!></button>`);
+	var root_2$6 = from_html(`<p class="tp-earlier"><span><b> </b> </span><button class="btn">Voir la dernière offre</button></p>`);
+	var root_3$6 = from_html(`<li class="tp-fold"><button class="link-btn"> </button></li>`);
+	var root_4$6 = from_html(`<button><span class="tp-chain-what"><b> </b> <span class="tp-step-deal"> </span></span> <span class="nowrap tp-chain-when"> </span></button>`);
+	var root_5$6 = from_html(`<span class="nowrap tp-chain-when"> </span>`);
+	var root_6$5 = from_html(`<span class="tp-chain-what"><b> </b> </span> <!>`, 1);
+	var root_7$5 = from_html(`<li><!></li>`);
+	var root_8$4 = from_html(`<section class="tp-chain"><h3>Négociation</h3> <ol></ol></section>`);
+	var root_9$4 = from_html(`Accepter l'échange ? Vous donnez <b> </b> et recevez <b> </b>.`, 1);
+	var root_10$3 = from_html(`<div class="tp-confirm" role="alertdialog" aria-label="Confirmation"><p class="confirm-text"><!></p> <div class="tp-actions"><button class="btn">Retour</button> <button> </button></div></div>`);
+	var root_11$3 = from_html(`<div class="modal-msg tp-msg" role="alert"> </div>`);
+	var root_12$3 = from_html(`<button class="btn">Contre-offre</button>`);
+	var root_13$3 = from_html(`<div class="tp-actions"><button class="btn danger">Refuser</button> <!> <button class="btn primary">Accepter</button></div>`);
+	var root_14$2 = from_html(`<div class="tp-actions"><button class="btn danger">Annuler l'offre</button></div>`);
+	var root_15$2 = from_html(`<!> <!>`, 1);
+	var root_16$2 = from_html(`<footer class="tp-foot"><!></footer>`);
+	var root_17$2 = from_html(`<div class="tp-body"><!> <div><!> <!> <!></div> <!></div> <!>`, 1);
+	var root_18$2 = from_html(`<section class="tp" aria-labelledby="wm-tp-title"><header class="tp-head"><!> <!> <div class="tp-title"><h2 id="wm-tp-title"> </h2> <span class="tp-sub"><span class="trade-status"> </span><span class="nowrap"> </span></span></div> <div class="modal-tabs tp-mode" role="tablist" aria-label="Affichage"><button role="tab"><!>Échange</button> <button role="tab"><!>Discussion</button></div></header> <!></section> <!>`, 1);
 	function TradePane($$anchor, $$props) {
 		push($$props, true);
 		let all = prop($$props, "all", 19, () => []), mode = prop($$props, "mode", 15, "trade"), onback = prop($$props, "onback", 3, null);
@@ -10649,6 +11807,11 @@
 		let viewing = state(null);
 		const chain = user_derived(() => chainOf($$props.trade, all()));
 		const steps = user_derived(() => timeline(get(chain)));
+		const FOLD_FROM = 8;
+		const KEEP_END = 4;
+		let chainOpen = state(false);
+		const folded = (i) => !get(chainOpen) && get(steps).length > FOLD_FROM && i >= 1 && i < get(steps).length - KEEP_END && get(steps)[i].offer?.id !== get(o).id;
+		const foldedCount = user_derived(() => get(steps).filter((_, i) => folded(i)).length);
 		const o = user_derived(() => get(chain).find((c) => c.id === get(viewing)) ?? $$props.trade);
 		const earlier = user_derived(() => get(o).id !== $$props.trade.id);
 		const v = user_derived(() => verdict(sideValue(get(o).give, get(o).giveCoins, $$props.values), sideValue(get(o).get, get(o).getCoins, $$props.values)));
@@ -10662,8 +11825,10 @@
 		let box = state(null);
 		let chainH = state(0);
 		let earlierH = state(0);
+		const COMPACT_FROM = 16;
+		const compact = user_derived(() => get(o).give.length + get(o).get.length > COMPACT_FROM);
 		const lay = user_derived(() => {
-			if (!get(box)) return null;
+			if (!get(box) || get(compact)) return null;
 			const shape = [sideShape(get(o).give, get(o).giveCoins), sideShape(get(o).get, get(o).getCoins)];
 			const h = get(box).height - (get(earlier) ? get(earlierH) + DEAL.bodyGap : 0);
 			const all = dealLayout(get(box).width, h, ...shape);
@@ -10704,13 +11869,13 @@
 			if (get(ask)) set(ask, null);
 			else onback()?.();
 		}
-		var fragment = root_17$1();
+		var fragment = root_18$2();
 		event("keydown", $window, onKey);
 		var section = first_child(fragment);
 		var header = child(section);
 		var node = child(header);
 		var consequent = ($$anchor) => {
-			var button = root_1$10();
+			var button = root_1$9();
 			Icon(child(button), {
 				name: "prev",
 				width: 2
@@ -10769,12 +11934,12 @@
 			});
 			append($$anchor, fragment_1);
 		};
-		var alternate_3 = ($$anchor) => {
-			var fragment_3 = root_16$1();
+		var alternate_4 = ($$anchor) => {
+			var fragment_3 = root_17$2();
 			var div_2 = first_child(fragment_3);
 			var node_7 = child(div_2);
 			var consequent_2 = ($$anchor) => {
-				var p = root_2$7();
+				var p = root_2$6();
 				var span_3 = child(p);
 				var b = child(span_3);
 				var text_3 = only_child(b);
@@ -10819,6 +11984,9 @@
 					get narrow() {
 						return get($1);
 					},
+					get compact() {
+						return get(compact);
+					},
 					get values() {
 						return $$props.values;
 					},
@@ -10849,6 +12017,9 @@
 					get narrow() {
 						return get($1);
 					},
+					get compact() {
+						return get(compact);
+					},
 					get values() {
 						return $$props.values;
 					},
@@ -10857,68 +12028,95 @@
 			}
 			reset(div_3);
 			var node_11 = sibling(div_3, 2);
-			var consequent_5 = ($$anchor) => {
-				var section_1 = root_7$5();
+			var consequent_7 = ($$anchor) => {
+				var section_1 = root_8$4();
 				var ol = sibling(child(section_1), 2);
 				each(ol, 21, () => get(steps), index, ($$anchor, s, i) => {
-					var li = root_6$5();
-					let classes_3;
-					var node_12 = child(li);
-					var consequent_3 = ($$anchor) => {
-						var button_4 = root_3$6();
-						let classes_4;
-						var span_4 = child(button_4);
-						var b_1 = child(span_4);
-						var text_5 = only_child(b_1, true);
-						var text_6 = sibling(b_1);
-						var text_7 = only_child(sibling(text_6), true);
-						reset(span_4);
-						var text_8 = only_child(sibling(span_4, 2), true);
-						reset(button_4);
-						template_effect(($0, $1) => {
-							classes_4 = set_class(button_4, 1, "tp-step", null, classes_4, { on: get(s).offer.id === get(o).id });
-							set_attribute(button_4, "aria-pressed", get(s).offer.id === get(o).id);
-							set_text(text_5, get(s).text);
-							set_text(text_6, ` ${get(s).by ?? ""}`);
-							set_text(text_7, $0);
-							set_text(text_8, $1);
-						}, [() => dealLine(get(s).offer.give.length, get(s).offer.giveCoins, get(s).offer.get.length, get(s).offer.getCoins), () => ago(get(s).at)]);
-						delegated("click", button_4, () => set(viewing, get(s).offer.id, true));
-						append($$anchor, button_4);
-					};
-					var alternate = ($$anchor) => {
-						var fragment_4 = root_5$6();
-						var span_7 = first_child(fragment_4);
-						var b_2 = child(span_7);
-						var text_9 = only_child(b_2, true);
-						var text_10 = sibling(b_2);
-						reset(span_7);
-						var node_13 = sibling(span_7, 2);
-						var consequent_4 = ($$anchor) => {
-							var span_8 = root_4$6();
-							var text_11 = only_child(span_8, true);
-							template_effect(($0) => set_text(text_11, $0), [() => ago(get(s).at)]);
-							append($$anchor, span_8);
+					var fragment_4 = comment();
+					var node_12 = first_child(fragment_4);
+					var consequent_4 = ($$anchor) => {
+						var fragment_5 = comment();
+						var node_13 = first_child(fragment_5);
+						var consequent_3 = ($$anchor) => {
+							var li = root_3$6();
+							var button_4 = child(li);
+							var text_5 = only_child(button_4);
+							reset(li);
+							template_effect(() => set_text(text_5, `Voir les ${get(foldedCount) ?? ""} étapes intermédiaires`));
+							delegated("click", button_4, () => set(chainOpen, true));
+							append($$anchor, li);
 						};
 						if_block(node_13, ($$render) => {
-							if (get(s).at) $$render(consequent_4);
+							if (i === 1) $$render(consequent_3);
 						});
+						append($$anchor, fragment_5);
+					};
+					var d = user_derived(() => folded(i));
+					var alternate_1 = ($$anchor) => {
+						var li_1 = root_7$5();
+						let classes_3;
+						var node_14 = child(li_1);
+						var consequent_5 = ($$anchor) => {
+							var button_5 = root_4$6();
+							let classes_4;
+							var span_4 = child(button_5);
+							var b_1 = child(span_4);
+							var text_6 = only_child(b_1, true);
+							var text_7 = sibling(b_1);
+							var text_8 = only_child(sibling(text_7), true);
+							reset(span_4);
+							var text_9 = only_child(sibling(span_4, 2), true);
+							reset(button_5);
+							template_effect(($0, $1) => {
+								classes_4 = set_class(button_5, 1, "tp-step", null, classes_4, { on: get(s).offer.id === get(o).id });
+								set_attribute(button_5, "aria-pressed", get(s).offer.id === get(o).id);
+								set_text(text_6, get(s).text);
+								set_text(text_7, ` ${get(s).by ?? ""}`);
+								set_text(text_8, $0);
+								set_text(text_9, $1);
+							}, [() => dealLine(get(s).offer.give.length, get(s).offer.giveCoins, get(s).offer.get.length, get(s).offer.getCoins), () => ago(get(s).at)]);
+							delegated("click", button_5, () => set(viewing, get(s).offer.id, true));
+							append($$anchor, button_5);
+						};
+						var alternate = ($$anchor) => {
+							var fragment_6 = root_6$5();
+							var span_7 = first_child(fragment_6);
+							var b_2 = child(span_7);
+							var text_10 = only_child(b_2, true);
+							var text_11 = sibling(b_2);
+							reset(span_7);
+							var node_15 = sibling(span_7, 2);
+							var consequent_6 = ($$anchor) => {
+								var span_8 = root_5$6();
+								var text_12 = only_child(span_8, true);
+								template_effect(($0) => set_text(text_12, $0), [() => ago(get(s).at)]);
+								append($$anchor, span_8);
+							};
+							if_block(node_15, ($$render) => {
+								if (get(s).at) $$render(consequent_6);
+							});
+							template_effect(() => {
+								set_text(text_10, get(s).text);
+								set_text(text_11, ` ${get(s).by ?? ""}`);
+							});
+							append($$anchor, fragment_6);
+						};
+						if_block(node_14, ($$render) => {
+							if (get(s).offer) $$render(consequent_5);
+							else $$render(alternate, -1);
+						});
+						reset(li_1);
 						template_effect(() => {
-							set_text(text_9, get(s).text);
-							set_text(text_10, ` ${get(s).by ?? ""}`);
+							set_attribute(li_1, "data-k", get(s).kind);
+							classes_3 = set_class(li_1, 1, "", null, classes_3, { now: i === get(steps).length - 1 });
 						});
-						append($$anchor, fragment_4);
+						append($$anchor, li_1);
 					};
 					if_block(node_12, ($$render) => {
-						if (get(s).offer) $$render(consequent_3);
-						else $$render(alternate, -1);
+						if (get(d)) $$render(consequent_4);
+						else $$render(alternate_1, -1);
 					});
-					reset(li);
-					template_effect(() => {
-						set_attribute(li, "data-k", get(s).kind);
-						classes_3 = set_class(li, 1, "", null, classes_3, { now: i === get(steps).length - 1 });
-					});
-					append($$anchor, li);
+					append($$anchor, fragment_4);
 				});
 				reset(ol);
 				reset(section_1);
@@ -10926,119 +12124,120 @@
 				append($$anchor, section_1);
 			};
 			if_block(node_11, ($$render) => {
-				if (get(steps).length > 2 || $$props.trade.status !== "pending") $$render(consequent_5);
+				if (get(steps).length > 2 || $$props.trade.status !== "pending") $$render(consequent_7);
 			});
 			reset(div_2);
-			var node_14 = sibling(div_2, 2);
-			var consequent_13 = ($$anchor) => {
-				var footer = root_15$1();
-				var node_15 = child(footer);
-				var consequent_8 = ($$anchor) => {
-					var div_4 = root_9$3();
+			var node_16 = sibling(div_2, 2);
+			var consequent_15 = ($$anchor) => {
+				var footer = root_16$2();
+				var node_17 = child(footer);
+				var consequent_10 = ($$anchor) => {
+					var div_4 = root_10$3();
 					var p_1 = child(div_4);
-					var node_16 = child(p_1);
-					var consequent_6 = ($$anchor) => {
-						var fragment_5 = root_8$4();
-						var b_3 = sibling(first_child(fragment_5));
-						var text_12 = only_child(b_3, true);
-						var text_13 = only_child(sibling(b_3, 2), true);
+					var node_18 = child(p_1);
+					var consequent_8 = ($$anchor) => {
+						var fragment_7 = root_9$4();
+						var b_3 = sibling(first_child(fragment_7));
+						var text_13 = only_child(b_3, true);
+						var text_14 = only_child(sibling(b_3, 2), true);
 						next();
 						template_effect(($0, $1) => {
-							set_text(text_12, $0);
-							set_text(text_13, $1);
+							set_text(text_13, $0);
+							set_text(text_14, $1);
 						}, [() => moves($$props.trade.give, $$props.trade.giveCoins), () => moves($$props.trade.get, $$props.trade.getCoins)]);
-						append($$anchor, fragment_5);
+						append($$anchor, fragment_7);
 					};
-					var consequent_7 = ($$anchor) => {
-						var text_14 = text();
-						template_effect(() => set_text(text_14, `Refuser l'offre de ${$$props.trade.other.username ?? ""} ? Aucune carte ni WikiBidou ne sera échangé.`));
-						append($$anchor, text_14);
-					};
-					var alternate_1 = ($$anchor) => {
+					var consequent_9 = ($$anchor) => {
 						var text_15 = text();
-						template_effect(() => set_text(text_15, `Annuler votre offre à ${$$props.trade.other.username ?? ""} ? Aucune carte ni WikiBidou ne sera échangé.`));
+						template_effect(() => set_text(text_15, `Refuser l'offre de ${$$props.trade.other.username ?? ""} ? Aucune carte ni WikiBidou ne sera échangé.`));
 						append($$anchor, text_15);
 					};
-					if_block(node_16, ($$render) => {
-						if (get(ask) === "accept") $$render(consequent_6);
-						else if (get(ask) === "decline") $$render(consequent_7, 1);
-						else $$render(alternate_1, -1);
+					var alternate_2 = ($$anchor) => {
+						var text_16 = text();
+						template_effect(() => set_text(text_16, `Annuler votre offre à ${$$props.trade.other.username ?? ""} ? Aucune carte ni WikiBidou ne sera échangé.`));
+						append($$anchor, text_16);
+					};
+					if_block(node_18, ($$render) => {
+						if (get(ask) === "accept") $$render(consequent_8);
+						else if (get(ask) === "decline") $$render(consequent_9, 1);
+						else $$render(alternate_2, -1);
 					});
 					reset(p_1);
 					var div_5 = sibling(p_1, 2);
-					var button_5 = child(div_5);
-					var button_6 = sibling(button_5, 2);
-					var text_16 = only_child(button_6, true);
+					var button_6 = child(div_5);
+					var button_7 = sibling(button_6, 2);
+					var text_17 = only_child(button_7, true);
 					reset(div_5);
 					reset(div_4);
 					template_effect(() => {
-						button_5.disabled = get(busy);
-						set_class(button_6, 1, `btn ${ACT[get(ask)][1] ?? ""}`);
 						button_6.disabled = get(busy);
-						set_text(text_16, get(busy) ? "Envoi..." : ACT[get(ask)][0]);
+						set_class(button_7, 1, `btn ${ACT[get(ask)][1] ?? ""}`);
+						button_7.disabled = get(busy);
+						set_text(text_17, get(busy) ? "Envoi..." : ACT[get(ask)][0]);
 					});
-					delegated("click", button_5, () => set(ask, null));
-					delegated("click", button_6, () => act(get(ask)));
+					delegated("click", button_6, () => set(ask, null));
+					delegated("click", button_7, () => act(get(ask)));
 					append($$anchor, div_4);
 				};
-				var alternate_2 = ($$anchor) => {
-					var fragment_8 = root_14$1();
-					var node_17 = first_child(fragment_8);
-					var consequent_9 = ($$anchor) => {
-						var div_6 = root_10$3();
-						var text_17 = only_child(div_6, true);
-						template_effect(() => set_text(text_17, get(msg)));
+				var alternate_3 = ($$anchor) => {
+					var fragment_10 = root_15$2();
+					var node_19 = first_child(fragment_10);
+					var consequent_11 = ($$anchor) => {
+						var div_6 = root_11$3();
+						var text_18 = only_child(div_6, true);
+						template_effect(() => set_text(text_18, get(msg)));
 						append($$anchor, div_6);
 					};
-					if_block(node_17, ($$render) => {
-						if (get(msg)) $$render(consequent_9);
+					if_block(node_19, ($$render) => {
+						if (get(msg)) $$render(consequent_11);
 					});
-					var node_18 = sibling(node_17, 2);
-					var consequent_11 = ($$anchor) => {
-						var div_7 = root_12$3();
-						var button_7 = child(div_7);
-						var node_19 = sibling(button_7, 2);
-						var consequent_10 = ($$anchor) => {
-							var button_8 = root_11$3();
-							delegated("click", button_8, () => $$props.oncounter($$props.trade));
-							append($$anchor, button_8);
+					var node_20 = sibling(node_19, 2);
+					var consequent_13 = ($$anchor) => {
+						var div_7 = root_13$3();
+						var button_8 = child(div_7);
+						var node_21 = sibling(button_8, 2);
+						var consequent_12 = ($$anchor) => {
+							var button_9 = root_12$3();
+							delegated("click", button_9, () => $$props.oncounter($$props.trade));
+							append($$anchor, button_9);
 						};
-						if_block(node_19, ($$render) => {
-							if ($$props.oncounter) $$render(consequent_10);
+						if_block(node_21, ($$render) => {
+							if ($$props.oncounter) $$render(consequent_12);
 						});
-						var button_9 = sibling(node_19, 2);
+						var button_10 = sibling(node_21, 2);
 						reset(div_7);
-						delegated("click", button_7, () => set(ask, "decline"));
-						delegated("click", button_9, () => set(ask, "accept"));
+						delegated("click", button_8, () => set(ask, "decline"));
+						delegated("click", button_10, () => set(ask, "accept"));
 						append($$anchor, div_7);
 					};
-					var consequent_12 = ($$anchor) => {
-						var div_8 = root_13$2();
+					var consequent_14 = ($$anchor) => {
+						var div_8 = root_14$2();
 						delegated("click", only_child(div_8), () => set(ask, "cancel"));
 						append($$anchor, div_8);
 					};
-					if_block(node_18, ($$render) => {
-						if (get(canAnswer)) $$render(consequent_11);
-						else if (get(canCancel)) $$render(consequent_12, 1);
+					if_block(node_20, ($$render) => {
+						if (get(canAnswer)) $$render(consequent_13);
+						else if (get(canCancel)) $$render(consequent_14, 1);
 					});
-					append($$anchor, fragment_8);
+					append($$anchor, fragment_10);
 				};
-				if_block(node_15, ($$render) => {
-					if (get(ask)) $$render(consequent_8);
-					else $$render(alternate_2, -1);
+				if_block(node_17, ($$render) => {
+					if (get(ask)) $$render(consequent_10);
+					else $$render(alternate_3, -1);
 				});
 				reset(footer);
 				append($$anchor, footer);
 			};
-			if_block(node_14, ($$render) => {
-				if (!get(earlier) && (get(ask) || get(canAnswer) || get(canCancel) || get(msg))) $$render(consequent_13);
+			if_block(node_16, ($$render) => {
+				if (!get(earlier) && (get(ask) || get(canAnswer) || get(canCancel) || get(msg))) $$render(consequent_15);
 			});
 			template_effect(() => {
 				set_style(div_2, `${dealVars ?? ""};--card-w:${get(lay)?.w ?? DEAL.min ?? ""}px`);
 				classes_2 = set_class(div_3, 1, "tp-sides", null, classes_2, {
+					compact: get(compact),
 					stacked: get(lay)?.stacked,
 					scrolls: get(lay) && !get(lay).fits,
-					measuring: !get(lay)
+					measuring: !get(lay) && !get(compact)
 				});
 			});
 			bind_resize_observer(div_2, "contentRect", ($$value) => set(box, $$value));
@@ -11046,12 +12245,12 @@
 		};
 		if_block(node_5, ($$render) => {
 			if (mode() === "chat") $$render(consequent_1);
-			else $$render(alternate_3, -1);
+			else $$render(alternate_4, -1);
 		});
 		reset(section);
 		bind_this(section, ($$value) => set(root, $$value), () => get(root));
-		var node_20 = sibling(section, 2);
-		var consequent_14 = ($$anchor) => {
+		var node_22 = sibling(section, 2);
+		var consequent_16 = ($$anchor) => {
 			{
 				let $0 = user_derived(() => ({
 					card: get(card).card,
@@ -11066,8 +12265,8 @@
 				});
 			}
 		};
-		if_block(node_20, ($$render) => {
-			if (get(card)) $$render(consequent_14);
+		if_block(node_22, ($$render) => {
+			if (get(card)) $$render(consequent_16);
 		});
 		template_effect(($0, $1) => {
 			set_text(text$1, `Échange avec ${$$props.trade.other.username ?? ""}`);
@@ -11086,39 +12285,42 @@
 	}
 	delegate(["click"]);
 	var RANK = Object.fromEntries(RARITIES_DESC.map((r, i) => [r, i]));
+	var added = (it) => Date.parse(it.obtained_at || "") || 0;
 	var val = (values, it) => values.get(it.card.id) ?? -1;
 	var byName = (a, b) => a.card.title.localeCompare(b.card.title, "fr", { sensitivity: "base" });
 	var SORTS = {
 		rarity: () => (a, b) => RANK[a.card.rarity] - RANK[b.card.rarity] || byName(a, b),
 		value: (v) => (a, b) => val(v, b) - val(v, a) || RANK[a.card.rarity] - RANK[b.card.rarity] || byName(a, b),
-		name: () => byName
+		name: () => byName,
+		recent: () => (a, b) => added(b) - added(a) || byName(a, b)
 	};
 	var PICK_SORTS = [
 		["rarity", "Rareté"],
+		["recent", "Récentes"],
 		["value", "Valeur estimée"],
 		["name", "Nom"]
 	];
 	var allValued = (items, values) => items.every((it) => values.has(it.card.id));
-	function pickList(items, { q = "", rarity = "", sort = "rarity", values, isLocked = () => false }) {
-		const nq = normSearch(q);
+	function pickList(items, { sort = "rarity", values, isLocked = () => false }) {
 		const cmp = (SORTS[sort] ?? SORTS.rarity)(values);
-		return items.filter((it) => (!rarity || it.card.rarity === rarity) && (!nq || normSearch(it.card.title).includes(nq))).map((it) => ({
+		return items.map((it) => ({
 			it,
 			locked: !!isLocked(it)
 		})).sort((a, b) => a.locked - b.locked || cmp(a.it, b.it)).map((x) => x.it);
 	}
-	var root$10 = from_html(`<option> </option>`);
-	var root_1$9 = from_html(`<span class="pick-lock">Échange en attente</span>`);
-	var root_2$6 = from_html(`<button><!> <!> <!></button>`);
-	var root_3$5 = from_html(`<div class="empty"><b>Impossible de charger ces cartes.</b><button class="btn">Réessayer</button></div>`);
-	var root_4$5 = from_html(`<div class="empty"><b> </b></div>`);
-	var root_5$5 = from_html(`<span class="modal-msg">Impossible de charger la suite.</span><button class="btn">Réessayer</button>`, 1);
-	var root_6$4 = from_html(`<span class="loading-more"><span class="spin"></span></span>`);
-	var root_7$4 = from_html(`<div class="picker-more"><!></div>`);
-	var root_8$3 = from_html(`<div class="picker"><div class="picker-bar"><!> <!> <!> <div class="isel" title="Trier les cartes"><!> <select aria-label="Trier"></select></div></div> <div class="picker-scroll"><div></div> <!></div></div>`);
+	var root$9 = from_html(`<option> </option>`);
+	var root_1$8 = from_html(`<p class="sort-hint"> </p>`);
+	var root_2$5 = from_html(`<span class="pick-lock">Échange en attente</span>`);
+	var root_3$5 = from_html(`<button><!> <!> <!></button>`);
+	var root_4$5 = from_html(`<div class="empty"><b>Impossible de charger ces cartes.</b><button class="btn">Réessayer</button></div>`);
+	var root_5$5 = from_html(`<div class="empty"><b> </b></div>`);
+	var root_6$4 = from_html(`<span class="modal-msg">Impossible de charger la suite.</span><button class="btn">Réessayer</button>`, 1);
+	var root_7$4 = from_html(`<span class="loading-more"><span class="spin"></span></span>`);
+	var root_8$3 = from_html(`<div class="picker-more"><!></div>`);
+	var root_9$3 = from_html(`<div class="picker"><div class="picker-bar"><!> <!> <!> <div class="isel" title="Trier les cartes"><!> <select aria-label="Trier"></select></div></div> <div class="picker-scroll"><!> <div></div> <!></div></div>`);
 	function CardPicker($$anchor, $$props) {
 		push($$props, true);
-		let items = prop($$props, "items", 19, () => []), locked = prop($$props, "locked", 19, () => new Set()), loading = prop($$props, "loading", 3, false), error = prop($$props, "error", 3, false), more = prop($$props, "more", 3, null), loadingMore = prop($$props, "loadingMore", 3, false), moreError = prop($$props, "moreError", 3, false), onquery = prop($$props, "onquery", 3, null);
+		let items = prop($$props, "items", 19, () => []), locked = prop($$props, "locked", 19, () => new Set()), loading = prop($$props, "loading", 3, false), error = prop($$props, "error", 3, false), more = prop($$props, "more", 3, null), loadingMore = prop($$props, "loadingMore", 3, false), moreError = prop($$props, "moreError", 3, false);
 		let q = state("");
 		let rarity = state("");
 		let sort = state("rarity");
@@ -11131,14 +12333,7 @@
 			get(settled);
 			set(ranked, untrack(() => new Map($$props.values)));
 		});
-		const remote = user_derived(() => !!onquery());
-		const shown = user_derived(() => pickList(items(), get(remote) ? {
-			sort: get(sort),
-			values: get(ranked),
-			isLocked
-		} : {
-			q: get(q),
-			rarity: get(rarity),
+		const shown = user_derived(() => pickList(items(), {
 			sort: get(sort),
 			values: get(ranked),
 			isLocked
@@ -11155,21 +12350,15 @@
 			};
 			if (next.q === asked.q && next.rarity === asked.rarity && next.sort === asked.sort) return;
 			asked = next;
-			onquery()(next);
+			$$props.onquery(next);
 		};
-		debouncedSearch(() => get(q), (text) => get(remote) && ask({ q: text }));
-		user_effect(() => {
-			if (get(remote)) ask({
-				rarity: get(rarity),
-				sort: get(sort) === "name" ? "name" : "rarity",
-				q: untrack(() => get(q)).trim()
-			});
-		});
-		const filling = user_derived(() => get(remote) && get(sort) === "value" && !!more() && !moreError());
-		user_effect(() => {
-			if (get(filling) && !loadingMore()) untrack(() => more()());
-		});
-		var div = root_8$3();
+		debouncedSearch(() => get(q), (text) => ask({ q: text }));
+		user_effect(() => ask({
+			rarity: get(rarity),
+			sort: get(sort) === "value" ? "rarity" : get(sort),
+			q: untrack(() => get(q)).trim()
+		}));
+		var div = root_9$3();
 		var div_1 = child(div);
 		var node = child(div_1);
 		snippet(node, () => $$props.lead ?? noop);
@@ -11200,7 +12389,7 @@
 			var $$array = user_derived(() => to_array(get($$item), 2));
 			let id = () => get($$array)[0];
 			let label = () => get($$array)[1];
-			var option = root$10();
+			var option = root$9();
 			var text_1 = only_child(option, true);
 			var option_value = {};
 			template_effect(() => {
@@ -11214,17 +12403,27 @@
 		reset(div_2);
 		reset(div_1);
 		var div_3 = sibling(div_1, 2);
-		var div_4 = child(div_3);
+		var node_4 = child(div_3);
+		var consequent = ($$anchor) => {
+			var p = root_1$8();
+			var text_2 = only_child(p);
+			template_effect(() => set_text(text_2, `Classées par valeur parmi les ${items().length ?? ""} cartes chargées.`));
+			append($$anchor, p);
+		};
+		if_block(node_4, ($$render) => {
+			if (get(sort) === "value" && more()) $$render(consequent);
+		});
+		var div_4 = sibling(node_4, 2);
 		let classes;
 		each(div_4, 21, () => get(shown), (it) => it.id, ($$anchor, it) => {
 			const off = user_derived(() => isLocked(get(it)));
 			const on = user_derived(() => $$props.picked.has(get(it).id));
-			var button = root_2$6();
+			var button = root_3$5();
 			let classes_1;
-			var node_4 = child(button);
+			var node_5 = child(button);
 			{
 				let $0 = user_derived(() => $$props.values.get(get(it).card.id));
-				Card(node_4, {
+				Card(node_5, {
 					get card() {
 						return get(it).card;
 					},
@@ -11237,16 +12436,16 @@
 					}
 				});
 			}
-			var node_5 = sibling(node_4, 2);
-			PickMark(node_5, { get on() {
+			var node_6 = sibling(node_5, 2);
+			PickMark(node_6, { get on() {
 				return get(on);
 			} });
-			var node_6 = sibling(node_5, 2);
-			var consequent = ($$anchor) => {
-				append($$anchor, root_1$9());
+			var node_7 = sibling(node_6, 2);
+			var consequent_1 = ($$anchor) => {
+				append($$anchor, root_2$5());
 			};
-			if_block(node_6, ($$render) => {
-				if (get(off)) $$render(consequent);
+			if_block(node_7, ($$render) => {
+				if (get(off)) $$render(consequent_1);
 			});
 			reset(button);
 			action(button, ($$node, $$action_arg) => $$props.watch?.($$node, $$action_arg), () => get(it).card);
@@ -11266,9 +12465,9 @@
 			append($$anchor, button);
 		}, ($$anchor) => {
 			var fragment = comment();
-			var node_7 = first_child(fragment);
-			var consequent_1 = ($$anchor) => {
-				var div_5 = root_3$5();
+			var node_8 = first_child(fragment);
+			var consequent_2 = ($$anchor) => {
+				var div_5 = root_4$5();
 				var button_1 = sibling(child(div_5));
 				reset(div_5);
 				delegated("click", button_1, function(...$$args) {
@@ -11277,35 +12476,35 @@
 				append($$anchor, div_5);
 			};
 			var alternate = ($$anchor) => {
-				var div_6 = root_4$5();
-				var text_2 = only_child(child(div_6), true);
+				var div_6 = root_5$5();
+				var text_3 = only_child(child(div_6), true);
 				reset(div_6);
-				template_effect(() => set_text(text_2, loading() ? "Chargement..." : items().length || get(q) || get(rarity) ? "Aucune carte ne correspond" : "Aucune carte"));
+				template_effect(() => set_text(text_3, loading() ? "Chargement..." : items().length || get(q) || get(rarity) ? "Aucune carte ne correspond" : "Aucune carte"));
 				append($$anchor, div_6);
 			};
-			if_block(node_7, ($$render) => {
-				if (error() && !loading()) $$render(consequent_1);
+			if_block(node_8, ($$render) => {
+				if (error() && !loading()) $$render(consequent_2);
 				else $$render(alternate, -1);
 			});
 			append($$anchor, fragment);
 		});
 		reset(div_4);
-		var node_8 = sibling(div_4, 2);
-		var consequent_3 = ($$anchor) => {
-			var div_7 = root_7$4();
-			var node_9 = child(div_7);
-			var consequent_2 = ($$anchor) => {
-				var fragment_1 = root_5$5();
+		var node_9 = sibling(div_4, 2);
+		var consequent_4 = ($$anchor) => {
+			var div_7 = root_8$3();
+			var node_10 = child(div_7);
+			var consequent_3 = ($$anchor) => {
+				var fragment_1 = root_6$4();
 				delegated("click", sibling(first_child(fragment_1)), function(...$$args) {
 					more()?.apply(this, $$args);
 				});
 				append($$anchor, fragment_1);
 			};
 			var alternate_1 = ($$anchor) => {
-				append($$anchor, root_6$4());
+				append($$anchor, root_7$4());
 			};
-			if_block(node_9, ($$render) => {
-				if (moreError() && !loadingMore()) $$render(consequent_2);
+			if_block(node_10, ($$render) => {
+				if (moreError() && !loadingMore()) $$render(consequent_3);
 				else $$render(alternate_1, -1);
 			});
 			reset(div_7);
@@ -11317,8 +12516,8 @@
 			}));
 			append($$anchor, div_7);
 		};
-		if_block(node_8, ($$render) => {
-			if (more()) $$render(consequent_3);
+		if_block(node_9, ($$render) => {
+			if (more()) $$render(consequent_4);
 		});
 		reset(div_3);
 		reset(div);
@@ -11328,8 +12527,8 @@
 		pop();
 	}
 	delegate(["click"]);
-	var root$9 = from_html(`<span class="coins-field af-input-row"><!> <input class="af-input" type="number" min="0"/> <span class="af-unit">wb</span> <button class="coins-x" aria-label="Retirer les WikiBidous"><!></button></span>`);
-	var root_1$8 = from_html(`<button class="iconbtn coins-add"><!> </button>`);
+	var root$8 = from_html(`<span class="coins-field af-input-row"><!> <input class="af-input" type="number" min="0"/> <span class="af-unit">wb</span> <button class="coins-x" aria-label="Retirer les WikiBidous"><!></button></span>`);
+	var root_1$7 = from_html(`<button class="iconbtn coins-add"><!> </button>`);
 	function CoinsField($$anchor, $$props) {
 		push($$props, true);
 		let value = prop($$props, "value", 15, 0), max = prop($$props, "max", 3, void 0), label = prop($$props, "label", 3, "Ajouter des WB");
@@ -11349,7 +12548,7 @@
 		var fragment = comment();
 		var node = first_child(fragment);
 		var consequent = ($$anchor) => {
-			var span = root$9();
+			var span = root$8();
 			var node_1 = child(span);
 			Icon(node_1, {
 				name: "coin",
@@ -11374,7 +12573,7 @@
 			append($$anchor, span);
 		};
 		var alternate = ($$anchor) => {
-			var button_1 = root_1$8();
+			var button_1 = root_1$7();
 			var node_3 = child(button_1);
 			Icon(node_3, { name: "coin" });
 			var text = sibling(node_3, 1, true);
@@ -11391,49 +12590,6 @@
 		pop();
 	}
 	delegate(["click"]);
-	var root$8 = from_html(`<img alt="" loading="lazy" crossorigin="anonymous"/>`);
-	var root_1$7 = from_html(`<img alt="" loading="lazy"/>`);
-	var root_2$5 = from_html(`<span aria-hidden="true"><!> <span class="cthumb-r"> </span></span>`);
-	function CardThumb($$anchor, $$props) {
-		push($$props, true);
-		let shiny = prop($$props, "shiny", 3, false);
-		let failed = state(false);
-		let paper = state(false);
-		const photo = user_derived(() => $$props.card.image_url && !get(failed) && !(settings.hideSensitive && $$props.card.nsfw_image));
-		var span = root_2$5();
-		let classes;
-		var node = child(span);
-		var consequent = ($$anchor) => {
-			var img = root$8();
-			template_effect(() => set_attribute(img, "src", $$props.card.image_url));
-			event("load", img, (e) => set(paper, seeThrough(e.currentTarget), true));
-			event("error", img, () => set(failed, true));
-			replay_events(img);
-			append($$anchor, img);
-		};
-		var alternate = ($$anchor) => {
-			var img_1 = root_1$7();
-			template_effect(($0) => set_attribute(img_1, "src", $0), [() => rarityArt($$props.card, shiny())]);
-			append($$anchor, img_1);
-		};
-		if_block(node, ($$render) => {
-			if (get(photo)) $$render(consequent);
-			else $$render(alternate, -1);
-		});
-		var text = only_child(sibling(node, 2), true);
-		reset(span);
-		template_effect(() => {
-			classes = set_class(span, 1, "cthumb", null, classes, {
-				paper: get(paper),
-				art: !get(photo),
-				shiny: shiny()
-			});
-			set_attribute(span, "data-r", $$props.card.rarity);
-			set_text(text, $$props.card.rarity);
-		});
-		append($$anchor, span);
-		pop();
-	}
 	var root$7 = from_html(`<span class="tab-n"> </span>`);
 	var root_1$6 = from_html(`<span class="oside-total"> </span>`);
 	var root_2$4 = from_html(`<span> </span>`);
@@ -11568,38 +12724,20 @@
 		pop();
 	}
 	delegate(["click"]);
-	var NO_PAGES = Object.freeze({
-		loaded: -1,
-		items: [],
-		hasMore: false
-	});
-	function addPage(acc, page, d) {
-		if (page === 0) return {
-			loaded: 0,
-			items: d.items,
-			hasMore: !!d.hasMore
-		};
-		if (page !== acc.loaded + 1) return acc;
-		return {
-			loaded: page,
-			items: [...acc.items, ...d.items],
-			hasMore: !!d.hasMore
-		};
-	}
-	var nextPage = (acc) => acc.loaded + 1;
 	var root$6 = from_html(`<button class="friend"><!><b> </b></button>`);
 	var root_1$5 = from_html(`<div class="empty"><b> </b><button class="btn">Réessayer</button></div>`);
 	var root_2$3 = from_html(`<div class="empty"><b>Aucun ami pour l'instant.</b></div>`);
-	var root_3$3 = from_html(`<div class="loading-more"><span class="spin"></span></div>`);
-	var root_4$3 = from_html(`<p class="composer-sub">Avec qui voulez-vous échanger ?</p> <div class="friend-list"><!> <!></div>`, 1);
-	var root_5$3 = from_html(`<span class="tab-n"> </span>`);
-	var root_6$2 = from_html(`<div class="modal-tabs composer-tabs" role="tablist"><button role="tab">Mes cartes<!></button> <button role="tab"> <!></button></div>`);
-	var root_7$2 = from_html(`<span class="modal-msg"> </span>`);
-	var root_8$2 = from_html(`<span> </span>`);
-	var root_9$2 = from_html(`<p class="offer-sum-empty">L'équilibre de l'échange s'affiche ici dès que vous choisissez des cartes.</p>`);
-	var root_10$2 = from_html(`<div class="modal-msg"> </div>`);
-	var root_11$2 = from_html(`<div class="composer-pick"><div class="composer-tab" role="tabpanel"><!></div> <div class="composer-tab" role="tabpanel"><!></div></div> <aside aria-label="Votre offre"><div class="offer-bar"><button class="offer-peek"><span class="offer-peek-txt"><b> </b><!></span> <!></button> <button class="btn primary"> </button></div> <div class="offer-panel"><h3 class="offer-title">Votre offre</h3> <div class="offer-sides"><!> <!></div> <div class="offer-sum"><!> <!></div> <div class="offer-actions"><button class="btn">Annuler</button> <button class="btn primary"> </button></div></div></aside>`, 1);
-	var root_12$2 = from_html(`<div class="modal-backdrop" role="presentation"><div role="dialog" aria-modal="true" aria-labelledby="wm-compose-title" tabindex="-1"><button class="modal-close" aria-label="Fermer"><!></button> <header class="tm-head"><!> <h2 id="wm-compose-title"> </h2></header> <!></div></div>`);
+	var root_3$3 = from_html(`<div class="empty"><b>Aucun ami ne s'appelle ainsi.</b></div>`);
+	var root_4$3 = from_html(`<div class="loading-more"><span class="spin"></span></div>`);
+	var root_5$3 = from_html(`<p class="composer-sub">Avec qui voulez-vous échanger ?</p> <!> <div class="friend-list"><!> <!></div>`, 1);
+	var root_6$2 = from_html(`<span class="tab-n"> </span>`);
+	var root_7$2 = from_html(`<div class="modal-tabs composer-tabs" role="tablist"><button role="tab">Mes cartes<!></button> <button role="tab"> <!></button></div>`);
+	var root_8$2 = from_html(`<span class="modal-msg"> </span>`);
+	var root_9$2 = from_html(`<span> </span>`);
+	var root_10$2 = from_html(`<p class="offer-sum-empty">L'équilibre de l'échange s'affiche ici dès que vous choisissez des cartes.</p>`);
+	var root_11$2 = from_html(`<div class="modal-msg"> </div>`);
+	var root_12$2 = from_html(`<div class="composer-pick"><div class="composer-tab" role="tabpanel"><!></div> <div class="composer-tab" role="tabpanel"><!></div></div> <aside aria-label="Votre offre"><div class="offer-bar"><button class="offer-peek"><span class="offer-peek-txt"><b> </b><!></span> <!></button> <button class="btn primary"> </button></div> <div class="offer-panel"><h3 class="offer-title">Votre offre</h3> <div class="offer-sides"><!> <!></div> <div class="offer-sum"><!> <!></div> <div class="offer-actions"><button class="btn">Annuler</button> <button class="btn primary"> </button></div></div></aside>`, 1);
+	var root_13$2 = from_html(`<div class="modal-backdrop" role="presentation"><div role="dialog" aria-modal="true" aria-labelledby="wm-compose-title" tabindex="-1"><button class="modal-close" aria-label="Fermer"><!></button> <header class="tm-head"><!> <h2 id="wm-compose-title"> </h2></header> <!></div></div>`);
 	function TradeComposer($$anchor, $$props) {
 		push($$props, true);
 		let counter = prop($$props, "counter", 3, null), balance = prop($$props, "balance", 3, null);
@@ -11614,42 +12752,31 @@
 		user_effect(() => {
 			if (!get(friend)) untrack(loadFriends);
 		});
-		let mine = state(proxy([]));
-		let myPending = state(proxy([]));
-		let mineLoading = state(true);
-		let mineError = state(false);
-		const setMine = (d) => {
-			set(mine, d.items, true);
-			set(myPending, d.pending ?? [], true);
-			set(mineLoading, false);
-		};
-		function loadMine() {
-			set(mineLoading, true);
-			set(mineError, false);
-			loadCollection({ onCached: setMine }).then(setMine, () => {
-				set(mineLoading, false);
-				set(mineError, !get(mine).length);
-			});
+		const FRIEND_SEARCH_FROM = 8;
+		let who = state("");
+		const pickable = user_derived(() => (get(friends) ?? []).filter((f) => !get(who).trim() || normSearch(f.username).includes(normSearch(get(who)))).sort((a, b) => a.username.localeCompare(b.username, "fr", { sensitivity: "base" })));
+		function side(fetchPage) {
+			let query = {};
+			const stream = new PageStream((page) => page ? pageLane.run(() => fetchPage(page, query)) : fetchPage(page, query));
+			return {
+				stream,
+				ask: (q) => {
+					query = q;
+					stream.reset();
+				}
+			};
 		}
-		loadMine();
-		let theirQuery = {};
-		const theirPage = (page) => data.profileCollection(get(friend).username, {
+		const mine = side((page, q) => myCardsPage({
 			page,
-			...theirQuery
-		});
-		const theirs = new PagedList((page) => page ? pageLane.run(() => theirPage(page)) : theirPage(page));
-		const queryTheirs = (query) => {
-			theirQuery = query;
-			theirs.go(0);
-		};
-		const theirsFirst = user_derived(() => theirs.loading && theirs.page === 0);
-		let theirPages = state(proxy(NO_PAGES));
+			...q
+		}));
+		const theirs = side((page, q) => data.profileCollection(get(friend).username, {
+			page,
+			...q
+		}));
+		mine.stream.reset();
 		user_effect(() => {
-			if (get(friend)) untrack(() => theirs.go(0));
-		});
-		user_effect(() => {
-			const d = theirs.data;
-			if (d) untrack(() => set(theirPages, addPage(get(theirPages), theirs.loaded, d), true));
+			if (get(friend)) untrack(() => theirs.stream.reset());
 		});
 		const asItem = (row) => ({
 			userCardId: row.id,
@@ -11666,8 +12793,8 @@
 		let msg = state("");
 		const countered = user_derived(() => new Set([...counter()?.give ?? [], ...counter()?.get ?? []].map((it) => it.userCardId)));
 		const lockedBut = (ids) => new Set([...ids].filter((id) => !get(countered).has(id)));
-		const myLocked = user_derived(() => lockedBut(get(myPending)));
-		const theirLocked = user_derived(() => lockedBut(theirs.data?.pending ?? []));
+		const myLocked = user_derived(() => lockedBut(mine.stream.meta?.pending ?? []));
+		const theirLocked = user_derived(() => lockedBut(theirs.stream.meta?.pending ?? []));
 		const toggle = (map, row) => {
 			const m = new Map(map);
 			m.has(row.id) ? m.delete(row.id) : m.set(row.id, asItem(row));
@@ -11724,7 +12851,7 @@
 			if (get(sheet)) set(sheet, false);
 			else close();
 		};
-		var div = root_12$2();
+		var div = root_13$2();
 		event("keydown", $window, onKey);
 		var div_1 = child(div);
 		let classes;
@@ -11751,84 +12878,103 @@
 		var text = only_child(sibling(node_1, 2), true);
 		reset(header);
 		var node_2 = sibling(header, 2);
-		var consequent_4 = ($$anchor) => {
-			var fragment_1 = root_4$3();
-			var div_2 = sibling(first_child(fragment_1), 2);
-			var node_3 = child(div_2);
-			each(node_3, 17, () => get(friends) ?? [], (f) => f.id, ($$anchor, f) => {
+		var consequent_6 = ($$anchor) => {
+			var fragment_1 = root_5$3();
+			var node_3 = sibling(first_child(fragment_1), 2);
+			var consequent_1 = ($$anchor) => {
+				SearchBox($$anchor, {
+					placeholder: "Chercher un ami...",
+					get value() {
+						return get(who);
+					},
+					set value($$value) {
+						set(who, $$value, true);
+					}
+				});
+			};
+			if_block(node_3, ($$render) => {
+				if ((get(friends)?.length ?? 0) > FRIEND_SEARCH_FROM) $$render(consequent_1);
+			});
+			var div_2 = sibling(node_3, 2);
+			var node_4 = child(div_2);
+			each(node_4, 17, () => get(pickable), (f) => f.id, ($$anchor, f) => {
 				var button_1 = root$6();
-				var node_4 = child(button_1);
-				Avatar(node_4, {
+				var node_5 = child(button_1);
+				Avatar(node_5, {
 					get user() {
 						return get(f);
 					},
 					size: 52
 				});
-				var text_1 = only_child(sibling(node_4), true);
+				var text_1 = only_child(sibling(node_5), true);
 				reset(button_1);
 				template_effect(() => set_text(text_1, get(f).username));
 				delegated("click", button_1, () => set(friend, get(f)));
 				append($$anchor, button_1);
 			});
-			var node_5 = sibling(node_3, 2);
-			var consequent_1 = ($$anchor) => {
+			var node_6 = sibling(node_4, 2);
+			var consequent_2 = ($$anchor) => {
 				var div_3 = root_1$5();
-				var b_1 = child(div_3);
-				var text_2 = only_child(b_1, true);
-				var button_2 = sibling(b_1);
+				var b_2 = child(div_3);
+				var text_2 = only_child(b_2, true);
+				var button_2 = sibling(b_2);
 				reset(div_3);
 				template_effect(() => set_text(text_2, get(friendsError)));
 				delegated("click", button_2, loadFriends);
 				append($$anchor, div_3);
 			};
-			var consequent_2 = ($$anchor) => {
+			var consequent_3 = ($$anchor) => {
 				append($$anchor, root_2$3());
 			};
-			var consequent_3 = ($$anchor) => {
+			var consequent_4 = ($$anchor) => {
 				append($$anchor, root_3$3());
 			};
-			if_block(node_5, ($$render) => {
-				if (get(friendsError)) $$render(consequent_1);
-				else if (get(friends) && !get(friends).length) $$render(consequent_2, 1);
-				else if (!get(friends)) $$render(consequent_3, 2);
+			var consequent_5 = ($$anchor) => {
+				append($$anchor, root_4$3());
+			};
+			if_block(node_6, ($$render) => {
+				if (get(friendsError)) $$render(consequent_2);
+				else if (get(friends) && !get(friends).length) $$render(consequent_3, 1);
+				else if (get(friends) && !get(pickable).length) $$render(consequent_4, 2);
+				else if (!get(friends)) $$render(consequent_5, 3);
 			});
 			reset(div_2);
 			append($$anchor, fragment_1);
 		};
 		var alternate_2 = ($$anchor) => {
-			var fragment_2 = root_11$2();
-			var div_6 = first_child(fragment_2);
+			var fragment_3 = root_12$2();
+			var div_7 = first_child(fragment_3);
 			{
 				const tabs = ($$anchor) => {
-					var div_7 = root_6$2();
-					var button_3 = child(div_7);
+					var div_8 = root_7$2();
+					var button_3 = child(div_8);
 					let classes_1;
-					var node_6 = sibling(child(button_3));
-					var consequent_5 = ($$anchor) => {
-						var span = root_5$3();
+					var node_7 = sibling(child(button_3));
+					var consequent_7 = ($$anchor) => {
+						var span = root_6$2();
 						var text_3 = only_child(span, true);
 						template_effect(() => set_text(text_3, get(give).size));
 						append($$anchor, span);
 					};
-					if_block(node_6, ($$render) => {
-						if (get(give).size) $$render(consequent_5);
+					if_block(node_7, ($$render) => {
+						if (get(give).size) $$render(consequent_7);
 					});
 					reset(button_3);
 					var button_4 = sibling(button_3, 2);
 					let classes_2;
 					var text_4 = child(button_4);
-					var node_7 = sibling(text_4);
-					var consequent_6 = ($$anchor) => {
-						var span_1 = root_5$3();
+					var node_8 = sibling(text_4);
+					var consequent_8 = ($$anchor) => {
+						var span_1 = root_6$2();
 						var text_5 = only_child(span_1, true);
 						template_effect(() => set_text(text_5, get(get$1).size));
 						append($$anchor, span_1);
 					};
-					if_block(node_7, ($$render) => {
-						if (get(get$1).size) $$render(consequent_6);
+					if_block(node_8, ($$render) => {
+						if (get(get$1).size) $$render(consequent_8);
 					});
 					reset(button_4);
-					reset(div_7);
+					reset(div_8);
 					template_effect(() => {
 						set_attribute(button_3, "aria-selected", get(tab) === "mine");
 						classes_1 = set_class(button_3, 1, "", null, classes_1, { on: get(tab) === "mine" });
@@ -11838,113 +12984,92 @@
 					});
 					delegated("click", button_3, () => showTab("mine"));
 					delegated("click", button_4, () => showTab("theirs"));
-					append($$anchor, div_7);
+					append($$anchor, div_8);
 				};
-				var div_8 = child(div_6);
-				CardPicker(child(div_8), {
-					get lead() {
-						return tabs;
-					},
-					get items() {
-						return get(mine);
-					},
-					get picked() {
-						return get(give);
-					},
-					get locked() {
-						return get(myLocked);
-					},
-					get loading() {
-						return get(mineLoading);
-					},
-					get error() {
-						return get(mineError);
-					},
-					onretry: loadMine,
-					onpick: (row) => set(give, toggle(get(give), row)),
-					get values() {
-						return values;
-					},
-					get watch() {
-						return cardValues.watch;
-					},
-					get load() {
-						return cardValues.load;
+				const picker = ($$anchor, $$arg0, picked = noop, locked = noop, onpick = noop) => {
+					let stream = () => ($$arg0?.()).stream;
+					let ask = () => ($$arg0?.()).ask;
+					{
+						let $0 = user_derived(() => stream().loading && stream().first);
+						let $1 = user_derived(() => stream().error && !stream().started);
+						let $2 = user_derived(() => stream().hasMore ? () => stream().more() : null);
+						let $3 = user_derived(() => stream().loading && !stream().first);
+						let $4 = user_derived(() => stream().error && stream().started);
+						CardPicker($$anchor, {
+							get lead() {
+								return tabs;
+							},
+							get items() {
+								return stream().items;
+							},
+							get picked() {
+								return picked();
+							},
+							get locked() {
+								return locked();
+							},
+							get onpick() {
+								return onpick();
+							},
+							get loading() {
+								return get($0);
+							},
+							get error() {
+								return get($1);
+							},
+							onretry: () => stream().reset(),
+							get values() {
+								return values;
+							},
+							get watch() {
+								return cardValues.watch;
+							},
+							get load() {
+								return cardValues.load;
+							},
+							get onquery() {
+								return ask();
+							},
+							get more() {
+								return get($2);
+							},
+							get loadingMore() {
+								return get($3);
+							},
+							get moreError() {
+								return get($4);
+							}
+						});
 					}
-				});
-				reset(div_8);
-				var div_9 = sibling(div_8, 2);
-				var node_9 = child(div_9);
-				{
-					let $0 = user_derived(() => theirs.error && theirs.page === 0);
-					let $1 = user_derived(() => get(theirPages).hasMore ? () => theirs.go(nextPage(get(theirPages))) : null);
-					let $2 = user_derived(() => theirs.loading && theirs.page > 0);
-					let $3 = user_derived(() => theirs.error && theirs.page > 0);
-					CardPicker(node_9, {
-						get lead() {
-							return tabs;
-						},
-						get items() {
-							return get(theirPages).items;
-						},
-						get picked() {
-							return get(get$1);
-						},
-						get locked() {
-							return get(theirLocked);
-						},
-						get loading() {
-							return get(theirsFirst);
-						},
-						get error() {
-							return get($0);
-						},
-						onretry: () => theirs.go(0),
-						onpick: (row) => set(get$1, toggle(get(get$1), row)),
-						get values() {
-							return values;
-						},
-						get watch() {
-							return cardValues.watch;
-						},
-						get load() {
-							return cardValues.load;
-						},
-						get more() {
-							return get($1);
-						},
-						get loadingMore() {
-							return get($2);
-						},
-						get moreError() {
-							return get($3);
-						},
-						onquery: queryTheirs
-					});
-				}
+				};
+				var div_9 = child(div_7);
+				picker(child(div_9), () => mine, () => get(give), () => get(myLocked), () => (row) => set(give, toggle(get(give), row)));
 				reset(div_9);
-				reset(div_6);
+				var div_10 = sibling(div_9, 2);
+				picker(child(div_10), () => theirs, () => get(get$1), () => get(theirLocked), () => (row) => set(get$1, toggle(get(get$1), row)));
+				reset(div_10);
+				reset(div_7);
 				template_effect(() => {
-					set_attribute(div_8, "hidden", get(tab) !== "mine");
-					set_attribute(div_9, "hidden", get(tab) !== "theirs");
+					set_attribute(div_9, "hidden", get(tab) !== "mine");
+					set_attribute(div_10, "hidden", get(tab) !== "theirs");
 				});
 			}
-			var aside = sibling(div_6, 2);
+			var aside = sibling(div_7, 2);
 			let classes_3;
-			var div_10 = child(aside);
-			var button_5 = child(div_10);
+			var div_11 = child(aside);
+			var button_5 = child(div_11);
 			var span_2 = child(button_5);
-			var b_2 = child(span_2);
-			var text_6 = only_child(b_2, true);
-			var node_10 = sibling(b_2);
-			var consequent_7 = ($$anchor) => {
-				var span_3 = root_7$2();
+			var b_3 = child(span_2);
+			var text_6 = only_child(b_3, true);
+			var node_11 = sibling(b_3);
+			var consequent_9 = ($$anchor) => {
+				var span_3 = root_8$2();
 				var text_7 = only_child(span_3, true);
 				template_effect(() => set_text(text_7, get(alert)));
 				append($$anchor, span_3);
 			};
 			var alternate = ($$anchor) => {
-				var span_4 = root_8$2();
+				var span_4 = root_9$2();
 				var text_8 = only_child(span_4, true);
 				template_effect(($0) => {
 					set_attribute(span_4, "data-k", get(summary) ? get(v).kind : null);
@@ -11952,8 +13077,8 @@
 				}, [() => get(summary) ? balanceLabel(get(v)) : "Choisissez des cartes de chaque côté"]);
 				append($$anchor, span_4);
 			};
-			if_block(node_10, ($$render) => {
-				if (get(alert)) $$render(consequent_7);
+			if_block(node_11, ($$render) => {
+				if (get(alert)) $$render(consequent_9);
 				else $$render(alternate, -1);
 			});
 			reset(span_2);
@@ -11964,13 +13089,13 @@
 			reset(button_5);
 			var button_6 = sibling(button_5, 2);
 			var text_9 = only_child(button_6, true);
-			reset(div_10);
-			var div_11 = sibling(div_10, 2);
-			var div_12 = sibling(child(div_11), 2);
-			var node_12 = child(div_12);
+			reset(div_11);
+			var div_12 = sibling(div_11, 2);
+			var div_13 = sibling(child(div_12), 2);
+			var node_13 = child(div_13);
 			{
 				let $0 = user_derived(() => balance() ?? void 0);
-				OfferSide(node_12, {
+				OfferSide(node_13, {
 					get label() {
 						return SIDE.give;
 					},
@@ -11995,7 +13120,7 @@
 					}
 				});
 			}
-			OfferSide(sibling(node_12, 2), {
+			OfferSide(sibling(node_13, 2), {
 				get label() {
 					return SIDE.get;
 				},
@@ -12018,39 +13143,39 @@
 					set(getCoins, $$value);
 				}
 			});
-			reset(div_12);
-			action(div_12, ($$node, $$action_arg) => scrollFade?.($$node, $$action_arg), () => ({ axis: "y" }));
-			var div_13 = sibling(div_12, 2);
-			var node_14 = child(div_13);
-			var consequent_8 = ($$anchor) => {
+			reset(div_13);
+			action(div_13, ($$node, $$action_arg) => scrollFade?.($$node, $$action_arg), () => ({ axis: "y" }));
+			var div_14 = sibling(div_13, 2);
+			var node_15 = child(div_14);
+			var consequent_10 = ($$anchor) => {
 				TradeVerdict($$anchor, { get v() {
 					return get(v);
 				} });
 			};
 			var alternate_1 = ($$anchor) => {
-				append($$anchor, root_9$2());
-			};
-			if_block(node_14, ($$render) => {
-				if (get(summary)) $$render(consequent_8);
-				else $$render(alternate_1, -1);
-			});
-			var node_15 = sibling(node_14, 2);
-			var consequent_9 = ($$anchor) => {
-				var div_14 = root_10$2();
-				var text_10 = only_child(div_14, true);
-				template_effect(() => set_text(text_10, get(alert)));
-				append($$anchor, div_14);
+				append($$anchor, root_10$2());
 			};
 			if_block(node_15, ($$render) => {
-				if (get(alert)) $$render(consequent_9);
+				if (get(summary)) $$render(consequent_10);
+				else $$render(alternate_1, -1);
 			});
-			reset(div_13);
-			var div_15 = sibling(div_13, 2);
-			var button_7 = child(div_15);
+			var node_16 = sibling(node_15, 2);
+			var consequent_11 = ($$anchor) => {
+				var div_15 = root_11$2();
+				var text_10 = only_child(div_15, true);
+				template_effect(() => set_text(text_10, get(alert)));
+				append($$anchor, div_15);
+			};
+			if_block(node_16, ($$render) => {
+				if (get(alert)) $$render(consequent_11);
+			});
+			reset(div_14);
+			var div_16 = sibling(div_14, 2);
+			var button_7 = child(div_16);
 			var button_8 = sibling(button_7, 2);
 			var text_11 = only_child(button_8, true);
-			reset(div_15);
-			reset(div_11);
+			reset(div_16);
+			reset(div_12);
 			reset(aside);
 			template_effect(() => {
 				classes_3 = set_class(aside, 1, "offer", null, classes_3, { open: get(sheet) });
@@ -12068,10 +13193,10 @@
 			delegated("click", button_6, send);
 			delegated("click", button_7, close);
 			delegated("click", button_8, send);
-			append($$anchor, fragment_2);
+			append($$anchor, fragment_3);
 		};
 		if_block(node_2, ($$render) => {
-			if (!get(friend)) $$render(consequent_4);
+			if (!get(friend)) $$render(consequent_6);
 			else $$render(alternate_2, -1);
 		});
 		reset(div_1);
@@ -12092,16 +13217,21 @@
 	var root_1$4 = from_html(`<div class="empty"><b>Échanges indisponibles pour le moment.</b><button class="btn">Réessayer</button></div>`);
 	var root_2$2 = from_html(`<span class="tab-n"> </span>`);
 	var root_3$2 = from_html(`<button role="tab"> <!></button>`);
-	var root_4$2 = from_html(`<div class="tr-row sk"></div>`);
-	var root_5$2 = from_html(`<div class="tr-rows"></div>`);
-	var root_6$1 = from_html(`<div class="tr-col-empty"><p class="tr-col-none">Rien ici pour l'instant.</p><!></div>`);
-	var root_7$1 = from_html(`<span class="tr-row-rounds"> </span>`);
-	var root_8$1 = from_html(`<span class="trade-status"> </span>`);
-	var root_9$1 = from_html(`<span class="tr-badge"> </span>`);
-	var root_10$1 = from_html(`<button><!> <span class="tr-row-main"><span class="tr-row-top"><b> </b><span class="tr-row-when nowrap"> </span></span> <span class="tr-row-line"> <!></span></span> <!></button>`);
-	var root_11$1 = from_html(`<div class="tr-pane-sk"><div class="sk-line"></div><div class="sk-cards"><div class="wc skeleton"></div><div class="wc skeleton"></div></div></div>`);
-	var root_12$1 = from_html(`<div><aside class="tr-col" aria-label="Vos échanges"><div class="tabs tr-tabs" role="tablist"></div> <!></aside> <div class="tr-pane"><!></div></div>`);
-	var root_13$1 = from_html(`<div class="coll-head tr-head"><div><h1>Échanges</h1><div class="meta">Vos offres avec vos amis</div></div> <button class="btn primary"><!> Proposer un échange</button></div> <!> <!>`, 1);
+	var root_4$2 = from_html(`<option> </option>`);
+	var root_5$2 = from_html(`<div class="tr-find"><!> <div class="tr-find-row"><div class="isel tr-who" title="Ami"><!> <select aria-label="Ami"><option>Tous les amis</option><!></select></div> <div class="isel" title="Ordre"><!> <select aria-label="Ordre"><option>Récents</option><option>Anciens</option></select></div></div></div>`);
+	var root_6$1 = from_html(`<div class="tr-row sk"></div>`);
+	var root_7$1 = from_html(`<div class="tr-rows"></div>`);
+	var root_8$1 = from_html(`<div class="tr-col-empty"><p class="tr-col-none">Aucun échange ne correspond.</p><button class="btn">Tout afficher</button></div>`);
+	var root_9$1 = from_html(`<div class="tr-col-empty"><p class="tr-col-none">Rien ici pour l'instant.</p><!></div>`);
+	var root_10$1 = from_html(`<span class="tr-row-rounds"> </span>`);
+	var root_11$1 = from_html(`<span class="trade-status"> </span>`);
+	var root_12$1 = from_html(`<span class="tr-badge"> </span>`);
+	var root_13$1 = from_html(`<button><!> <span class="tr-row-main"><span class="tr-row-top"><b> </b><span class="tr-row-when nowrap"> </span></span> <span class="tr-row-line"> <!></span></span> <!></button>`);
+	var root_14$1 = from_html(`<div class="tr-more" aria-hidden="true"></div>`);
+	var root_15$1 = from_html(`<div class="tr-rows"><!> <!></div>`);
+	var root_16$1 = from_html(`<div class="tr-pane-sk"><div class="sk-line"></div><div class="sk-cards"><div class="wc skeleton"></div><div class="wc skeleton"></div></div></div>`);
+	var root_17$1 = from_html(`<div><aside class="tr-col" aria-label="Vos échanges"><div class="tabs tr-tabs" role="tablist"></div> <!> <!></aside> <div class="tr-pane"><!></div></div>`);
+	var root_18$1 = from_html(`<div class="coll-head tr-head"><div><h1>Échanges</h1><div class="meta">Vos offres avec vos amis</div></div> <button class="btn primary"><!> Proposer un échange</button></div> <!> <!>`, 1);
 	function Trades($$anchor, $$props) {
 		push($$props, true);
 		const emptyState = ($$anchor) => {
@@ -12149,7 +13279,7 @@
 		let rowsEl = state(null);
 		async function load(quiet = false) {
 			try {
-				set(trades, await data.trades({ quiet }), true);
+				set(trades, reuse(get(trades) ?? [], await data.trades({ quiet })), true);
 				set(error, false);
 			} catch {
 				if (!get(trades)) set(error, true);
@@ -12162,9 +13292,47 @@
 		});
 		user_effect(() => cardValues.load((get(trades) || []).flatMap((t) => [...t.give, ...t.get])));
 		const tabs = user_derived(() => get(trades) ? tradeTabs(get(trades)) : null);
-		const shown = user_derived(() => get(tabs)?.[get(tab)] ?? null);
+		const inTab = user_derived(() => get(tabs)?.[get(tab)] ?? null);
+		const roundCount = user_derived(() => get(trades) ? roundsOf(get(trades)) : new Map());
+		const FIND_FROM = 6;
+		let search = state("");
+		let friend = state("");
+		let order = state("new");
+		const finding = user_derived(() => (get(inTab)?.length ?? 0) > FIND_FROM);
+		const friendsHere = user_derived(() => {
+			const n = new Map();
+			for (const t of get(inTab) ?? []) n.set(t.other.id, {
+				f: t.other,
+				n: (n.get(t.other.id)?.n ?? 0) + 1
+			});
+			return [...n.values()].sort((a, b) => b.n - a.n || a.f.username.localeCompare(b.f.username, "fr", { sensitivity: "base" }));
+		});
+		const searchKey = (t) => normSearch([t.other.username, ...[...t.give, ...t.get].map((it) => `${it.card.title} ${it.card.category}`)].join(" "));
+		const shown = user_derived(() => {
+			if (!get(inTab)) return null;
+			const q = normSearch(get(search));
+			const hits = get(inTab).filter((t) => (!get(friend) || t.other.id === get(friend)) && (!q || searchKey(t).includes(q)));
+			return get(order) === "old" ? hits.reverse() : hits;
+		});
+		user_effect(() => {
+			get(tab);
+			set(search, "");
+			set(friend, "");
+		});
+		const STEP = 60;
+		let more = state(STEP);
+		user_effect(() => {
+			get(tab), get(search), get(friend), get(order);
+			set(more, STEP);
+		});
+		const drawn = user_derived(() => Math.max(get(more), (get(shown)?.findIndex((t) => t.id === get(selected)?.id) ?? -1) + 1));
 		const selected = user_derived(() => get(shown) && (get(trades).find((t) => t.id === picks[get(tab)]) ?? get(shown)[0] ?? null));
 		const balance = (t) => verdict(sideValue(t.give, t.giveCoins, values), sideValue(t.get, t.getCoins, values));
+		const rows = user_derived(() => (get(shown) ?? []).slice(0, get(drawn)).map((t) => ({
+			t,
+			b: balance(t),
+			rounds: get(roundCount).get(t.id) ?? 1
+		})));
 		const tabOf = (t) => t.status !== "pending" ? "history" : t.incoming ? "incoming" : "outgoing";
 		function select(t, open = true) {
 			if (!t) return;
@@ -12197,7 +13365,7 @@
 			await tick();
 			get(rowsEl)?.querySelector(`[data-id="${CSS.escape(t.id)}"]`)?.focus();
 		}
-		var fragment = root_13$1();
+		var fragment = root_18$1();
 		var div_1 = first_child(fragment);
 		var button_1 = sibling(child(div_1), 2);
 		Icon(child(button_1), { name: "trades" });
@@ -12213,7 +13381,7 @@
 			append($$anchor, div_2);
 		};
 		var alternate_2 = ($$anchor) => {
-			var div_3 = root_12$1();
+			var div_3 = root_17$1();
 			let classes;
 			var aside = child(div_3);
 			var div_4 = child(aside);
@@ -12250,112 +13418,192 @@
 			var node_4 = sibling(div_4, 2);
 			var consequent_2 = ($$anchor) => {
 				var div_5 = root_5$2();
-				each(div_5, 20, () => Array(4), index, ($$anchor, _) => {
-					append($$anchor, root_4$2());
+				var node_5 = child(div_5);
+				SearchBox(node_5, {
+					placeholder: "Ami ou carte...",
+					get value() {
+						return get(search);
+					},
+					set value($$value) {
+						set(search, $$value, true);
+					}
 				});
+				var div_6 = sibling(node_5, 2);
+				var div_7 = child(div_6);
+				var node_6 = child(div_7);
+				Icon(node_6, { name: "friends" });
+				var select_1 = sibling(node_6, 2);
+				var option = child(select_1);
+				option.value = option.__value = "";
+				each(sibling(option), 17, () => get(friendsHere), ({ f, n }) => f.id, ($$anchor, $$item) => {
+					let f = () => get($$item).f;
+					let n = () => get($$item).n;
+					var option_1 = root_4$2();
+					var text_4 = only_child(option_1);
+					var option_1_value = {};
+					template_effect(() => {
+						set_text(text_4, `${f().username ?? ""} (${n() ?? ""})`);
+						if (option_1_value !== (option_1_value = f().id)) option_1.value = (option_1.__value = option_1_value) ?? "";
+					});
+					append($$anchor, option_1);
+				});
+				reset(select_1);
+				init_select(select_1);
+				reset(div_7);
+				var div_8 = sibling(div_7, 2);
+				var node_8 = child(div_8);
+				Icon(node_8, { name: "sort" });
+				var select_2 = sibling(node_8, 2);
+				var option_2 = child(select_2);
+				option_2.value = option_2.__value = "new";
+				var option_3 = sibling(option_2);
+				option_3.value = option_3.__value = "old";
+				reset(select_2);
+				init_select(select_2);
+				reset(div_8);
+				reset(div_6);
 				reset(div_5);
+				bind_select_value(select_1, () => get(friend), ($$value) => set(friend, $$value));
+				bind_select_value(select_2, () => get(order), ($$value) => set(order, $$value));
 				append($$anchor, div_5);
 			};
+			if_block(node_4, ($$render) => {
+				if (get(finding)) $$render(consequent_2);
+			});
+			var node_9 = sibling(node_4, 2);
 			var consequent_3 = ($$anchor) => {
-				var div_7 = root_6$1();
-				var node_5 = sibling(child(div_7));
-				emptyState(node_5);
-				reset(div_7);
-				append($$anchor, div_7);
+				var div_9 = root_7$1();
+				each(div_9, 20, () => Array(4), index, ($$anchor, _) => {
+					append($$anchor, root_6$1());
+				});
+				reset(div_9);
+				append($$anchor, div_9);
+			};
+			var consequent_4 = ($$anchor) => {
+				var div_11 = root_8$1();
+				var button_4 = sibling(child(div_11));
+				reset(div_11);
+				delegated("click", button_4, () => {
+					set(search, "");
+					set(friend, "");
+				});
+				append($$anchor, div_11);
+			};
+			var consequent_5 = ($$anchor) => {
+				var div_12 = root_9$1();
+				var node_10 = sibling(child(div_12));
+				emptyState(node_10);
+				reset(div_12);
+				append($$anchor, div_12);
 			};
 			var alternate = ($$anchor) => {
-				var div_8 = root_5$2();
-				each(div_8, 21, () => get(shown), (t) => t.id, ($$anchor, t) => {
-					const b = user_derived(() => balance(get(t)));
-					const rounds = user_derived(() => chainOf(get(t), get(trades)).length);
-					var button_4 = root_10$1();
+				var div_13 = root_15$1();
+				var node_11 = child(div_13);
+				each(node_11, 17, () => get(rows), ({ t, b, rounds }) => t.id, ($$anchor, $$item) => {
+					let t = () => get($$item).t;
+					let b = () => get($$item).b;
+					let rounds = () => get($$item).rounds;
+					var button_5 = root_13$1();
 					let classes_2;
-					var node_6 = child(button_4);
-					Avatar(node_6, {
+					var node_12 = child(button_5);
+					Avatar(node_12, {
 						get user() {
-							return get(t).other;
+							return t().other;
 						},
 						size: 40
 					});
-					var span_3 = sibling(node_6, 2);
+					var span_3 = sibling(node_12, 2);
 					var span_4 = child(span_3);
 					var b_2 = child(span_4);
-					var text_4 = only_child(b_2, true);
-					var text_5 = only_child(sibling(b_2), true);
+					var text_5 = only_child(b_2, true);
+					var text_6 = only_child(sibling(b_2), true);
 					reset(span_4);
 					var span_6 = sibling(span_4, 2);
-					var text_6 = child(span_6, true);
-					var node_7 = sibling(text_6);
-					var consequent_4 = ($$anchor) => {
-						var span_7 = root_7$1();
-						var text_7 = only_child(span_7);
-						template_effect(() => set_text(text_7, `· ${get(rounds) ?? ""} offres`));
+					var text_7 = child(span_6, true);
+					var node_13 = sibling(text_7);
+					var consequent_6 = ($$anchor) => {
+						var span_7 = root_10$1();
+						var text_8 = only_child(span_7);
+						template_effect(() => set_text(text_8, `· ${rounds() ?? ""} offres`));
 						append($$anchor, span_7);
 					};
-					if_block(node_7, ($$render) => {
-						if (get(rounds) > 1) $$render(consequent_4);
+					if_block(node_13, ($$render) => {
+						if (rounds() > 1) $$render(consequent_6);
 					});
 					reset(span_6);
 					reset(span_3);
-					var node_8 = sibling(span_3, 2);
-					var consequent_5 = ($$anchor) => {
-						var span_8 = root_8$1();
-						var text_8 = only_child(span_8, true);
+					var node_14 = sibling(span_3, 2);
+					var consequent_7 = ($$anchor) => {
+						var span_8 = root_11$1();
+						var text_9 = only_child(span_8, true);
 						template_effect(($0) => {
-							set_attribute(span_8, "data-s", get(t).status);
-							set_text(text_8, $0);
-						}, [() => statusLabel(get(t).status)]);
+							set_attribute(span_8, "data-s", t().status);
+							set_text(text_9, $0);
+						}, [() => statusLabel(t().status)]);
 						append($$anchor, span_8);
 					};
-					var consequent_6 = ($$anchor) => {
-						var span_9 = root_9$1();
-						var text_9 = only_child(span_9, true);
+					var consequent_8 = ($$anchor) => {
+						var span_9 = root_12$1();
+						var text_10 = only_child(span_9, true);
 						template_effect(($0, $1) => {
-							set_attribute(span_9, "data-k", get(b).kind);
+							set_attribute(span_9, "data-k", b().kind);
 							set_attribute(span_9, "title", $0);
-							set_text(text_9, $1);
-						}, [() => balanceLabel(get(b)), () => balanceBadge(get(b))]);
+							set_text(text_10, $1);
+						}, [() => balanceLabel(b()), () => balanceBadge(b())]);
 						append($$anchor, span_9);
 					};
-					if_block(node_8, ($$render) => {
-						if (get(tab) === "history") $$render(consequent_5);
-						else if (get(b).kind !== "unknown") $$render(consequent_6, 1);
+					if_block(node_14, ($$render) => {
+						if (get(tab) === "history") $$render(consequent_7);
+						else if (b().kind !== "unknown") $$render(consequent_8, 1);
 					});
-					reset(button_4);
+					reset(button_5);
 					template_effect(($0, $1, $2, $3) => {
-						classes_2 = set_class(button_4, 1, "tr-row", null, classes_2, { on: get(selected)?.id === get(t).id });
-						set_attribute(button_4, "data-id", get(t).id);
-						set_attribute(button_4, "aria-current", get(selected)?.id === get(t).id ? "true" : void 0);
-						set_attribute(button_4, "aria-label", `Échange avec ${get(t).other.username ?? ""}, ${$0 ?? ""}, ${$1 ?? ""}`);
-						set_text(text_4, get(t).other.username);
-						set_text(text_5, $2);
-						set_text(text_6, $3);
+						classes_2 = set_class(button_5, 1, "tr-row", null, classes_2, { on: get(selected)?.id === t().id });
+						set_attribute(button_5, "data-id", t().id);
+						set_attribute(button_5, "aria-current", get(selected)?.id === t().id ? "true" : void 0);
+						set_attribute(button_5, "aria-label", `Échange avec ${t().other.username ?? ""}, ${$0 ?? ""}, ${$1 ?? ""}`);
+						set_text(text_5, t().other.username);
+						set_text(text_6, $2);
+						set_text(text_7, $3);
 					}, [
-						() => dealLine(get(t).give.length, get(t).giveCoins, get(t).get.length, get(t).getCoins),
-						() => balanceLabel(get(b)),
-						() => ago(get(t).updatedAt),
-						() => dealLine(get(t).give.length, get(t).giveCoins, get(t).get.length, get(t).getCoins)
+						() => dealLine(t().give.length, t().giveCoins, t().get.length, t().getCoins),
+						() => balanceLabel(b()),
+						() => ago(t().updatedAt),
+						() => dealLine(t().give.length, t().giveCoins, t().get.length, t().getCoins)
 					]);
-					delegated("click", button_4, () => select(get(t)));
-					delegated("keydown", button_4, onRowsKey);
-					append($$anchor, button_4);
+					delegated("click", button_5, () => select(t()));
+					delegated("keydown", button_5, onRowsKey);
+					append($$anchor, button_5);
 				});
-				reset(div_8);
-				bind_this(div_8, ($$value) => set(rowsEl, $$value), () => get(rowsEl));
-				append($$anchor, div_8);
+				var node_15 = sibling(node_11, 2);
+				var consequent_9 = ($$anchor) => {
+					var div_14 = root_14$1();
+					action(div_14, ($$node, $$action_arg) => inView?.($$node, $$action_arg), () => ({
+						onEnter: () => set(more, get(more) + STEP),
+						key: get(drawn)
+					}));
+					append($$anchor, div_14);
+				};
+				if_block(node_15, ($$render) => {
+					if (get(shown).length > get(drawn)) $$render(consequent_9);
+				});
+				reset(div_13);
+				bind_this(div_13, ($$value) => set(rowsEl, $$value), () => get(rowsEl));
+				append($$anchor, div_13);
 			};
-			if_block(node_4, ($$render) => {
-				if (!get(shown)) $$render(consequent_2);
-				else if (!get(shown).length) $$render(consequent_3, 1);
+			if_block(node_9, ($$render) => {
+				if (!get(shown)) $$render(consequent_3);
+				else if (!get(shown).length && get(inTab).length) $$render(consequent_4, 1);
+				else if (!get(shown).length) $$render(consequent_5, 2);
 				else $$render(alternate, -1);
 			});
 			reset(aside);
-			var div_9 = sibling(aside, 2);
-			var node_9 = child(div_9);
-			var consequent_7 = ($$anchor) => {
-				append($$anchor, root_11$1());
+			var div_15 = sibling(aside, 2);
+			var node_16 = child(div_15);
+			var consequent_10 = ($$anchor) => {
+				append($$anchor, root_16$1());
 			};
-			var consequent_8 = ($$anchor) => {
+			var consequent_11 = ($$anchor) => {
 				var fragment_1 = comment();
 				key(first_child(fragment_1), () => get(selected).id, ($$anchor) => {
 					TradePane($$anchor, {
@@ -12386,12 +13634,12 @@
 			var alternate_1 = ($$anchor) => {
 				emptyState($$anchor);
 			};
-			if_block(node_9, ($$render) => {
-				if (!get(shown)) $$render(consequent_7);
-				else if (get(selected)) $$render(consequent_8, 1);
+			if_block(node_16, ($$render) => {
+				if (!get(shown)) $$render(consequent_10);
+				else if (get(selected)) $$render(consequent_11, 1);
 				else $$render(alternate_1, -1);
 			});
-			reset(div_9);
+			reset(div_15);
 			reset(div_3);
 			template_effect(() => classes = set_class(div_3, 1, "tr-split", null, classes, { reading: get(reading) && get(selected) }));
 			append($$anchor, div_3);
@@ -12400,8 +13648,8 @@
 			if (get(error)) $$render(consequent);
 			else $$render(alternate_2, -1);
 		});
-		var node_11 = sibling(node_2, 2);
-		var consequent_9 = ($$anchor) => {
+		var node_18 = sibling(node_2, 2);
+		var consequent_12 = ($$anchor) => {
 			{
 				let $0 = user_derived(() => $$props.profile?.currency ?? null);
 				TradeComposer($$anchor, {
@@ -12416,8 +13664,8 @@
 				});
 			}
 		};
-		if_block(node_11, ($$render) => {
-			if (get(compose)) $$render(consequent_9);
+		if_block(node_18, ($$render) => {
+			if (get(compose)) $$render(consequent_12);
 		});
 		delegated("click", button_1, () => set(compose, { counter: null }));
 		append($$anchor, fragment);
@@ -12706,33 +13954,62 @@
 		pop();
 	}
 	delegate(["click"]);
+	var CHECK_EVERY = 216e5;
+	function isNewer(a, b) {
+		const pa = String(a).split(".").map(Number), pb = String(b).split(".").map(Number);
+		for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+			const d = (pa[i] || 0) - (pb[i] || 0);
+			if (d) return d > 0;
+		}
+		return false;
+	}
+	var headerVersion = (text) => /^\/\/\s*@version\s+(\S+)/m.exec(text)?.[1] ?? null;
+	var isUserscript = () => typeof GM_info !== "undefined" && !!GM_info?.script;
+	async function availableUpdate(current, { metaUrl, fetch: get = fetch } = {}) {
+		if (!metaUrl) return null;
+		let latest = load$1("update.latest", CHECK_EVERY);
+		if (!latest) {
+			try {
+				const r = await get(metaUrl, { cache: "no-store" });
+				latest = r.ok ? headerVersion(await r.text()) : null;
+			} catch {}
+			if (latest) save("update.latest", latest);
+		}
+		return latest && isNewer(latest, current) ? latest : null;
+	}
 	var root = from_html(`<button type="button"><!><span class="nav-long"> </span><span class="nav-short"> </span></button>`);
 	var root_1 = from_html(`<a><!><span class="nav-lbl"> </span></a>`);
 	var root_2 = from_html(`<button class="ghost">Réinitialiser</button>`);
-	var root_3 = from_html(`<span class="health" role="status" title="Le serveur du jeu répond mal : nouvelle tentative automatique, vos données restent affichées."><span class="health-dot"></span><span class="health-txt">Serveur du jeu instable</span></span>`);
-	var root_4 = from_html(`<span class="bell-badge"> </span>`);
-	var root_5 = from_html(`<span class="notif-count"> </span> <button class="link-btn">Tout marquer comme lu</button>`, 1);
-	var root_6 = from_html(`<span class="notif-dot"></span>`);
-	var root_7 = from_html(`<div class="notif-msg"> </div>`);
-	var root_8 = from_html(`<!> <div class="notif-body"><div class="notif-title"> </div> <!> <div class="notif-time"> </div></div>`, 1);
-	var root_9 = from_html(`<div class="notif-empty">Aucune notification</div>`);
-	var root_10 = from_html(`<div class="notif-scrim" role="presentation"></div> <div class="notif-panel" role="dialog" aria-label="Notifications"><div class="notif-head">Notifications<!></div> <!></div>`, 1);
-	var root_11 = from_html(`<span class="badge pro">Pro</span>`);
-	var root_12 = from_html(`<span> </span>`);
-	var root_13 = from_html(`<span class="pk-pro">+1 PRO</span>`);
-	var root_14 = from_html(`<a><!><span> </span></a>`);
-	var root_15 = from_html(`<button class="btn sheet-reset">Réinitialiser (test)</button>`);
-	var root_16 = from_html(`<div class="sheet-scrim" role="presentation"></div> <div class="sheet" role="dialog" aria-modal="true" aria-label="Menu"><div class="sheet-grab"></div> <section class="sheet-sec"><!></section> <section class="sheet-sec sheet-row"><div><b>ATK et DEF</b><span>Sur toutes les cartes</span></div> <button class="snd-switch" role="switch" aria-label="Afficher l'ATK et la DEF"><span></span></button></section> <section class="sheet-sec"><b class="sheet-title">Le reste du site</b> <div class="sheet-grid"></div></section> <button class="btn sheet-reset">Revenir au site original</button> <!> <a class="app-version sheet-version" target="_blank" rel="noopener noreferrer"> </a></div>`, 1);
-	var root_17 = from_html(`<!> <div><b> </b><!></div>`, 1);
-	var root_18 = from_html(`<div class="toast-wrap" role="presentation"><!> <button class="toast-x" aria-label="Fermer la notification" title="Fermer"><!></button></div>`);
-	var root_19 = from_html(`<div class="toasts" role="status" aria-live="polite"></div>`);
-	var root_20 = from_html(`<div class="kbd-row"><span class="kbd"> </span> </div>`);
-	var root_21 = from_html(`<div class="kbd-help-scrim" role="presentation"><div class="kbd-help" role="dialog" aria-label="Raccourcis clavier"><h3>Raccourcis clavier</h3> <!></div></div>`);
-	var root_22 = from_html(`<div><!> <aside class="side"><div class="brand"><span class="mk"></span><b>Wiki Remaster</b> <button type="button" class="side-toggle"><!></button></div> <nav class="nav"><!> <div class="nav-sep">Le reste du site</div> <div class="nav-grid"></div></nav> <div class="side-foot"><!> <button class="foot-link" title="Raccourcis clavier"><span class="kbd">?</span><span class="foot-txt">Raccourcis clavier</span></button> <div class="hintline"> <a class="app-version" target="_blank" rel="noopener noreferrer"> </a></div></div></aside> <main class="main"><header class="topbar"><div class="crumb"><span class="nav-long"> </span><span class="nav-short"> </span></div> <div class="wallet"><!> <button><span>ATK</span></button> <!> <button class="bell menu-btn" aria-label="Menu"><!></button> <div class="notif"><button aria-label="Notifications"><!> <!></button> <!></div> <!> <button type="button"><span class="pk-ring"><!></span> <b> </b><span class="chip-cap"> </span> <!> <!></button> <span class="chip" title="WikiBidous"><!><b> </b></span></div></header> <section class="view"><!></section></main> <!> <!> <!> <!></div>`);
+	var root_3 = from_html(`<a class="app-update" target="_blank" rel="noopener noreferrer"><span class="upd-dot"></span>Mise à jour</a>`);
+	var root_4 = from_html(`<a class="app-version" target="_blank" rel="noopener noreferrer"> </a>`);
+	var root_5 = from_html(`<span class="health" role="status" title="Le serveur du jeu répond mal : nouvelle tentative automatique, vos données restent affichées."><span class="health-dot"></span><span class="health-txt">Serveur du jeu instable</span></span>`);
+	var root_6 = from_html(`<span class="upd-dot on-icon"></span>`);
+	var root_7 = from_html(`<span class="bell-badge"> </span>`);
+	var root_8 = from_html(`<span class="notif-count"> </span> <button class="link-btn">Tout marquer comme lu</button>`, 1);
+	var root_9 = from_html(`<span class="notif-dot"></span>`);
+	var root_10 = from_html(`<div class="notif-msg"> </div>`);
+	var root_11 = from_html(`<!> <div class="notif-body"><div class="notif-title"> </div> <!> <div class="notif-time"> </div></div>`, 1);
+	var root_12 = from_html(`<div class="notif-empty">Aucune notification</div>`);
+	var root_13 = from_html(`<div class="notif-scrim" role="presentation"></div> <div class="notif-panel" role="dialog" aria-label="Notifications"><div class="notif-head">Notifications<!></div> <!></div>`, 1);
+	var root_14 = from_html(`<span class="badge pro">Pro</span>`);
+	var root_15 = from_html(`<span> </span>`);
+	var root_16 = from_html(`<span class="pk-pro">+1 PRO</span>`);
+	var root_17 = from_html(`<a><!><span> </span></a>`);
+	var root_18 = from_html(`<a class="btn primary sheet-update" target="_blank" rel="noopener noreferrer"><span class="upd-dot"></span> </a>`);
+	var root_19 = from_html(`<button class="btn sheet-reset">Réinitialiser (test)</button>`);
+	var root_20 = from_html(`<div class="sheet-scrim" role="presentation"></div> <div class="sheet" role="dialog" aria-modal="true" aria-label="Menu"><div class="sheet-grab"></div> <section class="sheet-sec"><!></section> <section class="sheet-sec sheet-row"><div><b>ATK et DEF</b><span>Sur toutes les cartes</span></div> <button class="snd-switch" role="switch" aria-label="Afficher l'ATK et la DEF"><span></span></button></section> <section class="sheet-sec"><b class="sheet-title">Le reste du site</b> <div class="sheet-grid"></div></section> <!> <button class="btn sheet-reset">Revenir au site original</button> <!> <a class="app-version sheet-version" target="_blank" rel="noopener noreferrer"> </a></div>`, 1);
+	var root_21 = from_html(`<!> <div><b> </b><!></div>`, 1);
+	var root_22 = from_html(`<div class="toast-wrap" role="presentation"><!> <button class="toast-x" aria-label="Fermer la notification" title="Fermer"><!></button></div>`);
+	var root_23 = from_html(`<div class="toasts" role="status" aria-live="polite"></div>`);
+	var root_24 = from_html(`<div class="kbd-row"><span class="kbd"> </span> </div>`);
+	var root_25 = from_html(`<div class="kbd-help-scrim" role="presentation"><div class="kbd-help" role="dialog" aria-label="Raccourcis clavier"><h3>Raccourcis clavier</h3> <!></div></div>`);
+	var root_26 = from_html(`<div><!> <aside class="side"><div class="brand"><span class="mk"></span><b>Wiki Remaster</b> <button type="button" class="side-toggle"><!></button></div> <nav class="nav"><!> <div class="nav-sep">Le reste du site</div> <div class="nav-grid"></div></nav> <div class="side-foot"><!> <button class="foot-link" title="Raccourcis clavier"><span class="kbd">?</span><span class="foot-txt">Raccourcis clavier</span></button> <div class="hintline"> <!></div></div></aside> <main class="main"><header class="topbar"><div class="crumb"><span class="nav-long"> </span><span class="nav-short"> </span></div> <div class="wallet"><!> <button><span>ATK</span></button> <!> <button class="bell menu-btn"><!><!></button> <div class="notif"><button aria-label="Notifications"><!> <!></button> <!></div> <!> <button type="button"><span class="pk-ring"><!></span> <b> </b><span class="chip-cap"> </span> <!> <!></button> <span class="chip" title="WikiBidous"><!><b> </b></span></div></header> <section class="view"><!></section></main> <!> <!> <!> <!></div>`);
 	function App($$anchor, $$props) {
 		push($$props, true);
-		const VERSION = "0.12.7";
+		const VERSION = "0.12.8";
 		const REPO = "https://github.com/KazeTachinuu/wiki-remaster";
+		let update$1 = state(null);
+		if (isUserscript()) availableUpdate(VERSION, { metaUrl: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.meta.js" }).then((v) => set(update$1, v, true));
 		const VIEWS = [
 			{
 				id: "pulls",
@@ -12982,7 +14259,7 @@
 				appEl?.querySelector("input.search")?.focus();
 			} else if (/^[1-5]$/.test(e.key)) go(VIEWS[e.key - 1]);
 		}
-		var div = root_22();
+		var div = root_26();
 		event("keydown", $window, onKey);
 		let classes;
 		var node = child(div);
@@ -13063,9 +14340,27 @@
 		var button_3 = sibling(node_5, 2);
 		var div_4 = sibling(button_3, 2);
 		var text_3 = child(div_4);
-		var a_1 = sibling(text_3);
-		set_attribute(a_1, "href", REPO);
-		var text_4 = only_child(a_1);
+		var node_6 = sibling(text_3);
+		var consequent_1 = ($$anchor) => {
+			var a_1 = root_3();
+			set_attribute(a_1, "href", "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js");
+			template_effect(() => set_attribute(a_1, "title", `Wiki Remaster ${get(update$1) ?? ""} est disponible (vous avez la ${VERSION}) : Tampermonkey propose la mise à jour`));
+			append($$anchor, a_1);
+		};
+		var alternate = ($$anchor) => {
+			var a_2 = root_4();
+			set_attribute(a_2, "href", REPO);
+			var text_4 = only_child(a_2);
+			template_effect(() => {
+				set_attribute(a_2, "title", `Wiki Remaster ${VERSION}, le code source`);
+				set_text(text_4, `v${VERSION}`);
+			});
+			append($$anchor, a_2);
+		};
+		if_block(node_6, ($$render) => {
+			if (get(update$1)) $$render(consequent_1);
+			else $$render(alternate, -1);
+		});
 		reset(div_4);
 		reset(div_3);
 		reset(aside);
@@ -13077,60 +14372,68 @@
 		var text_6 = only_child(sibling(span_3), true);
 		reset(div_5);
 		var div_6 = sibling(div_5, 2);
-		var node_6 = child(div_6);
-		var consequent_1 = ($$anchor) => {
-			append($$anchor, root_3());
+		var node_7 = child(div_6);
+		var consequent_2 = ($$anchor) => {
+			append($$anchor, root_5());
 		};
-		if_block(node_6, ($$render) => {
-			if (get(unstable)) $$render(consequent_1);
+		if_block(node_7, ($$render) => {
+			if (get(unstable)) $$render(consequent_2);
 		});
-		var button_4 = sibling(node_6, 2);
+		var button_4 = sibling(node_7, 2);
 		let classes_2;
-		var node_7 = sibling(button_4, 2);
-		SoundControl(node_7, {});
-		var button_5 = sibling(node_7, 2);
-		Icon(child(button_5), {
+		var node_8 = sibling(button_4, 2);
+		SoundControl(node_8, {});
+		var button_5 = sibling(node_8, 2);
+		var node_9 = child(button_5);
+		Icon(node_9, {
 			name: "menu",
 			width: 1.8
+		});
+		var node_10 = sibling(node_9);
+		var consequent_3 = ($$anchor) => {
+			append($$anchor, root_6());
+		};
+		if_block(node_10, ($$render) => {
+			if (get(update$1)) $$render(consequent_3);
 		});
 		reset(button_5);
 		var div_7 = sibling(button_5, 2);
 		var button_6 = child(div_7);
 		let classes_3;
-		var node_9 = child(button_6);
-		Icon(node_9, {
+		var node_11 = child(button_6);
+		Icon(node_11, {
 			name: "bell",
 			width: 1.7
 		});
-		var node_10 = sibling(node_9, 2);
-		var consequent_2 = ($$anchor) => {
-			var span_6 = root_4();
-			var text_7 = only_child(span_6, true);
+		var node_12 = sibling(node_11, 2);
+		var consequent_4 = ($$anchor) => {
+			var span_7 = root_7();
+			var text_7 = only_child(span_7, true);
 			template_effect(() => set_text(text_7, get(unread).length));
-			append($$anchor, span_6);
+			append($$anchor, span_7);
 		};
-		if_block(node_10, ($$render) => {
-			if (get(unread).length) $$render(consequent_2);
+		if_block(node_12, ($$render) => {
+			if (get(unread).length) $$render(consequent_4);
 		});
 		reset(button_6);
-		var node_11 = sibling(button_6, 2);
-		var consequent_6 = ($$anchor) => {
-			var fragment = root_10();
+		var node_13 = sibling(button_6, 2);
+		var consequent_8 = ($$anchor) => {
+			var fragment = root_13();
 			var div_8 = first_child(fragment);
 			var div_9 = sibling(div_8, 2);
 			var div_10 = child(div_9);
-			var node_12 = sibling(child(div_10));
-			var consequent_3 = ($$anchor) => {
-				var fragment_1 = root_5();
-				var span_7 = first_child(fragment_1);
-				var text_8 = only_child(span_7, true);
-				var button_7 = sibling(span_7, 2);
+			var node_14 = sibling(child(div_10));
+			var consequent_5 = ($$anchor) => {
+				var fragment_1 = root_8();
+				var span_8 = first_child(fragment_1);
+				var text_8 = only_child(span_8, true);
+				var button_7 = sibling(span_8, 2);
 				template_effect(() => set_text(text_8, get(unread).length));
 				delegated("click", button_7, () => markRead());
 				append($$anchor, fragment_1);
 			};
-			if_block(node_12, ($$render) => {
-				if (get(unread).length) $$render(consequent_3);
+			if_block(node_14, ($$render) => {
+				if (get(unread).length) $$render(consequent_5);
 			});
 			reset(div_10);
 			each(sibling(div_10, 2), 17, () => get(notifs), (n) => n.id, ($$anchor, n) => {
@@ -13144,28 +14447,28 @@
 						onclick: event_handler,
 						[CLASS]: { unread: !get(n).read }
 					}), [() => asButton(get(n))]);
-					var fragment_3 = root_8();
-					var node_15 = first_child(fragment_3);
-					var consequent_4 = ($$anchor) => {
-						append($$anchor, root_6());
+					var fragment_3 = root_11();
+					var node_17 = first_child(fragment_3);
+					var consequent_6 = ($$anchor) => {
+						append($$anchor, root_9());
 					};
-					if_block(node_15, ($$render) => {
-						if (!get(n).read) $$render(consequent_4);
+					if_block(node_17, ($$render) => {
+						if (!get(n).read) $$render(consequent_6);
 					});
-					var div_11 = sibling(node_15, 2);
+					var div_11 = sibling(node_17, 2);
 					var div_12 = child(div_11);
 					var text_9 = only_child(div_12, true);
-					var node_16 = sibling(div_12, 2);
-					var consequent_5 = ($$anchor) => {
-						var div_13 = root_7();
+					var node_18 = sibling(div_12, 2);
+					var consequent_7 = ($$anchor) => {
+						var div_13 = root_10();
 						var text_10 = only_child(div_13, true);
 						template_effect(() => set_text(text_10, get(n).message));
 						append($$anchor, div_13);
 					};
-					if_block(node_16, ($$render) => {
-						if (get(n).message) $$render(consequent_5);
+					if_block(node_18, ($$render) => {
+						if (get(n).message) $$render(consequent_7);
 					});
-					var text_11 = only_child(sibling(node_16, 2), true);
+					var text_11 = only_child(sibling(node_18, 2), true);
 					reset(div_11);
 					template_effect(($0) => {
 						set_text(text_9, get(n).title);
@@ -13175,71 +14478,71 @@
 				});
 				append($$anchor, fragment_2);
 			}, ($$anchor) => {
-				append($$anchor, root_9());
+				append($$anchor, root_12());
 			});
 			reset(div_9);
 			delegated("click", div_8, () => set(notifOpen, false));
 			append($$anchor, fragment);
 		};
-		if_block(node_11, ($$render) => {
-			if (get(notifOpen)) $$render(consequent_6);
+		if_block(node_13, ($$render) => {
+			if (get(notifOpen)) $$render(consequent_8);
 		});
 		reset(div_7);
-		var node_17 = sibling(div_7, 2);
-		var consequent_7 = ($$anchor) => {
-			append($$anchor, root_11());
+		var node_19 = sibling(div_7, 2);
+		var consequent_9 = ($$anchor) => {
+			append($$anchor, root_14());
 		};
-		if_block(node_17, ($$render) => {
-			if (get(profile)?.is_pro) $$render(consequent_7);
+		if_block(node_19, ($$render) => {
+			if (get(profile)?.is_pro) $$render(consequent_9);
 		});
-		var button_8 = sibling(node_17, 2);
+		var button_8 = sibling(node_19, 2);
 		let classes_4;
-		var span_10 = child(button_8);
+		var span_11 = child(button_8);
 		let styles;
-		Icon(child(span_10), {
+		Icon(child(span_11), {
 			name: "pulls",
 			class: "cico pk"
 		});
-		reset(span_10);
-		var b_1 = sibling(span_10, 2);
+		reset(span_11);
+		var b_1 = sibling(span_11, 2);
 		var text_12 = only_child(b_1, true);
-		var span_11 = sibling(b_1);
-		var text_13 = only_child(span_11);
-		var node_19 = sibling(span_11, 2);
-		var consequent_8 = ($$anchor) => {
-			var span_12 = root_12();
+		var span_12 = sibling(b_1);
+		var text_13 = only_child(span_12);
+		var node_21 = sibling(span_12, 2);
+		var consequent_10 = ($$anchor) => {
+			var span_13 = root_15();
 			let classes_5;
-			var text_14 = only_child(span_12, true);
+			var text_14 = only_child(span_13, true);
 			template_effect(($0) => {
-				classes_5 = set_class(span_12, 1, "pk-next", null, classes_5, { ready: !packTime.secs });
+				classes_5 = set_class(span_13, 1, "pk-next", null, classes_5, { ready: !packTime.secs });
 				set_text(text_14, $0);
 			}, [() => packTime.secs ? clock(packTime.secs) : "prêt"]);
-			append($$anchor, span_12);
+			append($$anchor, span_13);
 		};
-		if_block(node_19, ($$render) => {
-			if (packTime.secs != null) $$render(consequent_8);
+		if_block(node_21, ($$render) => {
+			if (packTime.secs != null) $$render(consequent_10);
 		});
-		var node_20 = sibling(node_19, 2);
-		var consequent_9 = ($$anchor) => {
-			append($$anchor, root_13());
+		var node_22 = sibling(node_21, 2);
+		var consequent_11 = ($$anchor) => {
+			append($$anchor, root_16());
 		};
-		if_block(node_20, ($$render) => {
-			if (get(proDaily)?.eligible) $$render(consequent_9);
+		if_block(node_22, ($$render) => {
+			if (get(proDaily)?.eligible) $$render(consequent_11);
 		});
 		reset(button_8);
-		var span_14 = sibling(button_8, 2);
-		var node_21 = child(span_14);
-		Icon(node_21, {
+		var span_15 = sibling(button_8, 2);
+		var node_23 = child(span_15);
+		Icon(node_23, {
 			name: "coin",
 			class: "cico coin"
 		});
-		var text_15 = only_child(sibling(node_21), true);
-		reset(span_14);
+		var text_15 = only_child(sibling(node_23), true);
+		reset(span_15);
 		reset(div_6);
 		reset(header);
 		var section = sibling(header, 2);
-		var node_22 = child(section);
-		var consequent_10 = ($$anchor) => {
+		var node_24 = child(section);
+		var consequent_12 = ($$anchor) => {
 			Pulls($$anchor, {
 				get profile() {
 					return get(profile);
@@ -13248,17 +14551,17 @@
 				onprofile: () => loadProfile({ sync: true })
 			});
 		};
-		var consequent_11 = ($$anchor) => {
+		var consequent_13 = ($$anchor) => {
 			var fragment_5 = comment();
 			key(first_child(fragment_5), () => get(collKey), ($$anchor) => {
 				Collection($$anchor, { onwallet: () => loadProfile() });
 			});
 			append($$anchor, fragment_5);
 		};
-		var consequent_12 = ($$anchor) => {
+		var consequent_14 = ($$anchor) => {
 			Catalog($$anchor, {});
 		};
-		var consequent_13 = ($$anchor) => {
+		var consequent_15 = ($$anchor) => {
 			Trades($$anchor, {
 				get profile() {
 					return get(profile);
@@ -13266,7 +14569,7 @@
 				onwallet: () => loadProfile()
 			});
 		};
-		var alternate = ($$anchor) => {
+		var alternate_1 = ($$anchor) => {
 			Marketplace($$anchor, {
 				get profile() {
 					return get(profile);
@@ -13277,18 +14580,18 @@
 				}
 			});
 		};
-		if_block(node_22, ($$render) => {
-			if (get(view) === "pulls") $$render(consequent_10);
-			else if (get(view) === "collection") $$render(consequent_11, 1);
-			else if (get(view) === "catalog") $$render(consequent_12, 2);
-			else if (get(view) === "trades") $$render(consequent_13, 3);
-			else $$render(alternate, -1);
+		if_block(node_24, ($$render) => {
+			if (get(view) === "pulls") $$render(consequent_12);
+			else if (get(view) === "collection") $$render(consequent_13, 1);
+			else if (get(view) === "catalog") $$render(consequent_14, 2);
+			else if (get(view) === "trades") $$render(consequent_15, 3);
+			else $$render(alternate_1, -1);
 		});
 		reset(section);
 		reset(main);
-		var node_24 = sibling(main, 2);
-		var consequent_15 = ($$anchor) => {
-			var fragment_10 = root_16();
+		var node_26 = sibling(main, 2);
+		var consequent_18 = ($$anchor) => {
+			var fragment_10 = root_20();
 			var div_16 = first_child(fragment_10);
 			var div_17 = sibling(div_16, 2);
 			var section_1 = sibling(child(div_17), 2);
@@ -13304,44 +14607,56 @@
 				let path = () => get($$array_1)[0];
 				let label = () => get($$array_1)[1];
 				let icon = () => get($$array_1)[2];
-				var a_2 = root_14();
-				var node_26 = child(a_2);
-				Icon(node_26, {
+				var a_3 = root_17();
+				var node_28 = child(a_3);
+				Icon(node_28, {
 					get name() {
 						return icon();
 					},
 					width: 1.7
 				});
-				var text_16 = only_child(sibling(node_26), true);
-				reset(a_2);
+				var text_16 = only_child(sibling(node_28), true);
+				reset(a_3);
 				template_effect(() => {
-					set_attribute(a_2, "href", data.isReal ? path() : "https://www.wiki-masters.com" + path());
+					set_attribute(a_3, "href", data.isReal ? path() : "https://www.wiki-masters.com" + path());
 					set_text(text_16, label());
 				});
-				append($$anchor, a_2);
+				append($$anchor, a_3);
 			});
 			reset(div_18);
 			reset(section_3);
-			var button_10 = sibling(section_3, 2);
-			var node_27 = sibling(button_10, 2);
-			var consequent_14 = ($$anchor) => {
-				var button_11 = root_15();
+			var node_29 = sibling(section_3, 2);
+			var consequent_16 = ($$anchor) => {
+				var a_4 = root_18();
+				set_attribute(a_4, "href", "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js");
+				var text_17 = sibling(child(a_4));
+				reset(a_4);
+				template_effect(() => set_text(text_17, `Mettre à jour vers la ${get(update$1) ?? ""}`));
+				append($$anchor, a_4);
+			};
+			if_block(node_29, ($$render) => {
+				if (get(update$1)) $$render(consequent_16);
+			});
+			var button_10 = sibling(node_29, 2);
+			var node_30 = sibling(button_10, 2);
+			var consequent_17 = ($$anchor) => {
+				var button_11 = root_19();
 				delegated("click", button_11, () => {
 					set(menuOpen, false);
 					reset$1();
 				});
 				append($$anchor, button_11);
 			};
-			if_block(node_27, ($$render) => {
-				if (data.canReset) $$render(consequent_14);
+			if_block(node_30, ($$render) => {
+				if (data.canReset) $$render(consequent_17);
 			});
-			var a_3 = sibling(node_27, 2);
-			set_attribute(a_3, "href", REPO);
-			var text_17 = only_child(a_3);
+			var a_5 = sibling(node_30, 2);
+			set_attribute(a_5, "href", REPO);
+			var text_18 = only_child(a_5);
 			reset(div_17);
 			template_effect(() => {
 				set_attribute(button_9, "aria-checked", !settings.hideStats);
-				set_text(text_17, `Wiki Remaster v${VERSION}`);
+				set_text(text_18, `Wiki Remaster v${VERSION}`);
 			});
 			delegated("click", div_16, () => set(menuOpen, false));
 			delegated("click", button_9, function(...$$args) {
@@ -13350,16 +14665,16 @@
 			delegated("click", button_10, () => useOriginalSite());
 			append($$anchor, fragment_10);
 		};
-		if_block(node_24, ($$render) => {
-			if (get(menuOpen)) $$render(consequent_15);
+		if_block(node_26, ($$render) => {
+			if (get(menuOpen)) $$render(consequent_18);
 		});
-		var node_28 = sibling(node_24, 2);
-		var consequent_17 = ($$anchor) => {
-			var div_19 = root_19();
+		var node_31 = sibling(node_26, 2);
+		var consequent_20 = ($$anchor) => {
+			var div_19 = root_23();
 			each(div_19, 21, () => get(toasts), (n) => n.id, ($$anchor, n) => {
-				var div_20 = root_18();
-				var node_29 = child(div_20);
-				element(node_29, () => get(n).href ? "a" : "div", false, ($$element_1, $$anchor) => {
+				var div_20 = root_22();
+				var node_32 = child(div_20);
+				element(node_32, () => get(n).href ? "a" : "div", false, ($$element_1, $$anchor) => {
 					var event_handler_1 = (e) => openNotif(get(n), e);
 					attribute_effect($$element_1, ($0) => ({
 						href: get(n).href,
@@ -13367,30 +14682,30 @@
 						class: "toast",
 						onclick: event_handler_1
 					}), [() => asButton(get(n))]);
-					var fragment_11 = root_17();
-					var node_30 = first_child(fragment_11);
-					Icon(node_30, {
+					var fragment_11 = root_21();
+					var node_33 = first_child(fragment_11);
+					Icon(node_33, {
 						name: "bell",
 						width: 1.8
 					});
-					var div_21 = sibling(node_30, 2);
+					var div_21 = sibling(node_33, 2);
 					var b_3 = child(div_21);
-					var text_18 = only_child(b_3, true);
-					var node_31 = sibling(b_3);
-					var consequent_16 = ($$anchor) => {
-						var span_16 = root_12();
-						var text_19 = only_child(span_16, true);
-						template_effect(() => set_text(text_19, get(n).message));
-						append($$anchor, span_16);
+					var text_19 = only_child(b_3, true);
+					var node_34 = sibling(b_3);
+					var consequent_19 = ($$anchor) => {
+						var span_17 = root_15();
+						var text_20 = only_child(span_17, true);
+						template_effect(() => set_text(text_20, get(n).message));
+						append($$anchor, span_17);
 					};
-					if_block(node_31, ($$render) => {
-						if (get(n).message) $$render(consequent_16);
+					if_block(node_34, ($$render) => {
+						if (get(n).message) $$render(consequent_19);
 					});
 					reset(div_21);
-					template_effect(() => set_text(text_18, get(n).title));
+					template_effect(() => set_text(text_19, get(n).title));
 					append($$anchor, fragment_11);
 				});
-				var button_12 = sibling(node_29, 2);
+				var button_12 = sibling(node_32, 2);
 				Icon(child(button_12), {
 					name: "close",
 					width: 2
@@ -13405,25 +14720,25 @@
 			reset(div_19);
 			append($$anchor, div_19);
 		};
-		if_block(node_28, ($$render) => {
-			if (get(toasts).length) $$render(consequent_17);
+		if_block(node_31, ($$render) => {
+			if (get(toasts).length) $$render(consequent_20);
 		});
-		var node_33 = sibling(node_28, 2);
-		var consequent_18 = ($$anchor) => {
-			var div_22 = root_21();
+		var node_36 = sibling(node_31, 2);
+		var consequent_21 = ($$anchor) => {
+			var div_22 = root_25();
 			var div_23 = child(div_22);
 			each(sibling(child(div_23), 2), 17, () => SHORTCUTS, index, ($$anchor, $$item) => {
 				var $$array_2 = user_derived(() => to_array(get($$item), 2));
 				let k = () => get($$array_2)[0];
 				let what = () => get($$array_2)[1];
-				var div_24 = root_20();
-				var span_17 = child(div_24);
-				var text_20 = only_child(span_17, true);
-				var text_21 = sibling(span_17, 1, true);
+				var div_24 = root_24();
+				var span_18 = child(div_24);
+				var text_21 = only_child(span_18, true);
+				var text_22 = sibling(span_18, 1, true);
 				reset(div_24);
 				template_effect(() => {
-					set_text(text_20, k());
-					set_text(text_21, what());
+					set_text(text_21, k());
+					set_text(text_22, what());
 				});
 				append($$anchor, div_24);
 			});
@@ -13432,10 +14747,10 @@
 			delegated("click", div_22, () => set(help, false));
 			append($$anchor, div_22);
 		};
-		if_block(node_33, ($$render) => {
-			if (get(help)) $$render(consequent_18);
+		if_block(node_36, ($$render) => {
+			if (get(help)) $$render(consequent_21);
 		});
-		HumanCheck(sibling(node_33, 2), {});
+		HumanCheck(sibling(node_36, 2), {});
 		reset(div);
 		bind_this(div, ($$value) => appEl = $$value, () => appEl);
 		template_effect(() => {
@@ -13444,20 +14759,19 @@
 			set_attribute(button, "aria-label", settings.sideRail ? "Déplier le menu" : "Replier le menu");
 			set_attribute(button, "title", (settings.sideRail ? "Déplier le menu" : "Replier le menu") + " ( [ )");
 			set_text(text_3, `${data.isReal ? "Connecté à WikiMasters" : "Serveur de test local"} `);
-			set_attribute(a_1, "title", `Wiki Remaster ${VERSION}, le code source`);
-			set_text(text_4, `v${VERSION}`);
 			set_text(text_5, get(current).label);
 			set_text(text_6, get(current).short ?? get(current).label);
 			classes_2 = set_class(button_4, 1, "bell stats-toggle", null, classes_2, { off: settings.hideStats });
 			set_attribute(button_4, "aria-pressed", !settings.hideStats);
 			set_attribute(button_4, "aria-label", settings.hideStats ? "Afficher l'ATK et la DEF" : "Masquer l'ATK et la DEF");
 			set_attribute(button_4, "title", settings.hideStats ? "Afficher l'ATK et la DEF" : "Masquer l'ATK et la DEF");
+			set_attribute(button_5, "aria-label", get(update$1) ? "Menu, mise à jour disponible" : "Menu");
 			set_attribute(button_5, "aria-expanded", get(menuOpen));
 			classes_3 = set_class(button_6, 1, "bell", null, classes_3, { has: get(unread).length > 0 });
 			classes_4 = set_class(button_8, 1, "chip pk-chip", null, classes_4, { regen: packTime.secs != null });
 			set_attribute(button_8, "title", get(packTitle));
 			set_attribute(button_8, "aria-label", `${get(packTitle) ?? ""}. Ouvrir des paquets`);
-			styles = set_style(span_10, "", styles, { "--p": get(packFill) });
+			styles = set_style(span_11, "", styles, { "--p": get(packFill) });
 			set_text(text_12, get(profile)?.packs_remaining ?? "-");
 			set_text(text_13, `/${get(profile)?.pack_cap ?? 10 ?? ""}`);
 			set_text(text_15, get(profile)?.currency ?? "-");
@@ -13479,7 +14793,7 @@
 		pop();
 	}
 	delegate(["click"]);
-	var styles_default = ":host,:root{--bg:#0c0d0c;--surface:#141613;--elev:#191c18;--elev2:#20241f;--line:#262a26;--line2:#333833;--fg:#eceee9;--fg-soft:#98a29a;--fg-faint:#7d857c;--accent:#3ccb8e;--accent-ink:#07130e;--bad:#f6867a;--r-c:#7fd8b4;--r-pc:#7fb0e6;--r-r:#b18fe0;--r-sr:#e46f9f;--r-ur:#f0912f;--r-l:#e8c93a;--card-bg:#0f110e;--coin:radial-gradient(circle at 35% 30%,#ffe680,var(--r-l));--display:\"Outfit\",system-ui,sans-serif;--body:\"Inter\",system-ui,sans-serif;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;--radius:14px;--radius-lg:18px;--sidebar:268px}:where(#wm-app-root,#wm-app-root *){box-sizing:border-box;margin:0;padding:0}[data-r=C]{--rc:var(--r-c)}[data-r=PC]{--rc:var(--r-pc)}[data-r=R]{--rc:var(--r-r)}[data-r=SR]{--rc:var(--r-sr)}[data-r=UR]{--rc:var(--r-ur)}[data-r=L]{--rc:var(--r-l)}#wm-app-root{--lightningcss-light: ;--lightningcss-dark:initial;color-scheme:dark;scrollbar-color:var(--line2) transparent;caret-color:var(--accent);font-family:var(--body);color:var(--fg);-webkit-font-smoothing:antialiased;line-height:1.5}#wm-app-root button{cursor:pointer;font-family:inherit}#wm-app-root ::selection{background:color-mix(in oklab,var(--accent) 32%,transparent);color:var(--fg)}#wm-app-root img{display:block}#wm-app-root a{color:inherit;text-decoration:none}#wm-app-root :is(a,button,input,select,textarea,[tabindex]:not([tabindex=\"-1\"])):focus-visible{outline:2px solid var(--accent);outline-offset:2px}#wm-app-root .modal:focus,#wm-app-root .modal:focus-visible{outline:none}.card-btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--radius)}.app{grid-template-columns:var(--sidebar) 1fr;background:var(--bg);min-height:100vh;display:grid}.side{background:var(--surface);border-right:1px solid var(--line);padding:var(--s5) var(--s4);gap:var(--s5);flex-direction:column;height:100vh;display:flex;position:sticky;top:0;overflow:hidden}.brand{padding:0 var(--s3);align-items:center;gap:10px;display:flex}.brand .mk{background:var(--accent);border-radius:3px;width:9px;height:9px}.brand b{font-family:var(--display);letter-spacing:-.01em;font-size:19px;font-weight:700}.nav{scrollbar-width:none;flex-direction:column;flex:1;gap:2px;min-height:0;display:flex;overflow-y:auto}.nav::-webkit-scrollbar{display:none}.nav button{align-items:center;gap:var(--s3);color:var(--fg-soft);cursor:pointer;text-align:left;background:0 0;border:0;border-radius:11px;width:100%;padding:10px 12px;font-family:inherit;font-size:14px;font-weight:500;transition:background .15s,color .15s;display:flex}.nav button svg{opacity:.85;flex:none;width:19px;height:19px}.nav button:hover{background:var(--elev);color:var(--fg)}.nav button.on{background:color-mix(in oklab,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}.nav button.on svg{opacity:1}.nav-sep{letter-spacing:.12em;text-transform:uppercase;color:var(--fg-faint);padding:var(--s4) 12px var(--s2);font-size:10px}.nav-grid{grid-template-columns:repeat(3,1fr);gap:2px;display:grid}.nav-grid a{color:var(--fg-soft);text-align:center;border-radius:10px;flex-direction:column;align-items:center;gap:6px;padding:10px 2px 9px;font-size:11px;line-height:1.1;transition:background .15s,color .15s;display:flex}.nav-grid a svg{opacity:.55;width:17px;height:17px}.nav-grid a:hover{background:var(--elev);color:var(--fg)}.nav-grid a:hover svg{opacity:.9}.side-foot{gap:var(--s2);padding:var(--s3) 12px 0;border-top:1px solid var(--line);flex-direction:column;display:flex}.ghost{border:1px solid var(--line2);color:var(--fg-soft);background:0 0;border-radius:10px;padding:9px;font-size:13px;font-weight:500;transition:all .15s}.ghost:hover{border-color:var(--fg-soft);color:var(--fg)}.foot-link{color:var(--fg-soft);font:inherit;cursor:pointer;text-align:left;background:0 0;border:0;align-items:center;gap:8px;padding:0;font-size:12.5px;display:flex}.foot-link svg{width:14px;height:14px}.foot-link:hover{color:var(--fg)}.hintline{color:var(--fg-faint);align-items:center;gap:8px;font-size:11.5px;display:flex}.hintline:before{content:\"\";background:var(--accent);border-radius:50%;width:6px;height:6px}@media (height<=760px) and (width>=901px){.side{padding:var(--s4) var(--s3);gap:var(--s3)}.nav button{padding:8px 12px}.nav-sep{padding:var(--s3) 12px 6px}.nav-grid a{gap:4px;padding:7px 2px 6px}}.main{flex-direction:column;min-width:0;display:flex}.topbar{justify-content:space-between;align-items:center;gap:var(--s4);padding:var(--s5) clamp(var(--s5),4vw,var(--s7));border-bottom:1px solid var(--line);z-index:5;background:color-mix(in oklab,var(--bg) 96%,transparent);display:flex;position:sticky;top:0}.crumb{font-family:var(--display);letter-spacing:-.01em;font-size:16px;font-weight:600}.wallet{align-items:center;gap:var(--s2);display:flex}.wallet .menu-btn,.nav-short{display:none}.stats-toggle span{font:800 10.5px/1 var(--display);letter-spacing:.06em}.stats-toggle.off{color:var(--fg-faint)}.stats-toggle.off span{text-decoration:line-through;text-decoration-thickness:1.5px}.chip{color:var(--fg-soft);background:var(--elev);border:1px solid var(--line);border-radius:999px;align-items:center;gap:8px;padding:9px 15px;font-size:13.5px;display:flex}.chip b{color:var(--fg);font-weight:600}.chip .cico{flex:none;width:14px;height:14px}.chip .cico.pk{color:var(--accent)}.chip .cico.coin{color:var(--r-l)}.pk-ring{place-items:center;width:22px;height:22px;margin:-4px -3px -4px -4px;display:grid;position:relative}.pk-chip.regen .pk-ring:before{content:\"\";background:conic-gradient(var(--accent) calc(var(--p) * 1turn),var(--line2) 0);border-radius:50%;position:absolute;inset:0;-webkit-mask:radial-gradient(farthest-side,#0000 calc(100% - 2px),#000 calc(100% - 1.5px));mask:radial-gradient(farthest-side,#0000 calc(100% - 2px),#000 calc(100% - 1.5px))}.pk-chip.regen .pk-ring .cico{width:12px;height:12px}.pk-next{border-left:1px solid var(--line2);color:var(--fg-soft);font-variant-numeric:tabular-nums;white-space:nowrap;margin-left:1px;padding-left:8px;font-size:12px;font-weight:500}.pk-next.ready{color:var(--accent);font-weight:600}.pk-pro{font:700 10.5px/1 var(--display);letter-spacing:.03em;color:var(--accent-ink);background:var(--r-l);white-space:nowrap;border-radius:999px;padding:3px 7px}button.pk-chip{font:inherit;cursor:pointer;transition:border-color .15s}button.pk-chip:hover{border-color:var(--line2)}.pk-chip{position:relative}@media (width<=560px){.pk-pro{width:9px;height:9px;box-shadow:0 0 0 2px var(--elev);padding:0;font-size:0;position:absolute;top:4px;left:26px}}.badge{font-family:var(--display);letter-spacing:.04em;border-radius:999px;align-items:center;padding:6px 11px;font-size:11px;font-weight:700;display:inline-flex}.badge.pro{background:var(--accent);color:var(--accent-ink)}.loadbar{z-index:2147483602;pointer-events:none;opacity:0;height:3px;transition:opacity .35s;position:fixed;top:0;left:0;right:0;overflow:hidden}.loadbar.on{opacity:1}.loadbar:before{content:\"\";background:linear-gradient(90deg,transparent,var(--accent) 30%,#b6f5d8 60%,var(--accent) 85%,transparent);width:45%;box-shadow:0 0 12px color-mix(in oklab,var(--accent) 70%,transparent),0 0 3px var(--accent);border-radius:0 3px 3px 0;position:absolute;inset:0 auto 0 0}.loadbar.on:before{animation:1.25s cubic-bezier(.45,.05,.4,.95) infinite loadbar}@keyframes loadbar{0%{transform:translate(-110%)}to{transform:translate(330%)}}.loadcap{z-index:2147483602;background:color-mix(in oklab,var(--elev2) 92%,transparent);border:1px solid var(--line2);width:max-content;max-width:calc(100vw - 32px);color:var(--fg);opacity:0;pointer-events:none;border-radius:999px;align-items:center;gap:10px;margin-inline:auto;padding:10px 16px 10px 14px;font-size:13px;font-weight:500;transition:opacity .25s,transform .25s;display:flex;position:fixed;bottom:24px;left:0;right:0;transform:translateY(10px);box-shadow:0 18px 40px -18px #000}.loadcap.on{opacity:1;transform:none}.loadcap .spin{color:var(--accent);width:14px;height:14px}.loadcap:not(.on) .spin{animation:none}.loadcap.slow .spin{color:var(--r-ur)}.loadcap-txt{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.loadcap-t{color:var(--fg-faint);font-variant-numeric:tabular-nums;flex:none}@media (width<=560px){.loadcap{bottom:calc(var(--tabbar,0px) + 12px);border-radius:16px}.loadcap-txt{white-space:normal;line-height:1.35}}@media (prefers-reduced-motion:reduce){.loadbar:before{opacity:.8;width:100%;animation:none}.loadcap{transition:none}}.health{color:var(--r-ur);background:color-mix(in oklab,var(--r-ur) 12%,transparent);border:1px solid color-mix(in oklab,var(--r-ur) 30%,transparent);white-space:nowrap;border-radius:999px;align-self:center;align-items:center;gap:8px;padding:6px 12px;font-size:12.5px;font-weight:500;animation:.3s fade;display:inline-flex}.health-dot{background:var(--r-ur);border-radius:50%;width:7px;height:7px;animation:1.4s ease-in-out infinite auc-pulse}@media (width<=560px){.health{padding:9px}.health-txt{display:none}}@media (prefers-reduced-motion:reduce){.health-dot{animation:none}}.notif{display:flex;position:relative}.bell{border:1px solid var(--line);background:var(--elev);width:38px;height:38px;color:var(--fg-soft);cursor:pointer;border-radius:999px;justify-content:center;align-items:center;transition:all .15s;display:flex;position:relative}.bell:hover{color:var(--fg);border-color:var(--line2)}.bell.has{color:var(--fg)}.bell svg{width:18px;height:18px}.bell-badge{color:#fff;min-width:18px;height:18px;font-family:var(--display);text-align:center;box-shadow:0 0 0 2px var(--bg);background:#f26d6d;border-radius:999px;padding:0 5px;font-size:10.5px;font-weight:700;line-height:18px;position:absolute;top:-3px;right:-3px}.notif-scrim{z-index:30;position:fixed;inset:0}.sheet-scrim{z-index:60;background:#0000008c;animation:.18s fade-in;position:fixed;inset:0}.sheet{z-index:61;overscroll-behavior:contain;max-height:86dvh;padding:var(--s2) var(--s4) calc(var(--s4) + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line2);border-radius:var(--radius-lg) var(--radius-lg) 0 0;animation:.2s toast-in;position:fixed;bottom:0;left:0;right:0;overflow:auto;box-shadow:0 -24px 60px -20px #000}.sheet-grab{background:var(--line2);width:40px;height:4px;margin:4px auto var(--s3);border-radius:2px}.sheet-sec{padding:var(--s3) 0}.sheet-sec+.sheet-sec{border-top:1px solid var(--line)}.sheet-row{justify-content:space-between;align-items:center;gap:var(--s3);display:flex}.sheet-row b{font-size:15px;display:block}.sheet-row span{color:var(--fg-faint);font-size:12.5px}.sheet-title{letter-spacing:.08em;text-transform:uppercase;color:var(--fg-faint);margin-bottom:var(--s2);font-size:12px;display:block}.sheet-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;display:grid}.sheet-grid a{min-height:64px;color:var(--fg-soft);text-align:center;border-radius:12px;flex-direction:column;justify-content:center;align-items:center;gap:6px;padding:8px 2px;font-size:12px;display:flex}.sheet-grid a:active,.sheet-grid a:hover{background:var(--elev);color:var(--fg)}.sheet-grid a svg{width:20px;height:20px}.sheet-reset{width:100%;margin-top:var(--s2)}.snd{display:flex;position:relative}.snd-panel{width:min(300px,calc(100vw - 2 * var(--s4)));z-index:31;gap:var(--s3);padding:var(--s4);background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);flex-direction:column;display:flex;position:absolute;top:46px;right:0;box-shadow:0 24px 60px -24px #000}.snd-head{justify-content:space-between;align-items:center;display:flex}.snd-head b{font:700 14px var(--display)}.snd-switch{border:1px solid var(--line2);background:var(--elev2);cursor:pointer;border-radius:999px;width:40px;height:24px;transition:background .15s,border-color .15s;position:relative}.snd-switch span{background:var(--fg-soft);border-radius:50%;width:16px;height:16px;transition:transform .18s cubic-bezier(.3,.7,.3,1),background .15s;position:absolute;top:3px;left:3px}.snd-switch[aria-checked=true]{background:color-mix(in oklab,var(--accent) 30%,var(--elev2));border-color:var(--accent)}.snd-switch[aria-checked=true] span{background:var(--accent);transform:translate(16px)}.snd-vol{color:var(--fg-soft);grid-template-columns:auto 1fr auto auto;align-items:center;gap:10px;transition:opacity .15s;display:grid}.snd-vol.off{opacity:.5}.snd-vol svg{width:16px;height:16px}.snd-vol input{cursor:pointer;appearance:none;background:0 0;width:100%;height:20px;margin:0}.snd-vol input::-webkit-slider-runnable-track{background:linear-gradient(var(--accent),var(--accent)) 0/var(--pct) 100% no-repeat,var(--line2);border-radius:2px;height:4px}.snd-vol input::-moz-range-track{background:var(--line2);border-radius:2px;height:4px}.snd-vol input::-moz-range-progress{background:var(--accent);border-radius:2px;height:4px}.snd-vol input::-webkit-slider-thumb{-webkit-appearance:none;background:var(--fg);border:none;border-radius:50%;width:14px;height:14px;margin-top:-5px;transition:transform .12s;box-shadow:0 1px 4px #0008}.snd-vol input::-moz-range-thumb{background:var(--fg);border:none;border-radius:50%;width:14px;height:14px;transition:transform .12s;box-shadow:0 1px 4px #0008}.snd-vol input:hover::-webkit-slider-thumb{transform:scale(1.15)}.snd-vol input:active::-webkit-slider-thumb{transform:scale(1.15)}.snd-vol input:hover::-moz-range-thumb{transform:scale(1.15)}.snd-vol input:active::-moz-range-thumb{transform:scale(1.15)}.snd-vol output{text-align:right;font-variant-numeric:tabular-nums;min-width:4ch;color:var(--fg);font-size:13px}.snd-note{color:var(--fg-faint);font-size:12px;line-height:1.4}.notif-panel{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);z-index:31;width:min(340px,86vw);max-height:66vh;padding:var(--s2);overscroll-behavior:contain;position:absolute;top:46px;right:0;overflow:auto;box-shadow:0 24px 60px -24px #000}.notif-head{font-family:var(--display);align-items:center;gap:8px;padding:8px 10px 10px;font-size:14px;font-weight:700;display:flex}.notif-count{background:color-mix(in oklab,var(--accent) 16%,transparent);color:var(--accent);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700}.notif-empty{text-align:center;color:var(--fg-faint);padding:24px;font-size:13px}.notif-item{border-radius:12px;gap:10px;padding:11px 10px;transition:background .15s;display:flex}.notif-item:hover{background:var(--elev)}.notif-item.unread{background:color-mix(in oklab,var(--accent) 7%,transparent)}.notif-dot{background:var(--accent);border-radius:50%;flex:none;width:7px;height:7px;margin-top:6px}.notif-item:not(.unread) .notif-body{margin-left:17px}.notif-body{min-width:0}.notif-title{font-size:13.5px;font-weight:600;line-height:1.3}.notif-msg{color:var(--fg-soft);margin-top:2px;font-size:12.5px;line-height:1.4}.notif-time{color:var(--fg-faint);margin-top:4px;font-size:11px}.view{padding:clamp(var(--s5),3.5vw,var(--s7));padding-bottom:max(clamp(var(--s5),3.5vw,var(--s7)),72px);width:100%;max-width:1600px;margin:0 auto}.view:has(>.pulls>.reveal-all){max-width:none}.side-toggle{width:30px;height:30px;color:var(--fg-faint);cursor:pointer;background:0 0;border:0;border-radius:8px;place-items:center;margin-left:auto;transition:color .15s,background .15s;display:grid}.side-toggle:hover{color:var(--fg);background:var(--elev)}.side-toggle svg{width:18px;height:18px}@media (width>=901px){.app{transition:grid-template-columns .22s}.app.rail{--sidebar:72px}.app.rail .side{padding-inline:var(--s2)}.app.rail .brand{justify-content:center;padding:0}.app.rail .brand .mk,.app.rail .brand b,.app.rail .side .nav-long,.app.rail .nav-lbl,.app.rail .foot-txt,.app.rail .hintline,.app.rail .side-foot .ghost{display:none}.app.rail .side-toggle{margin:0}.app.rail .nav button{justify-content:center;padding-inline:0}.app.rail .nav-sep{margin:var(--s3) 10px;border-top:1px solid var(--line);padding:0;font-size:0}.app.rail .nav-grid{grid-template-columns:1fr}.app.rail .side-foot{align-items:center;padding-inline:0}}@media (prefers-reduced-motion:reduce){.app{transition:none}}.app-version{color:var(--fg-faint);font-variant-numeric:tabular-nums;margin-left:auto;font-size:11px;text-decoration:none}.app-version:hover{color:var(--fg-soft);text-decoration:underline}.sheet-version{margin:var(--s3) auto 0;text-align:center;width:max-content;display:block}@media (width>=901px){.app.rail .app-version{display:none}}.pulls{position:relative}.pull-ready{justify-content:center;align-items:center;gap:var(--s5);text-align:center;flex-direction:column;min-height:64vh;display:flex}.pull-ready h1{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(26px,3vw,36px);font-weight:700}.special-note{background:color-mix(in oklab,var(--r-l) 12%,var(--elev));border:1px solid color-mix(in oklab,var(--r-l) 32%,var(--line));color:var(--fg);border-radius:12px;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;padding:10px 16px;font-size:13px;display:flex}.link-btn{color:var(--accent);font:inherit;cursor:pointer;text-underline-offset:3px;background:0 0;border:none;font-weight:600;text-decoration:underline}.pull-ready .sub{color:var(--fg-soft);margin-top:calc(-1 * var(--s3));font-size:15px}.booster-stage{width:100%;padding:var(--s3) 0;justify-content:center;align-items:center;display:flex;position:relative;overflow-x:clip}.booster{width:clamp(200px,min(calc((100dvh - 540px - var(--tabs-h,0px)) * .773),62vw),480px);aspect-ratio:2550/3300;cursor:pointer;filter:drop-shadow(0 34px 54px #0009);background:0 0;border:none;padding:0;transition:transform .3s cubic-bezier(.2,.7,.3,1);position:relative}.booster:hover:not(:disabled):not(.opening){transform:translateY(-8px)}.booster:disabled{cursor:default}.booster-main{transform-origin:50% 60%;animation:5.5s ease-in-out infinite booster-float;position:absolute;inset:0}.booster-img{background:var(--pack) center/contain no-repeat;position:absolute;inset:0}.booster-shine{pointer-events:none;mix-blend-mode:screen;opacity:0;-webkit-mask:var(--pack) center/contain no-repeat;-webkit-mask:var(--pack) center/contain no-repeat;mask:var(--pack) center/contain no-repeat;background:linear-gradient(115deg,#0000 40%,#ffffffd9 47%,#96d2ffb3 50%,#ffecb4b3 53%,#0000 60%) 0 0/260% 260% no-repeat;animation:5s ease-in-out infinite booster-sheen;position:absolute;inset:0}@keyframes booster-sheen{0%{opacity:0;background-position:130% 0}30%{opacity:.95}52%{opacity:.95;background-position:-30% 100%}72%,to{opacity:0;background-position:-30% 100%}}@keyframes booster-float{0%,to{transform:translateY(0)rotate(-1.2deg)}50%{transform:translateY(-12px)rotate(1.2deg)}}.booster-back{background:var(--pack) center/contain no-repeat;filter:brightness(.62)grayscale(.25);position:absolute;inset:0}.booster-back.b1{opacity:.7;transform:translate(11px,9px)rotate(4deg)scale(.985)}.booster-back.b2{opacity:.4;transform:translate(22px,18px)rotate(8deg)scale(.97)}.booster.is-empty .booster-main{filter:grayscale(.7)brightness(.55);opacity:.8;animation-play-state:paused}.booster.is-empty .booster-shine{display:none}.booster.opening{cursor:default}.booster.opening .booster-main{animation:.9s cubic-bezier(.3,.6,.2,1) forwards booster-open}@keyframes booster-open{0%{transform:translateY(0)rotate(0)}14%{transform:rotate(-5deg)}28%{transform:rotate(5deg)}42%{transform:rotate(-4deg)}56%{transform:rotate(3deg)scale(1.03)}68%{transform:rotate(0)scale(1.06)}to{opacity:0;filter:brightness(2.2);transform:scale(1.5)}}.booster.opening:after{content:\"\";pointer-events:none;opacity:0;background:radial-gradient(circle,#fff6e0f2,#fff6e040 45%,#0000 66%);border-radius:50%;animation:.9s ease-out forwards booster-burst;position:absolute;inset:-25%}@keyframes booster-burst{0%,52%{opacity:0;transform:scale(.5)}74%{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(1.5)}}.pack-count{flex-direction:column;align-items:center;gap:2px;display:flex}.pc-num{font-family:var(--display);color:var(--accent);font-variant-numeric:tabular-nums;font-size:clamp(36px,5vw,54px);font-weight:800;line-height:1}.pack-wait{flex-direction:column;align-items:center;gap:4px;display:flex}.pw-time{font-family:var(--display);color:var(--fg);font-variant-numeric:tabular-nums;font-size:clamp(34px,4.4vw,50px);font-weight:800;line-height:1}.pw-lbl{color:var(--fg-soft);font-size:15px}.pw-sub{color:var(--fg-faint);margin-top:var(--s2);font-size:12.5px}.pc-lbl{color:var(--fg-soft);font-size:14px}.regen-line{color:var(--fg-soft);font-size:13.5px}.regen-line b{color:var(--fg);font-weight:600}.regen-line.err{color:#f0a3a3}.btn.big{padding:14px 34px;font-size:16px}.btn{font-family:var(--display);white-space:nowrap;border:1px solid var(--line2);color:var(--fg);background:0 0;border-radius:12px;padding:13px 28px;font-size:15px;font-weight:600;transition:all .15s}.btn:hover{border-color:var(--fg-soft)}.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}.btn.primary:hover{filter:brightness(1.06)}.btn:disabled,.iconbtn:disabled,.modal-close:disabled{opacity:.45;cursor:not-allowed}.btn svg{vertical-align:-3px;flex:none;width:17px;height:17px}.pull-actions{gap:var(--s3);flex-wrap:wrap;justify-content:center;display:flex}.pull-ready.has-tabs{--tabs-h:56px}.pull-tabs{justify-content:center;width:min(100%,520px);margin-bottom:0}.tab-ready{background:var(--accent);vertical-align:2px;border-radius:50%;width:7px;height:7px;margin-left:7px;display:inline-block}.pull-ready[data-kind=pro]{--kind:var(--r-r)}.pull-ready[data-kind=special]{--kind:var(--r-l)}.pull-ready[data-kind=pro] .tab-ready,.pull-ready[data-kind=pro] .tabs button.on,.pull-ready[data-kind=special] .tabs button.on{border-bottom-color:var(--kind)}.pull-ready:not([data-kind=normal]) .booster-img{filter:drop-shadow(0 0 28px color-mix(in oklab,var(--kind) 55%,transparent)) drop-shadow(0 0 70px color-mix(in oklab,var(--kind) 30%,transparent))}.pull-ready:not([data-kind=normal]) .btn.primary{background:var(--kind);border-color:var(--kind);color:#15121c}.pull-ready:not([data-kind=normal]) .pw-time{color:var(--kind)}.booster-mark{font:800 13px/1 var(--display);letter-spacing:.12em;color:#15121c;background:var(--kind);box-shadow:0 4px 18px color-mix(in oklab,var(--kind) 50%,transparent);border-radius:999px;padding:5px 14px;position:absolute;bottom:9%;left:50%;transform:translate(-50%)}.pill-picks{flex-wrap:wrap;justify-content:center;gap:8px;display:flex}.pill-picks button{font:600 13.5px var(--body);color:var(--fg-soft);background:var(--elev);border:1px solid var(--line);cursor:pointer;border-radius:999px;padding:7px 16px;transition:color .15s,border-color .15s}.pill-picks button:hover{color:var(--fg);border-color:var(--line2)}.pill-picks button.on{color:var(--fg);border-color:var(--kind,var(--accent));background:color-mix(in oklab,var(--kind,var(--accent)) 12%,var(--elev))}.market-recent ol{border:1px solid var(--line);border-radius:var(--radius);margin:0;padding:0;list-style:none;overflow:hidden}.market-recent li{justify-content:space-between;align-items:center;gap:var(--s3);color:var(--fg-soft);font-variant-numeric:tabular-nums;padding:8px 14px;font-size:13px;display:flex}.market-recent li+li{border-top:1px solid var(--line)}.market-recent b{color:var(--r-l);align-items:center;gap:6px;display:inline-flex}.session-recap{color:var(--fg-faint);margin-top:var(--s2);font-size:12.5px}.reveal{justify-content:center;align-items:center;gap:var(--s6);flex-direction:column;min-height:64vh;display:flex}.reveal .count{color:var(--fg-soft);font-size:14px}.reveal .count b{color:var(--accent);font-family:var(--display);margin:0 3px;font-size:18px}.stage{width:clamp(250px,min(71.4dvh - 342.72px,40vw),520px);max-width:100%;position:relative}.stage-aura{z-index:0;pointer-events:none;background:radial-gradient(closest-side, color-mix(in oklab,var(--rc) 60%, transparent), transparent 72%);filter:blur(34px);opacity:.35;border-radius:50%;animation:.55s cubic-bezier(.3,.8,.3,1) aurapop;position:absolute;inset:-14% -10%}.stage-aura[data-r=C]{opacity:.26}.stage-aura[data-r=PC]{opacity:.34}.stage-aura[data-r=R]{opacity:.46}.stage-aura[data-r=SR]{opacity:.58}.stage-aura[data-r=UR]{opacity:.72;inset:-18% -12%}.stage-aura[data-r=L]{opacity:.85;inset:-20% -14%}@keyframes aurapop{0%{transform:scale(.7)}to{transform:scale(1)}}.stage .flip-in{z-index:1;position:relative}.reveal-rarity{font-family:var(--display);letter-spacing:.06em;color:var(--rc);font-size:16px;font-weight:700;animation:.45s rarityin}.reveal-rarity[data-r=UR],.reveal-rarity[data-r=L]{letter-spacing:.1em;font-size:19px}@keyframes rarityin{0%{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}.dots{gap:var(--s2);align-items:center;display:flex}.dots .d{background:var(--line2);border-radius:50%;width:8px;height:8px;transition:all .2s}.dots .d.on{background:var(--accent);transform:scale(1.15)}.dots .d.seen{background:var(--fg-faint)}.navrow{align-items:center;gap:var(--s5);display:flex}.arrow{border:1px solid var(--line2);background:var(--elev);width:46px;height:46px;color:var(--fg);border-radius:50%;justify-content:center;align-items:center;transition:all .15s;display:flex}.arrow svg{width:20px;height:20px}.arrow:hover{border-color:var(--fg-soft)}.arrow:disabled{opacity:.3;cursor:not-allowed}.flip-in{animation:.5s cubic-bezier(.3,.8,.3,1) flipin}@keyframes flipin{0%{opacity:0;transform:rotateY(-14deg)translateY(14px)}to{opacity:1;transform:none}}.reveal-skip{color:var(--fg-faint);cursor:pointer;text-underline-offset:3px;background:0 0;border:none;padding:4px;font-size:13px;text-decoration:underline}.reveal-skip:hover{color:var(--fg-soft)}.reveal-all{gap:var(--s5)}.reveal-all-head{text-align:center;flex-direction:column;gap:4px;display:flex}.reveal-all-head h2{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(22px,2.4vw,28px);font-weight:700}.reveal-all-head .sub{color:var(--fg-soft);font-size:14px}.reveal-grid{--rg-w:clamp(110px,min(calc((100% - (var(--cols) - 1) * var(--s5)) / var(--cols)),calc((100dvh - 380px - (var(--rows) - 1) * var(--s5)) / var(--rows) * .714)),440px);grid-template-columns:repeat(auto-fit,var(--rg-w));gap:var(--s5);justify-content:center;width:100%;display:grid}@media (width<=560px){.reveal-grid{--rg-w:calc((100% - var(--s3)) / 2);gap:var(--s3)}}.rg-card{animation:.5s cubic-bezier(.2,.7,.3,1) both rgin;position:relative}.rg-aura{z-index:0;pointer-events:none;background:radial-gradient(closest-side,color-mix(in oklab,var(--rc) 55%,transparent),transparent 72%);filter:blur(26px);opacity:.3;border-radius:50%;position:absolute;inset:-10% -8%}.rg-aura[data-r=C]{opacity:.16}.rg-aura[data-r=PC]{opacity:.22}.rg-aura[data-r=R]{opacity:.34}.rg-aura[data-r=SR]{opacity:.46}.rg-aura[data-r=UR]{opacity:.6}.rg-aura[data-r=L]{opacity:.72}.rg-card .card-btn{z-index:1;position:relative}@keyframes rgin{0%{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}.wc{aspect-ratio:5/7;border-radius:var(--radius-lg);background:var(--card-bg);border:3.5px solid color-mix(in oklab,var(--rc) 65%,var(--line));cursor:pointer;transition:transform .2s cubic-bezier(.2,.7,.3,1),border-color .2s,box-shadow .2s;position:relative;overflow:hidden;container-type:inline-size}.wc[data-r=C]{box-shadow:0 6px 18px -12px color-mix(in oklab,var(--r-c) 45%,transparent)}.wc[data-r=PC]{box-shadow:0 6px 20px -12px color-mix(in oklab,var(--r-pc) 55%,transparent)}.wc[data-r=R]{box-shadow:0 8px 24px -12px color-mix(in oklab,var(--r-r) 62%,transparent)}.wc[data-r=SR]{box-shadow:0 8px 26px -11px color-mix(in oklab,var(--r-sr) 70%,transparent)}.wc[data-r=UR]{box-shadow:0 10px 30px -11px color-mix(in oklab,var(--r-ur) 78%,transparent)}.wc[data-r=L]{box-shadow:0 12px 36px -10px color-mix(in oklab,var(--r-l) 85%,transparent)}.wc[data-r=SR],.wc[data-r=UR],.wc[data-r=L]{border-color:color-mix(in oklab,var(--rc) 88%,var(--line))}.wc:hover{border-color:var(--rc);box-shadow:0 18px 42px -20px color-mix(in oklab,var(--rc) 42%,#000);transform:translateY(-5px)}.wc-face{background:linear-gradient(#181c16,#0d0f0c);position:absolute;inset:0}.wc:before{content:\"\";z-index:5;pointer-events:none;border-radius:inherit;position:absolute;inset:0;box-shadow:inset 0 1px #ffffff29,inset 0 0 0 1px #ffffff08,inset 0 -44px 52px -44px #0000008c}.wc:not(.is-noimg) .wc-face:after{content:\"\";pointer-events:none;background:linear-gradient(180deg, color-mix(in oklab,var(--rc) 26%, transparent), transparent 28%);position:absolute;inset:0}.wc-blur{object-fit:cover;filter:blur(22px)saturate(1.1)brightness(.5);z-index:0;width:100%;height:100%;position:absolute;inset:0;transform:scale(1.2)}.wc.is-noimg .wc-blur{display:none}.wc-photo{object-fit:contain;z-index:1;width:100%;height:100%;position:absolute;inset:0}.wc-bg{object-fit:cover;z-index:0;width:100%;height:100%;position:absolute;inset:0;transform:scale(1.8)}.wc-bg.onyx{transform:none}.wc[data-r=C] .wc-bg,.wc[data-r=PC] .wc-bg{filter:brightness(.6)saturate(1.2)}.wc-sky{z-index:1;width:100%;height:100%;position:absolute;inset:0}.wc-sky .ray{fill:var(--rc)}.wc-sky .core{fill:#fff;fill-opacity:.92}.wc-sky .glow-mid{stop-color:var(--rc);stop-opacity:.4}.wc-sky .glow-out{stop-color:var(--rc);stop-opacity:0}.wc-sky .spark{fill:#fff;fill-opacity:.85}.wc.is-shiny .wc-sky .core{fill-opacity:1}.wc-meteor{z-index:1;height:var(--w);border-radius:var(--w);transform-origin:0;transform:rotate(var(--a));will-change:transform;background:linear-gradient(90deg,#0000,#ffffff80 60%,#fff);animation:2.6s cubic-bezier(.35,.1,.45,1) infinite meteor;position:absolute;box-shadow:0 0 3px #ffffff59}@keyframes meteor{0%{transform:rotate(var(--a)) translateX(-140%);opacity:0}15%,70%{opacity:1}to{transform:rotate(var(--a)) translateX(90%);opacity:0}}@media (prefers-reduced-motion:reduce){.wc-meteor{animation:none}}.wc.is-noimg .wc-holo{display:none}.wc.is-noimg .wc-cap{background:linear-gradient(#0000,#050605b3 38%,#050605f0)}.wc-photo.onyx-photo{object-fit:cover;z-index:1}.wc.paper .wc-blur{display:none}.wc.paper .wc-photo{background:#e4e2db;padding:12% 10% 34%}.wc.is-noimg .wc-face{background:radial-gradient(110% 80% at 50% 30%,color-mix(in oklab,var(--rc) 14%,#05070d),#020306 80%)}.wc.is-shiny{box-shadow:inset 0 0 0 1px #e9c15a8c,0 0 16px #e9c15a4d,0 0 30px #00000080}.wc.is-shiny:hover{box-shadow:inset 0 0 0 1px #e9c15acc,0 0 22px #e9c15a80,0 18px 42px -20px #000}.wc-holo{z-index:2;pointer-events:none;mix-blend-mode:screen;opacity:.7;background:radial-gradient(circle at 50% 45%,#fff8e0 0%,#fff8e033 20%,#0000 46%) 0 0/175% 175% no-repeat;animation:6.5s ease-in-out infinite alternate paused shiny-drift;position:absolute;inset:0}.wc-holo.onyx{mix-blend-mode:soft-light;opacity:.9}@keyframes shiny-drift{0%{background-position:16% 12%}to{background-position:84% 82%}}@media (prefers-reduced-motion:reduce){.wc-holo{opacity:.5;background-position:50% 42%;animation:none}}.ox{z-index:1;pointer-events:none;position:absolute;inset:0}.ox-shade{mix-blend-mode:multiply;background:#2e2b36}.ox-tint{mix-blend-mode:color;background:#3b3b42}.ox-wash{background:radial-gradient(120% 80% at 50% 30%,#0000 40%,#05040866 78%,#050408cc 100%),linear-gradient(#0b0a12ec 0%,#0d0c15dd 55%,#0b0a1255 78%,#0b0a12bb 100%)}.ox-lines{opacity:.62;mix-blend-mode:screen;background:linear-gradient(160deg,#fff0b3 0%,#e9c15a 35%,#fff6d0 55%,#d7a93c 80%,#ffe9a6 100%);-webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat}.ox-shine{mix-blend-mode:screen;opacity:.95;background:radial-gradient(circle at 50% 45%,#fffbe8 0%,#f6d98aa6 16%,#e9c15a26 34%,#0000 52%) 0 0/210% 210% no-repeat;animation:5.5s ease-in-out infinite alternate paused onyx-shimmer;-webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat}@keyframes onyx-shimmer{0%{background-position:12% 8%}to{background-position:88% 86%}}@media (prefers-reduced-motion:reduce){.ox-shine{opacity:.7;background-position:42% 30%;animation:none}}.card-btn:hover :is(.wc-holo,.ox-shine),.card-btn:focus-visible :is(.wc-holo,.ox-shine),.wc-big :is(.wc-holo,.ox-shine){animation-play-state:running}.wc-scrim{pointer-events:none;background:linear-gradient(#0000 20%,#05060533 32%,#050605b3 50%,#050605fb 68%,#050605 100%);position:absolute;inset:0}.wc.bare .wc-cap,.wc.bare .wc-scrim{display:none}.wc-top{z-index:3;justify-content:space-between;align-items:flex-start;gap:6px;display:flex;position:absolute;top:11px;left:11px;right:11px}.wc-rtag{font-family:var(--display);color:var(--accent-ink);background:var(--rc);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;box-shadow:0 1px 5px #0006}.wc-flags{align-items:center;gap:5px;display:flex}.wc-count{color:#fff;background:#000000b8;border:1px solid #ffffff2e;border-radius:6px;padding:2px 7px;font-size:10.5px;font-weight:600}.wc-new{background:var(--accent);color:var(--accent-ink);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700}.wc-shiny{color:#f3d27a;background:#111014;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex;box-shadow:inset 0 0 0 1px #d7a93c,0 0 10px #e9c15a73}.wc-star{border:1px solid color-mix(in oklab,var(--r-l) 55%,#ffffff4d);color:var(--r-l);background:#000000b8;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex}.wc-cap{z-index:3;gap:var(--s1);background:linear-gradient(#0000,#0506058c 28%,#050605eb);flex-direction:column;padding:14px 14px 16px;display:flex;position:absolute;bottom:0;left:0;right:0}.wc.bare .wc-cap{background:0 0}.wc-name{font-family:var(--display);color:#fff;text-shadow:0 1px 10px #000000a6;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:15px;font-weight:700;line-height:1.18;display:-webkit-box;overflow:hidden}.wc-cat{color:#ffffffd1;white-space:nowrap;text-overflow:ellipsis;text-shadow:0 1px 6px #000000b3;font-size:10.5px;line-height:1.3;overflow:hidden}.wc-meta{border-top:1px solid #ffffff38;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:4px 8px;margin-top:9px;padding-top:9px;display:flex}.wc-stats{white-space:nowrap;color:#ffffffd9;letter-spacing:.02em;text-shadow:0 1px 6px #000000b3;gap:.9em;font-size:11px;display:flex}.wc-stats b{color:#fff;font-variant-numeric:tabular-nums;font-weight:700}.wc-val{color:var(--r-l);font-variant-numeric:tabular-nums;text-shadow:0 1px 6px #000000b3;white-space:nowrap;align-items:center;gap:4px;font-size:11px;font-weight:700;display:inline-flex}.wc-val:before{content:\"\";background:var(--coin);width:9px;height:9px;box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent);border-radius:50%}.wc-name{font-size:clamp(15px,7cqw,30px)}.wc-cat{font-size:clamp(10.5px,4.6cqw,16px)}.wc-stats,.wc-val{font-size:clamp(11px,4.8cqw,17px)}.wc-cap{padding:clamp(14px,6.5cqw,24px) clamp(14px,6.5cqw,24px) clamp(16px,7.5cqw,28px)}.wc-top{top:clamp(11px,5cqw,18px);left:clamp(11px,5cqw,18px);right:clamp(11px,5cqw,18px)}.wc-rtag,.wc-new{padding:.3em .8em;font-size:clamp(10px,4.2cqw,14px)}.wc-big .wc-cat{white-space:normal}.coll-head{justify-content:space-between;align-items:flex-start;gap:var(--s4);margin-bottom:var(--s5);flex-wrap:wrap;display:flex}.coll-head h1{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(24px,2.6vw,32px);font-weight:700}.coll-head .meta{color:var(--fg-soft);margin-top:6px;font-size:14px}.avatar{width:var(--s);height:var(--s);background:hsl(var(--h) 35% 26%);color:hsl(var(--h) 70% 85%);font:700 calc(var(--s) * .42)/1 var(--display);border-radius:50%;flex:none;justify-content:center;align-items:center;display:inline-flex;overflow:hidden}.avatar img{object-fit:cover;width:100%;height:100%}.coll-tools{gap:var(--s3);flex-wrap:wrap;flex:460px;justify-content:flex-end;align-items:center;display:flex}.search-wrap{flex:300px;align-items:center;min-width:220px;display:flex;position:relative}.search-ico{width:17px;height:17px;color:var(--fg-faint);pointer-events:none;position:absolute;left:14px}.search{background:var(--elev);border:1px solid var(--line);width:100%;color:var(--fg);font-family:var(--body);border-radius:11px;padding:11px 38px 11px 40px;font-size:14px}.search::placeholder,.af-input::placeholder{color:var(--fg-faint)}.search:focus{border-color:var(--fg-soft);background:var(--elev2)}.search::-webkit-search-cancel-button{display:none}.search-clear{width:24px;height:24px;color:var(--fg-faint);background:0 0;border:none;border-radius:7px;justify-content:center;align-items:center;font-size:18px;line-height:1;display:flex;position:absolute;right:8px}.search-clear:hover{background:var(--elev2);color:var(--fg)}.tool-actions{gap:var(--s2);flex-wrap:wrap;align-items:center;display:flex}.isel{background:var(--elev);border:1px solid var(--line);border-radius:11px;align-items:center;gap:8px;height:42px;padding:0 12px;transition:all .15s;display:inline-flex;position:relative}.isel:hover,.isel:focus-within{border-color:var(--line2)}.isel svg{width:16px;height:16px;color:var(--fg-soft);flex:none}.isel select{appearance:none;color:var(--fg);font-family:var(--body);cursor:pointer;background:0 0;border:none;outline:none;height:100%;padding:0 18px 0 0;font-size:14px;font-weight:500}#wm-app-root option{background:var(--elev);color:var(--fg)}@supports (appearance:base-select){#wm-app-root select{appearance:base-select}#wm-app-root ::picker(select){appearance:base-select}#wm-app-root select{align-items:center;display:inline-flex}#wm-app-root select::picker-icon{display:none}#wm-app-root ::picker(select){background:var(--elev);border:1px solid var(--line2);min-width:anchor-size(width);opacity:0;transition:opacity .15s ease,translate .15s ease,overlay .15s allow-discrete,display .15s allow-discrete;border-radius:12px;margin-block:6px;padding:4px;translate:0 -4px;box-shadow:0 18px 40px -16px #000}#wm-app-root select:open::picker(select){opacity:1;translate:0}@starting-style{#wm-app-root select:open::picker(select){opacity:0;translate:0 -4px}}#wm-app-root option{color:var(--fg-soft);font:500 14px/1.2 var(--body);cursor:pointer;background:0 0;border-radius:8px;padding:9px 12px;transition:background .12s,color .12s}#wm-app-root option::checkmark{display:none}#wm-app-root option:hover,#wm-app-root option:focus-visible{background:var(--elev2);color:var(--fg);outline:none}#wm-app-root option:checked{color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,transparent)}}.isel:after{content:\"\";border-right:2px solid var(--fg-soft);border-bottom:2px solid var(--fg-soft);pointer-events:none;width:8px;height:8px;position:absolute;right:12px;transform:rotate(45deg)translateY(-2px)}.iconbtn{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);height:42px;font-family:var(--body);white-space:nowrap;border-radius:11px;align-items:center;gap:8px;padding:0 14px;font-size:14px;font-weight:500;transition:all .15s;display:inline-flex}.iconbtn svg{flex:none;width:17px;height:17px}.iconbtn:hover{color:var(--fg);border-color:var(--line2)}.iconbtn.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}.sort-hint{margin:-8px 0 var(--s4);color:var(--fg-soft);font-size:12.5px}.rarity-panel{gap:var(--s3);margin-bottom:var(--s6);flex-direction:column;display:flex}.rarity-meter{gap:5px;height:9px;display:flex}.rm-seg{background:var(--rc);cursor:pointer;border:none;border-radius:999px;min-width:14px;height:100%;padding:0;transition:flex-grow .45s cubic-bezier(.2,.7,.3,1),opacity .2s,filter .2s,transform .15s}.rm-seg:hover{filter:brightness(1.18)}.rm-seg.sel{filter:brightness(1.2);transform:scaleY(1.5)}.rm-seg.dim{opacity:.28}.rarity-legend{gap:var(--s2);flex-wrap:wrap;align-items:center;display:flex}.rl{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);border-radius:999px;align-items:center;gap:8px;padding:7px 13px;font-size:13px;font-weight:500;transition:all .15s;display:inline-flex}.rl:hover{color:var(--fg);border-color:var(--line2)}.rl.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}.rl-dot{border-radius:3px;flex:none;width:9px;height:9px}.rl-n{color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}.rl-sep{background:var(--line2);width:1px;height:22px;margin:0 4px}.rl-ico{flex:none;width:14px;height:14px}.rl.fav.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}.rl.fav.on .rl-ico{fill:var(--r-l);stroke:var(--r-l)}.rl.shiny.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}.card-btn{text-align:left;cursor:pointer;content-visibility:auto;contain-intrinsic-size:auto 300px;overflow-clip-margin:40px;background:0 0;border:none;width:100%;margin:0;padding:0;display:block;position:relative}.card-btn.picking .wc{opacity:.55;transition:opacity .15s}.card-btn.picked .wc{opacity:1}.pick-overlay{z-index:10;border-radius:var(--radius-lg);pointer-events:none;border:3px solid #0000;justify-content:flex-end;align-items:flex-start;padding:9px;transition:all .15s;display:flex;position:absolute;inset:0}.pick-overlay .pick-check{color:#fff;background:#0000008c;border:2px solid #ffffffe6;border-radius:50%;justify-content:center;align-items:center;width:28px;height:28px;font-size:15px;font-weight:800;display:flex}.pick-overlay.on{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 22%,transparent);box-shadow:0 0 0 2px var(--accent) inset}.pick-check svg{width:16px;height:16px}.pick-overlay.on .pick-check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}.loading-more{color:var(--fg-faint);padding:var(--s3) 0;text-align:center;font-size:13px}.bulk-bar{z-index:40;max-width:calc(100vw - 2 * var(--s4));background:var(--elev2);border:1px solid var(--line2);border-radius:999px;align-items:center;gap:12px;padding:8px 10px 8px 18px;display:flex;position:fixed;bottom:20px;left:50%;transform:translate(-50%);box-shadow:0 18px 44px -18px #000}.bulk-text{color:var(--fg);white-space:nowrap;font-size:13.5px}.bulk-text b{color:var(--r-l)}.bulk-bar .btn{padding:9px 18px}.grid{gap:var(--s5);grid-template-columns:repeat(auto-fill,minmax(200px,1fr));display:grid}.empty{justify-content:center;align-items:center;gap:var(--s3);min-height:44vh;color:var(--fg-soft);text-align:center;flex-direction:column;display:flex}.empty b{font-family:var(--display);color:var(--fg);font-size:19px}.loading{color:var(--fg-faint);padding:var(--s7);text-align:center}.wc.skeleton{border:1px solid var(--line);background:linear-gradient(100deg,#141613 30%,#1c201c 50%,#141613 70%) 0 0/200% 100%;animation:1.2s ease-in-out infinite sk}@keyframes sk{to{background-position:-200% 0}}.grid-more{height:1px}.modal-backdrop{z-index:2147483600;padding:var(--s4) var(--s5);background:#060806d6;justify-content:center;align-items:flex-start;animation:.18s fade;display:flex;position:fixed;inset:0}@keyframes fade{0%{opacity:0}to{opacity:1}}.modal{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);width:100%;max-width:clamp(740px,46vw,960px);max-height:calc(100dvh - 2 * var(--s4));gap:var(--s6);padding:var(--s6);grid-template-columns:minmax(0,1fr) minmax(0,1.618fr);align-items:start;display:grid;position:relative;overflow:auto}.modal-card{width:100%}.modal-close{color:var(--fg-soft);cursor:pointer;z-index:2;background:0 0;border:none;font-size:28px;line-height:1;position:absolute;top:12px;right:16px}.modal-close:hover{color:var(--fg)}.modal-info{gap:var(--s4);flex-direction:column;justify-content:flex-start;min-width:0;display:flex}.modal-rar{color:var(--rc);font-family:var(--display);letter-spacing:.04em;font-size:12px;font-weight:700}.modal-name{font-family:var(--display);letter-spacing:-.01em;font-size:26px;font-weight:700;line-height:1.15}.modal-cat{color:var(--fg-soft);font-size:14px;line-height:1.45}.modal-sum{color:var(--fg-soft);-webkit-line-clamp:4;-webkit-box-orient:vertical;font-size:13.5px;line-height:1.55;display:-webkit-box;overflow:hidden}.modal-sum.muted{color:var(--fg-faint)}.modal .btn{text-align:center;text-decoration:none}.modal-panel{align-items:stretch;gap:var(--s4);flex-direction:column;display:flex}.modal-card{align-self:start;position:sticky;top:0}.mk-h,.modal .cmp-head h3{font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);margin:0 0 var(--s2)}.mk-price{background:var(--elev);border:1px solid var(--line);border-radius:var(--radius);padding:var(--s4)}.mk-kpis{gap:var(--s2);grid-template-columns:repeat(auto-fit,minmax(130px,1fr));display:grid}.mk-kpi{min-width:0;padding:var(--s3) var(--s3) 10px;background:var(--elev);border:1px solid var(--line);text-align:left;color:var(--fg);font:inherit;border-radius:12px;flex-direction:column;align-items:flex-start;gap:2px;display:flex}.mk-kpi .mk-h{margin:0}.mk-kpi b{font:700 24px/1.15 var(--display);font-variant-numeric:tabular-nums}.mk-kpi b.gold{color:var(--r-l)}.mk-kpi small{color:var(--fg-faint);align-items:center;gap:4px;font-size:12px;line-height:1.3;display:inline-flex}.mk-kpi small svg{flex:none;width:12px;height:12px}.mk-kpi.buy{cursor:pointer;transition:border-color .15s,background .15s}.mk-kpi.buy:hover{border-color:var(--line2);background:var(--elev2)}.mk-kpi.buy.good{border-color:color-mix(in oklab,var(--accent) 40%,var(--line));background:color-mix(in oklab,var(--accent) 7%,var(--elev))}.mk-kpi.buy.good small{color:var(--accent);font-weight:600}.mk-sell{justify-content:space-between;align-items:center;gap:var(--s3);padding:10px 10px 10px var(--s4);border:1px dashed var(--line2);color:var(--fg-soft);border-radius:12px;flex-wrap:wrap;font-size:13px;display:flex}.mk-sell b{color:var(--fg)}.mk-sell span{flex:200px}.mk-sell .btn{margin-left:auto;padding-block:8px}.mk-plot{height:104px;margin-top:var(--s4);position:relative}.mk-plot svg{width:100%;height:100%;display:block;position:absolute;inset:0}.mk-avgline{border-top:1px dashed color-mix(in oklab,var(--r-l) 55%,transparent);pointer-events:none;position:absolute;left:0;right:0}.mk-avgline span{background:var(--elev);color:color-mix(in oklab,var(--r-l) 80%,transparent);border-radius:4px;padding:0 4px;font-size:10px;font-weight:600;position:absolute;bottom:3px;left:0}.mk-slice{cursor:crosshair;background:0 0;border:none;padding:0;position:absolute;top:0;bottom:0;translate:-50%}.mk-slice:before{content:\"\";border-left:1px solid var(--line2);opacity:0;transition:opacity .12s;position:absolute;top:0;bottom:0;left:50%}.mk-slice:after{content:\"\";left:50%;top:var(--y);background:var(--surface);border:2px solid var(--accent);border-radius:50%;width:7px;height:7px;transition:scale .12s;position:absolute;translate:-50% -50%}.mk-slice.on:before{opacity:1}.mk-slice.on:after{background:var(--accent);scale:1.4}#wm-app-root .mk-slice:focus-visible{outline:none}#wm-app-root .mk-slice:focus-visible:after{box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 40%,transparent)}.mk-tip{background:var(--elev2);border:1px solid var(--line2);color:var(--fg-soft);white-space:nowrap;pointer-events:none;z-index:1;border-radius:9px;flex-direction:column;align-items:center;gap:1px;padding:6px 10px;font-size:11px;display:flex;position:absolute;translate:-50% calc(-100% - 12px);box-shadow:0 10px 24px -12px #000}.mk-tip b{font:700 14px/1.2 var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:5px;display:inline-flex}.mk-tip.flip{translate:calc(16px - 100%) calc(-100% - 12px)}.mk-tip.flop{translate:-16px calc(-100% - 12px)}.mk-history{border-top:1px solid var(--line);padding-top:var(--s3)}.mk-history summary{align-items:center;gap:var(--s2);cursor:pointer;font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);list-style:none;display:flex}.mk-history summary::-webkit-details-marker{display:none}.mk-history summary span{letter-spacing:0;text-transform:none;color:var(--fg-faint);font-weight:500}.mk-history summary:after{content:\"\";border-bottom:1.5px solid;border-right:1.5px solid;width:6px;height:6px;margin-left:auto;transition:rotate .15s;translate:0 -2px;rotate:45deg}.mk-history[open] summary:after{translate:0 2px;rotate:225deg}.mk-history summary:hover{color:var(--fg-soft)}.mk-list{margin:var(--s3) 0 0;padding:0;list-style:none}.mk-list li{color:var(--fg-soft);font-variant-numeric:tabular-nums;justify-content:space-between;align-items:center;padding:7px 2px;font-size:13px;display:flex}.mk-list li+li{border-top:1px solid var(--line)}.mk-list b{color:var(--r-l);align-items:center;gap:6px;display:inline-flex}.mk-x{color:var(--fg-faint);margin-top:var(--s1);justify-content:space-between;font-size:11px;display:flex}.modal .cmp{background:0 0;border:none;padding:0}.modal .cmp-head{margin-bottom:var(--s2);flex-direction:column;align-items:flex-start;gap:2px}.modal .cmp-head h3{margin:0}.modal .cmp-list{max-height:none;overflow:visible}.modal .cmp-row{grid-template-columns:minmax(72px,auto) minmax(0,1fr) auto minmax(0,auto);row-gap:0}.modal .cmp-gap{text-align:left}.modal .cmp-time{flex-wrap:nowrap}.modal .cmp-tag{display:none}.modal .cmp .auc-empty{padding-top:0}.modal-wiki{color:var(--accent);align-self:flex-start;font-size:13.5px;font-weight:600;text-decoration:none}.modal-wiki:hover{text-decoration:underline}.actions{border-top:1px solid var(--line);padding-top:var(--s4)}.modal-credit{color:var(--fg-faint);font-size:11px}@media (prefers-reduced-motion:reduce){.flip-in,.stage-aura,.reveal-rarity,.rg-card,.booster-main,.booster-shine{animation:none}.booster,.wc{transition:none}}@media (width<=900px){:host,:root{--sidebar:100%;--tabbar:calc(64px + env(safe-area-inset-bottom))}.app{grid-template-columns:1fr}.side{z-index:20;height:auto;padding:6px max(6px,env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-right));border-right:0;border-top:1px solid var(--line);background:color-mix(in oklab,var(--surface) 97%,transparent);flex-direction:row;gap:0;position:fixed;inset:auto 0 0}.side .brand,.nav-sep,.nav-grid,.side-foot{display:none}.nav{flex:1;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;display:grid;overflow:visible}.nav button{white-space:nowrap;border-radius:12px;flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;font-size:11px;font-weight:600;overflow:hidden}.nav button svg{width:22px;height:22px}.nav button.on{background:0 0}.nav-long{display:none}.nav-short{text-overflow:ellipsis;max-width:100%;display:block;overflow:hidden}.main{padding-bottom:var(--tabbar)}.topbar{padding:calc(var(--s2) + env(safe-area-inset-top)) var(--s4) var(--s2);gap:var(--s3)}.crumb{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:18px;font-weight:700;overflow:hidden}.wallet .stats-toggle,.wallet .snd{display:none}.wallet .menu-btn{display:grid}.wallet{position:relative}.notif{position:static}.notif-panel{width:min(340px,calc(100vw - 2 * var(--s4)))}.coll-head h1,.page-head h1{display:none}.coll-head .meta{margin-top:0}.coll-tools,.coll-tools .search-wrap{flex:100%;min-width:0}.tool-actions{scrollbar-width:none;flex-wrap:nowrap;width:100%;min-width:0;overflow-x:auto}.pager{gap:var(--s2)}.pager-btn{min-width:0;padding-inline:var(--s3);flex:1 1 0;justify-content:center}.pager-info{flex:none}.tool-actions>*{flex:1 0 auto;justify-content:center;padding-inline:10px}.rarity-legend:not(.picker-chips){scrollbar-width:none;margin-inline:calc(-1 * var(--s4));padding-inline:var(--s4);flex-wrap:nowrap;overflow-x:auto}.rarity-legend:not(.picker-chips)>*{flex:none}.toasts,.bulk-bar{bottom:calc(var(--tabbar) + 12px)}}@media (width<=560px){.chip{padding:8px 12px}.badge.pro{display:none}.wallet{gap:6px}.wallet .bell{width:34px;height:34px}.chip-cap{display:none}}@media (width<=400px){.wallet{gap:4px}.chip{gap:6px;padding:7px 10px}}@media (width<=340px){.bulk-bar{left:var(--s4);right:var(--s4);justify-content:flex-end;gap:var(--s2) var(--s3);border-radius:var(--radius-lg);max-width:none;padding:var(--s3);flex-wrap:wrap;transform:none}.bulk-text{white-space:normal;flex:auto;min-width:0;padding-left:6px;line-height:1.35}.bulk-bar:has(.btn+.btn) .bulk-text{flex-basis:100%}.bulk-bar .btn{padding-inline:var(--s3);flex:1 1 0}}@media (width<=560px){.modal{justify-items:center;gap:var(--s4);padding:var(--s5);grid-template-columns:1fr}.modal-card{width:190px;position:static}.fact{flex-basis:40%}.grid{gap:var(--s3);grid-template-columns:repeat(2,minmax(0,1fr))}}.actions{gap:var(--s2);margin-top:var(--s2);display:flex}.actions .btn{padding-inline:var(--s3);flex:1}.btn.danger{color:#f0a0a0;border-color:#5a2b2b}.btn.danger:hover{color:#f8caca;border-color:#f26d6d}.af-input-row{align-items:center;display:flex;position:relative}.af-input{background:var(--surface);border:1px solid var(--line2);color:var(--fg);font-family:var(--body);border-radius:9px;flex:1;width:100%;padding:9px 40px 9px 12px;font-size:14px}.af-unit{color:var(--fg-faint);pointer-events:none;font-size:13px;position:absolute;right:12px}.af-input:focus{border-color:var(--accent)}.af-actions{gap:8px;margin-top:4px;display:flex}.af-actions .btn{padding-inline:var(--s3);flex:1}.modal-msg{color:#f0a0a0;font-size:12.5px}.modal-msg.ok{color:var(--accent)}.confirm{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:12px;flex-direction:column;gap:10px;padding:14px;display:flex}.confirm-text{color:var(--fg);font-size:14px;line-height:1.4}.confirm-text b{color:var(--r-l);font-weight:700}.sell2{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:14px;flex-direction:column;gap:14px;padding:16px;display:flex}.sell2-head{font-family:var(--display);color:var(--fg);font-size:15px;font-weight:700}.sell2-block{flex-direction:column;gap:8px;display:flex}.sell2-lab{letter-spacing:.02em;color:var(--fg-soft);text-transform:uppercase;justify-content:space-between;align-items:center;font-size:12px;font-weight:600;display:flex}.sell2-suggest{background:color-mix(in oklab,var(--r-l) 15%,transparent);border:1px solid color-mix(in oklab,var(--r-l) 30%,transparent);color:var(--r-l);cursor:pointer;text-transform:none;letter-spacing:0;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;transition:all .12s}.sell2-suggest:hover{background:color-mix(in oklab,var(--r-l) 24%,transparent)}.sell2 .af-input{font-variant-numeric:tabular-nums;font-size:16px;font-weight:600}.sell2-durs{grid-template-columns:repeat(7,1fr);gap:6px;display:grid}.sell2-dur{white-space:nowrap;background:var(--elev2);border:1px solid var(--line);color:var(--fg-soft);cursor:pointer;font-variant-numeric:tabular-nums;border-radius:9px;padding:9px 2px;font-size:12px;font-weight:600;transition:all .12s}.sell2-dur:hover{color:var(--fg);border-color:var(--line2)}.sell2-dur.on{background:color-mix(in oklab,var(--accent) 16%,transparent);border-color:var(--accent);color:var(--accent)}.modal-tabs{background:var(--elev);border:1px solid var(--line);border-radius:10px;align-self:flex-start;gap:4px;margin-top:2px;padding:3px;display:inline-flex}.modal-tabs button{color:var(--fg-soft);font-family:var(--display);cursor:pointer;background:0 0;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;transition:all .15s}.modal-tabs button.on{background:var(--accent);color:var(--accent-ink)}.mc-plot{align-items:stretch;gap:8px;display:flex}.mc-y{text-align:right;min-width:30px;color:var(--fg-faint);font-variant-numeric:tabular-nums;flex-direction:column;justify-content:space-between;padding:2px 0;font-size:10px;display:flex}.mc-plot svg{background:var(--elev);border:1px solid var(--line);border-radius:10px;flex:1;height:56px;display:block}.mc-x{color:var(--fg-faint);justify-content:space-between;margin-top:4px;margin-left:38px;font-size:10px;display:flex}.facts{gap:var(--s2);flex-wrap:wrap;display:flex}.fact{background:var(--elev);border:1px solid var(--line);border-radius:11px;flex:112px;padding:10px 13px}.fk{color:var(--fg-faint);font-size:11px}.fv{font-family:var(--display);font-variant-numeric:tabular-nums;margin-top:3px;font-size:18px;font-weight:700;line-height:1.15}.fv.atk{color:#f26d6d}.fv.def{color:#5aa2ff}.fv.val{color:var(--r-l)}.modal-obtained{color:var(--fg-faint);margin-top:calc(-1 * var(--s2));font-size:12px}.modal-backdrop,.modal{overscroll-behavior:contain}.wc.is-unowned{filter:saturate(.72)brightness(.9)}.card-btn:hover .wc.is-unowned{filter:saturate()brightness()}.wc-wish{border:1px solid color-mix(in oklab,var(--r-sr) 60%,#ffffff4d);color:var(--r-sr);background:#000000b8;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex}.wc.is-nsfw .wc-photo,.wc.is-nsfw .wc-blur{filter:blur(18px)saturate(.7);transform:scale(1.2)}.wc-nsfw{z-index:3;font:600 11px/1 var(--display);color:var(--fg);border:1px solid var(--line2);white-space:nowrap;background:#0009;border-radius:999px;padding:6px 12px;position:absolute;top:44%;left:50%;transform:translate(-50%,-50%)}.grid{position:relative}.grid>*{transition:opacity .2s}.grid.dim{pointer-events:none}.grid.dim>*{opacity:.45}.grid.dim:before{content:\"\";left:0;right:0;top:calc(-1 * var(--s4));z-index:2;background:linear-gradient(90deg,transparent,var(--accent) 40%,var(--accent) 60%,transparent) no-repeat,color-mix(in oklab,var(--accent) 14%,transparent);background-size:40% 100%,100% 100%;border-radius:3px;height:3px;animation:1.1s ease-in-out infinite load-bar;position:absolute}.grid.dim:after{content:\"\";z-index:2;pointer-events:none;background:linear-gradient(100deg,#0000 30%,#ffffff0d 50%,#0000 70%) 0 0/220% 100%;animation:1.4s ease-in-out infinite reverse sk;position:absolute;inset:0}@keyframes load-bar{0%{background-position:-40% 0,0 0}to{background-position:140% 0,0 0}}.spin{border:2px solid color-mix(in oklab,currentColor 22%,transparent);border-top-color:currentColor;border-radius:50%;flex:none;width:15px;height:15px;animation:.7s linear infinite spin;display:inline-block}.search-wrap .spin.search-ico{width:16px;height:16px;color:var(--accent)}@keyframes spin{to{transform:rotate(360deg)}}.sync{color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,transparent);font-variant-numeric:tabular-nums;vertical-align:1px;border-radius:999px;align-items:center;gap:7px;margin-left:10px;padding:2px 10px 2px 8px;font-size:12px;display:inline-flex}.sync .spin{width:11px;height:11px}.cmp-row.sk{cursor:default;background:linear-gradient(100deg,var(--elev2) 30%,color-mix(in oklab,var(--elev2) 70%,#fff 6%) 50%,var(--elev2) 70%);background-size:200% 100%;animation:1.2s ease-in-out infinite sk}.wc-photo,.wc-blur,.wc-bg{opacity:0;transition:opacity .35s}.wc.is-ready .wc-photo,.wc.is-ready .wc-blur,.wc.is-ready .wc-bg{opacity:1}.wc:not(.is-ready):not(.skeleton) .wc-face:before{content:\"\";z-index:0;background:linear-gradient(100deg,#0000 30%,#ffffff0f 50%,#0000 70%) 0 0/200% 100%;animation:1.2s ease-in-out infinite sk;position:absolute;inset:0}@media (prefers-reduced-motion:reduce){.grid.dim:before{background-size:100% 100%,100% 100%;animation:none}.grid.dim:after,.wc-face:before,.cmp-row.sk{animation:none}.spin{animation-duration:2s}.wc-photo,.wc-blur,.wc-bg{transition:none}}.pager{justify-content:center;align-items:center;gap:var(--s4);margin:var(--s6) 0 var(--s5);display:flex}.pager-info{color:var(--fg-soft);font-variant-numeric:tabular-nums;font-size:13.5px}.auc-item{flex-direction:column;gap:6px;display:flex}.auc-item .card-btn{width:100%}.auc-meta{justify-content:space-between;align-items:center;gap:8px;padding:0 2px;display:flex}.auc-bid{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:5px;font-size:14px;font-weight:700;display:inline-flex}.auc-coin{background:var(--coin);width:11px;height:11px;box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent);border-radius:50%;flex:none}.auc-end{color:var(--fg-soft);font-variant-numeric:tabular-nums;font-size:12.5px}.auc-seller{color:var(--fg-faint);white-space:nowrap;text-overflow:ellipsis;padding:0 2px;font-size:11.5px;overflow:hidden}.auc-seller.lead{color:var(--accent);font-weight:600}.auc-foot{justify-content:space-between;align-items:center;gap:8px;min-width:0;display:flex}.auc-foot .auc-seller{min-width:0}.auc-dup{font:700 11px/1 var(--display);color:var(--fg);background:var(--elev2);border:1px solid var(--line2);font-variant-numeric:tabular-nums;border-radius:999px;flex:none;padding:4px 8px}.cmp-head{justify-content:space-between;align-items:baseline;gap:var(--s3);margin-bottom:var(--s2);flex-wrap:wrap;display:flex}.cmp-head h3,.auc-panel .cmp-head h3{margin:0}.cmp-sum{color:var(--fg-soft);font-size:12.5px}.cmp-sum b{color:var(--fg);font-variant-numeric:tabular-nums}.cmp-list{scrollbar-width:thin;scrollbar-color:var(--line2) transparent;flex-direction:column;gap:4px;max-height:220px;margin:0;padding:0;list-style:none;display:flex;overflow:auto}.cmp-row{align-items:center;gap:var(--s3);background:var(--elev2);width:100%;min-height:40px;color:var(--fg);font:inherit;text-align:left;cursor:pointer;border:1px solid #0000;border-radius:10px;grid-template-columns:minmax(80px,1fr) minmax(96px,1fr) minmax(120px,1.4fr) minmax(0,1.2fr);padding:8px 12px;font-size:13px;transition:border-color .15s,background .15s;display:grid}.cmp-row:hover:not(:disabled){border-color:var(--line2)}.cmp-row.here{cursor:default;border-color:color-mix(in oklab,var(--accent) 45%,var(--line));background:color-mix(in oklab,var(--accent) 8%,var(--elev2))}.cmp-price{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:6px;font-size:15px;font-weight:700;display:inline-flex}.cmp-shiny{color:#f3d27a;display:inline-flex}.cmp-shiny svg{width:12px;height:12px}.cmp-gap{font-variant-numeric:tabular-nums;color:var(--fg-soft)}.cmp-gap.best{color:var(--accent);font-weight:600}.cmp-time{font-variant-numeric:tabular-nums;flex-wrap:wrap;align-items:center;gap:8px;display:inline-flex}.cmp-time.soon{color:var(--bad)}.cmp-tag{color:var(--fg-soft);background:var(--elev);border:1px solid var(--line2);white-space:nowrap;border-radius:999px;padding:2px 7px;font-size:10.5px;font-weight:700}.cmp-who{color:var(--fg-faint);white-space:nowrap;text-overflow:ellipsis;text-align:right;overflow:hidden}.cmp{container-type:inline-size}@container (width<=520px){.cmp-row{grid-template-columns:auto 1fr;row-gap:6px}.cmp-gap{text-align:right}.cmp-time{justify-content:flex-start}}@media (width<=560px){.cmp-list{max-height:none;overflow:visible}}.auc-end.soon{color:var(--bad)}.mkt-filter{margin-bottom:var(--s5)}.tabs{gap:var(--s5);border-bottom:1px solid var(--line);margin-bottom:var(--s5);scrollbar-width:none;display:flex;overflow-x:auto}.tabs button{color:var(--fg-soft);font:inherit;white-space:nowrap;cursor:pointer;background:0 0;border:0;border-bottom:2px solid #0000;margin-bottom:-1px;padding:0 0 12px;font-size:14px;font-weight:500;transition:color .15s,border-color .15s}.tabs button:hover{color:var(--fg)}.tabs button.on{color:var(--fg);border-bottom-color:var(--accent);font-weight:600}.auc{width:min(900px,94vw);max-height:calc(100dvh - 2 * var(--s4));background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);padding:var(--s6);gap:var(--s5);flex-direction:column;display:flex;position:relative;overflow:auto;box-shadow:0 40px 90px -30px #000}.auc-top{gap:var(--s6);grid-template-columns:minmax(0,1fr) minmax(0,1.618fr);align-items:start;display:grid}.auc-card .wc{border-radius:14px}.auc-body{gap:var(--s4);flex-direction:column;min-width:0;display:flex}.auc-name{font-family:var(--display);letter-spacing:-.02em;margin-top:6px;font-size:clamp(22px,2.6vw,30px);font-weight:700;line-height:1.1}.auc-cat{color:var(--fg-soft);margin-top:4px;font-size:14px}.auc-by{color:var(--fg-faint);margin-top:6px;font-size:12.5px}.auc-state{background:var(--elev);border:1px solid var(--line);border-radius:14px;flex-direction:column;gap:6px;padding:16px 18px;display:flex}.auc-state[data-phase=sold]{border-color:color-mix(in oklab,var(--accent) 40%,var(--line));background:color-mix(in oklab,var(--accent) 6%,var(--elev))}.auc-row{justify-content:space-between;gap:var(--s4);flex-wrap:wrap;display:flex}.auc-k{color:var(--fg-soft);letter-spacing:.02em;font-size:12px}.auc-price{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:9px;font-size:34px;font-weight:800;line-height:1.1;display:inline-flex}.auc-price.muted{color:var(--fg-soft)}.auc-price .auc-coin{width:17px;height:17px}.auc-clock{text-align:right}.auc-time{font-family:var(--display);font-variant-numeric:tabular-nums;font-size:26px;font-weight:800;line-height:1.2}.auc-clock[data-u=warn] .auc-time{color:var(--r-ur)}.auc-clock[data-u=crit] .auc-time{color:var(--bad);animation:1s ease-in-out infinite auc-pulse}.auc-clock[data-u=end] .auc-time{color:var(--fg-faint)}.auc-sub{color:var(--fg-faint);flex-wrap:wrap;align-items:center;gap:10px;font-size:12.5px;display:flex}.auc-live{color:var(--accent);align-items:center;gap:6px;display:inline-flex}.auc-dot{background:var(--accent);border-radius:50%;width:7px;height:7px;animation:1.8s ease-out infinite auc-live}.auc-flag{border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600}.auc-flag.lead{background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--accent)}.auc-flag.out{background:color-mix(in oklab,var(--bad) 14%,transparent);color:var(--bad)}.auc-act{flex-direction:column;gap:10px;display:flex}.auc-inline{gap:8px;display:flex}.auc-inline .af-input-row{flex:1}.auc-inline .btn{padding:10px 22px}.auc-cta{width:100%;padding:12px}.auc-quick{flex-wrap:wrap;gap:6px;display:flex}.auc-quick button{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);cursor:pointer;border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;transition:all .12s}.auc-quick button:hover{color:var(--fg);border-color:var(--line2)}.auc-bal{color:var(--fg-faint);font-size:12px}.auc-bal.low{color:var(--bad)}.auc-note{color:var(--fg-soft);font-size:13px}.auc-bottom{gap:var(--s4);grid-template-columns:1fr 1fr;display:grid}.auc-panel{background:var(--elev);border:1px solid var(--line);border-radius:14px;min-width:0;padding:14px 16px}.auc-panel h3{font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);margin-bottom:var(--s2)}.auc-chart{height:130px;margin-left:36px;position:relative}.auc-chart svg{width:100%;height:100%;display:block;overflow:visible}.auc-chart .mc-y{position:absolute;top:0;bottom:0;left:-36px}.auc-pt{background:var(--accent);width:6px;height:6px;box-shadow:0 0 0 2px var(--elev);border-radius:50%;margin:-3px 0 0 -3px;position:absolute}.auc-axis{color:var(--fg-faint);justify-content:space-between;margin:8px 0 0 36px;font-size:11px;display:flex}.auc-empty{color:var(--fg-faint);padding:2px 0 4px;font-size:13px}.auc-feed{max-height:176px;margin:0;padding:0;list-style:none;overflow:auto}.auc-feed li{border-top:1px solid var(--line);align-items:center;gap:8px;padding:7px 0;font-size:13px;display:flex}.auc-feed li:first-child{border-top:0}.auc-feed .who{white-space:nowrap;text-overflow:ellipsis;flex:1;min-width:0;font-weight:500;overflow:hidden}.auc-feed .me .who{color:var(--accent)}.auc-feed .tag{letter-spacing:.03em;color:var(--accent-ink);background:var(--accent);border-radius:999px;padding:2px 7px;font-size:10.5px;font-weight:700}.auc-feed .amt{color:var(--r-l);font-variant-numeric:tabular-nums;font-weight:700}.auc-feed li:not(.top) .amt{color:color-mix(in oklab,var(--r-l) 70%,var(--fg-soft))}.auc-feed .when{color:var(--fg-faint);text-align:right;min-width:74px;font-size:11.5px}.auc,.auc-feed,.modal,.notif-panel{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}@keyframes auc-pulse{50%{opacity:.55}}@keyframes auc-live{0%{box-shadow:0 0 0 0 color-mix(in oklab,var(--accent) 55%,transparent)}70%{box-shadow:0 0 0 7px #0000}to{box-shadow:0 0 #0000}}@media (width<=760px){.auc-top,.auc-bottom{grid-template-columns:1fr}.auc-card{width:180px;margin:0 auto}}@media (prefers-reduced-motion:reduce){.auc-clock[data-u=crit] .auc-time,.auc-dot{animation:none}}.wc-wish svg,.wc-star svg,.wc-shiny svg{width:12px;height:12px;display:block}.pager-btn{align-items:center;gap:7px;display:inline-flex}.pager-btn svg{width:15px;height:15px}.modal-close .x-ico{width:16px;height:16px}.search-clear .x-ico{width:13px;height:13px}.toasts{z-index:2147483601;flex-direction:column;gap:10px;width:min(360px,100vw - 40px);display:flex;position:fixed;bottom:68px;right:16px}.toast{background:var(--elev2);border:1px solid var(--line2);color:var(--fg);cursor:pointer;border-radius:14px;align-items:flex-start;gap:12px;padding:14px 16px;animation:.25s toast-in;display:flex;box-shadow:0 20px 50px -20px #000}.toast svg{width:18px;height:18px;color:var(--accent);flex:none;margin-top:1px}.toast-wrap{animation:.25s toast-in;position:relative}.toast-wrap .toast{padding-right:40px;animation:none}.toast-x{width:26px;height:26px;color:var(--fg-faint);cursor:pointer;background:0 0;border:0;border-radius:8px;justify-content:center;align-items:center;transition:background .15s,color .15s;display:flex;position:absolute;top:8px;right:8px}.toast-x:hover{background:var(--elev);color:var(--fg)}.toast-x svg{width:13px;height:13px}.toast b{font-size:13.5px;font-weight:600;display:block}.toast span{color:var(--fg-soft);margin-top:2px;font-size:12.5px;line-height:1.4;display:block}@keyframes toast-in{0%{opacity:0;transform:translateY(8px)}}.kbd{border:1px solid var(--line2);background:var(--elev);min-width:22px;height:22px;font:600 11.5px/1 var(--body);color:var(--fg);border-bottom-width:2px;border-radius:6px;justify-content:center;align-items:center;padding:0 6px;display:inline-flex}.kbd-help-scrim{z-index:2147483601;background:#06080699;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}.kbd-help{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);flex-direction:column;gap:10px;min-width:300px;padding:22px 26px;display:flex}.kbd-help h3{font-family:var(--display);margin-bottom:4px;font-size:16px}.kbd-row{color:var(--fg-soft);align-items:center;gap:12px;font-size:13.5px;display:flex}.kbd-row .kbd{min-width:58px}@media (prefers-reduced-motion:reduce){.toast,.toast-wrap{animation:none}}.hc-backdrop{z-index:2147483601}.modal.hc{gap:var(--s3);text-align:center;grid-template-columns:1fr;justify-items:center;max-width:420px}.hc-title{font-family:var(--display);font-size:20px}.hc-sub{color:var(--fg-soft);align-items:center;gap:8px;font-size:13.5px;display:inline-flex}.hc-box{justify-content:center;min-height:70px;display:flex}.hc-cancel{color:var(--fg-faint);font-weight:500}.tab-n{min-width:18px;height:18px;font:700 11px/1 var(--display);background:color-mix(in oklab,var(--accent) 18%,transparent);color:var(--accent);border-radius:999px;justify-content:center;align-items:center;margin-left:6px;padding:0 6px;display:inline-flex}.nowrap{white-space:nowrap}.trade-status{background:var(--elev2);color:var(--fg-soft);white-space:nowrap;border-radius:999px;align-items:center;padding:4px 9px;font-size:11.5px;font-weight:700;line-height:1;display:inline-flex}.trade-status[data-s=pending]{background:color-mix(in oklab,var(--r-l) 14%,transparent);color:var(--r-l)}.trade-status[data-s=accepted]{background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--accent)}.trade-status[data-s=declined]{background:color-mix(in oklab,var(--bad) 15%,transparent);color:var(--bad)}.trade-status[data-s=cancelled]{color:var(--fg-faint)}.tr-head{margin-bottom:var(--s4);align-items:center}.tr-split{gap:var(--s4);grid-template-columns:minmax(0,1fr);display:grid}.tr-col,.tr-pane{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);min-width:0}.tr-col{flex-direction:column;display:flex;overflow:hidden}.tr-tabs{padding:0 var(--s2);flex:none;gap:0;margin:0}.tr-tabs button{padding:var(--s4) var(--s2) 14px;flex:1;justify-content:center;align-items:center;display:inline-flex}.tr-rows{padding:var(--s2);overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line2) transparent;flex-direction:column;gap:2px;display:flex;overflow:auto}.tr-row{align-items:center;gap:var(--s3);width:100%;min-height:68px;padding:10px var(--s3);color:var(--fg);font:inherit;text-align:left;cursor:pointer;background:0 0;border:1px solid #0000;border-radius:12px;grid-template-columns:40px minmax(0,1fr) auto;transition:background .15s,border-color .15s;display:grid;position:relative}.tr-row:hover{background:var(--elev)}.tr-row.on{background:var(--elev2);border-color:var(--line2)}.tr-row.on:before{content:\"\";background:var(--accent);border-radius:0 3px 3px 0;width:3px;position:absolute;top:14px;bottom:14px;left:-1px}.tr-row.sk{cursor:default;background:linear-gradient(100deg,var(--surface) 30%,var(--elev) 50%,var(--surface) 70%);background-size:200% 100%;height:68px;animation:1.2s ease-in-out infinite sk}.tr-row-main{flex-direction:column;gap:5px;min-width:0;display:flex}.tr-row-top{align-items:baseline;gap:var(--s2);min-width:0;display:flex}.tr-row-top b{text-overflow:ellipsis;white-space:nowrap;flex:0 auto;min-width:0;font-size:14.5px;font-weight:600;overflow:hidden}.tr-row-when{text-overflow:ellipsis;min-width:0;color:var(--fg-faint);flex:0 1000 auto;margin-left:auto;font-size:12px;overflow:hidden}.tr-row-line{min-width:0;color:var(--fg-soft);-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:13px;line-height:1.35;display:-webkit-box;overflow:hidden}.tr-col-none{padding:var(--s5) var(--s4);text-align:center;color:var(--fg-faint);font-size:13.5px;display:none}.tr-badge{text-align:center;min-width:46px;font:700 13px/1 var(--display);font-variant-numeric:tabular-nums;white-space:nowrap;background:var(--elev2);color:var(--fg-soft);border-radius:9px;padding:6px 9px}.tr-row.on .tr-badge[data-k=balanced],.tr-row.on .tr-badge[data-k=unknown]{background:var(--line)}.tr-badge[data-k=advantage]{background:color-mix(in oklab,var(--accent) 15%,transparent);color:var(--accent)}.tr-badge[data-k=disadvantage]{background:color-mix(in oklab,var(--bad) 15%,transparent);color:var(--bad)}.tr-badge[data-k=unknown]{color:var(--fg-faint)}.tr-row>.trade-status{padding:6px 9px}.tr-empty{justify-content:center;align-items:center;gap:var(--s2);min-height:340px;padding:var(--s6) var(--s5);text-align:center;color:var(--fg-soft);flex-direction:column;flex:1;font-size:14px;display:flex}.tr-empty b{font:700 19px/1.3 var(--display);color:var(--fg)}.tr-empty .btn{margin-top:var(--s3)}.tr-empty-ico{width:64px;height:64px;margin-bottom:var(--s2);color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,var(--elev));border:1px solid color-mix(in oklab,var(--accent) 28%,var(--line));border-radius:50%;justify-content:center;align-items:center;display:flex}.tr-empty-ico svg{width:28px;height:28px}.tr-pane{flex-direction:column;display:flex;overflow:hidden;container:tpane/inline-size}.tr-pane-sk{padding:var(--s5);gap:var(--s5);flex-direction:column;display:flex}.tr-pane-sk .sk-line{background:var(--elev);border-radius:12px;width:min(320px,70%);height:44px;animation:1.2s ease-in-out infinite sk}.tr-pane-sk .sk-cards{justify-content:center;gap:var(--s7);grid-template-columns:repeat(2,minmax(0,220px));display:grid}.tr-pane-sk .wc{aspect-ratio:5/7}.tp{flex-direction:column;flex:1;min-height:0;display:flex}.tp-head{align-items:center;gap:var(--s3);padding:var(--s4) var(--s5);border-bottom:1px solid var(--line);flex:none;display:flex}.tp-back{flex:none;justify-content:center;width:42px;padding:0}.tp-title{flex-direction:column;flex:1;gap:5px;min-width:0;display:flex}.tp-title h2{font:700 20px/1.2 var(--display);letter-spacing:-.01em;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.tp-sub{align-items:center;gap:4px var(--s2);color:var(--fg-faint);flex-wrap:wrap;font-size:12.5px;display:flex}.tp-mode{flex:none;align-self:center;margin:0}.tp-mode button{align-items:center;gap:7px;display:inline-flex}.tp-mode svg{width:15px;height:15px}.tp-body{overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line2) transparent;min-height:0;padding:clamp(var(--s3),2.5cqi,var(--s5));gap:var(--deal-bodyGap);flex-direction:column;flex:1;display:flex;overflow:auto}.tp-body>:first-child{margin-top:auto}.tp-body>:last-child{margin-bottom:auto}.tp-sides{justify-content:center;align-items:stretch;gap:var(--deal-gap);display:flex}.tp-sides.measuring{visibility:hidden}.tp-sides.stacked{flex-direction:column}.tside{gap:var(--s3);min-width:0;padding:calc(var(--deal-pad) - 1px);border-radius:var(--radius);background:var(--elev);border:1px solid var(--line);flex-direction:column;flex:none;display:flex}.tside-head{justify-content:space-between;align-items:baseline;gap:4px var(--s2);white-space:nowrap;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-soft);flex-wrap:wrap;font-size:11.5px;font-weight:700;display:flex}.tside-total{text-transform:none;letter-spacing:0;color:var(--fg);font:700 16px/1 var(--display);font-variant-numeric:tabular-nums;white-space:nowrap}.tside-total.is-none{font:500 13px var(--body);color:var(--fg-faint)}.tside-none{color:var(--fg-faint);padding:var(--s3) 0;width:var(--card-w);font-size:13px}.tside-cards{align-content:flex-start;gap:var(--deal-gap);width:calc(var(--cols,1) * var(--card-w) + (var(--cols,1) - 1) * var(--deal-gap));flex-wrap:wrap;margin-inline:auto;display:flex}.tside-cards>*{width:var(--card-w);flex:none}.tside>:nth-child(2){margin-top:auto}.tside>:last-child{margin-bottom:auto}.stacked .tside-none{width:auto}.tp-sides:not(.stacked) .tside{width:min-content}.tp-sides.scrolls:not(.stacked){align-items:flex-start}.tp-sides.scrolls .tside>*{margin-block:0}.tp-sides.scrolls:not(.stacked) .tm-verdict{top:var(--s4);margin-top:calc(var(--card-w) * .5);align-self:flex-start;position:sticky}.tside-coins{aspect-ratio:5/7;border-radius:var(--radius-lg);border:1px dashed color-mix(in oklab,var(--r-l) 45%,var(--line2));background:color-mix(in oklab,var(--r-l) 8%,var(--surface));color:var(--r-l);flex-direction:column;justify-content:center;align-items:center;gap:6px;display:flex}.tside-coins svg{flex:none;width:26px;height:26px}.tside-chip{height:calc(var(--deal-chip) - var(--s3));justify-content:center;align-items:center;gap:var(--s2);padding:0 var(--s3);border:1px dashed color-mix(in oklab,var(--r-l) 45%,var(--line2));background:color-mix(in oklab,var(--r-l) 8%,var(--surface));color:var(--fg-soft);white-space:nowrap;border-radius:999px;flex:none;font-size:13px;display:flex}.tside-chip svg{width:16px;height:16px;color:var(--r-l);flex:none}.tside-chip b{font:700 15px/1 var(--display);color:var(--r-l);font-variant-numeric:tabular-nums}.tside-coins b{font:800 26px/1 var(--display);font-variant-numeric:tabular-nums}.tside-coins span{color:var(--fg-soft);font-size:12px}.tm-verdict{text-align:center;color:var(--fg-soft);flex-direction:column;align-self:center;align-items:center;gap:6px;min-width:120px;display:flex}.tm-verdict svg{width:22px;height:22px}.tm-verdict b{font:700 14px/1.2 var(--display);color:var(--fg)}.tm-verdict span{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.tm-verdict[data-k=advantage] b,.tm-verdict[data-k=advantage] span{color:var(--accent)}.tm-verdict[data-k=disadvantage] b,.tm-verdict[data-k=disadvantage] span{color:var(--bad)}.tp .tm-verdict{width:var(--deal-verdictW);flex:none;min-width:0}.tp .tm-verdict svg{box-sizing:content-box;background:var(--elev2);border:1px solid var(--line2);border-radius:50%;padding:12px}.tp .tm-verdict[data-k=advantage] svg{background:color-mix(in oklab,var(--accent) 14%,var(--elev));border-color:color-mix(in oklab,var(--accent) 40%,var(--line))}.tp .tm-verdict[data-k=disadvantage] svg{background:color-mix(in oklab,var(--bad) 13%,var(--elev));border-color:color-mix(in oklab,var(--bad) 38%,var(--line))}.tp .tm-verdict b{font-size:13px}.tp .tm-verdict span{font:700 15px/1.2 var(--display)}.tp .stacked .tm-verdict{width:auto;min-height:var(--deal-verdictH);justify-content:center;gap:var(--s2) var(--s3);flex-flow:wrap}.tp .stacked .tm-verdict svg{padding:8px;transform:rotate(90deg)}.tp-chain{width:100%;max-width:720px;margin-inline:auto}.tp-chain h3{letter-spacing:.05em;text-transform:uppercase;color:var(--fg-soft);margin-bottom:var(--s2);font-size:11.5px;font-weight:700}.tp-chain ol{--dot:9px;flex-direction:column;margin:0;padding:0;list-style:none;display:flex}.tp-chain li{align-items:center;gap:var(--s3);min-height:34px;padding-left:calc(var(--dot) + var(--s3));color:var(--fg-soft);font-size:13.5px;display:flex;position:relative}.tp-chain li:before{content:\"\";width:var(--dot);height:var(--dot);margin-top:calc(var(--dot) / -2);background:var(--line2);z-index:1;border-radius:50%;position:absolute;top:50%;left:0}.tp-chain li:after{content:\"\";left:calc(var(--dot) / 2 - 1px);background:var(--line);width:2px;position:absolute;top:0;bottom:0}.tp-chain li:first-child:after{top:50%}.tp-chain li:last-child:after{bottom:50%}.tp-chain li:only-child:after{display:none}.tp-chain li.now{color:var(--fg)}.tp-chain li.now:before{background:var(--fg-soft)}.tp-chain li[data-k=accepted]:before{background:var(--accent)}.tp-chain li[data-k=accepted] b{color:var(--accent)}.tp-chain li[data-k=declined]:before{background:var(--bad)}.tp-chain li[data-k=declined] b{color:var(--bad)}.tp-chain li[data-k=pending]:before{background:var(--r-l)}.tp-step{align-items:center;gap:var(--s3);min-width:0;padding:6px var(--s2);border-radius:calc(var(--radius) / 1.618);color:inherit;font:inherit;text-align:left;cursor:pointer;background:0 0;border:0;flex:1;margin-inline-start:calc(-1 * var(--s2));display:flex}.tp-step:hover{background:var(--elev)}.tp-step.on{background:var(--elev);color:var(--fg)}.tp-step-deal{color:var(--fg-faint);font-size:12.5px;display:block}.tp-earlier{justify-content:space-between;align-items:center;gap:var(--s2) var(--s3);width:100%;max-width:720px;padding:6px 6px 6px var(--s4);border-radius:var(--radius);background:color-mix(in oklab,var(--r-l) 10%,var(--surface));border:1px solid color-mix(in oklab,var(--r-l) 30%,var(--line));color:var(--fg-soft);flex-wrap:wrap;margin-inline:auto;font-size:13.5px;display:flex}.tp-earlier b{color:var(--fg)}.tp-earlier .btn{padding:5px 12px;font-size:12.5px}.tr-row-rounds{color:var(--fg-faint);white-space:nowrap;margin-left:.35em}.tp-chain-what{flex:1;min-width:0}.tp-chain li>.tp-chain-when{padding-right:var(--s2)}.tp-chain-when{color:var(--fg-faint);font-variant-numeric:tabular-nums;font-size:12.5px}.tp-foot{justify-content:flex-end;align-items:center;gap:var(--s3);padding:var(--s3) var(--s5);border-top:1px solid var(--line);background:var(--elev);flex-wrap:wrap;flex:none;display:flex}.tp-actions{gap:var(--s2);margin-left:auto;display:flex}.tp-actions .btn{padding:11px 22px}.tp-msg{flex:220px}.tp-confirm{align-items:center;gap:var(--s3);flex-wrap:wrap;flex:1;display:flex}.tp-confirm .confirm-text{flex:300px;margin:0}.chat{flex-direction:column;flex:1;min-height:0;display:flex}.chat-feed{overscroll-behavior:contain;min-height:0;padding:var(--s4) var(--s5);gap:var(--s2);scrollbar-width:thin;scrollbar-color:var(--line2) transparent;flex-direction:column;flex:1;display:flex;overflow:auto}.chat-feed .empty{flex:1;min-height:0}.chat-feed .empty span{font-size:13.5px}.chat-feed .loading-more{margin:auto}.bubble{background:var(--elev2);overflow-wrap:anywhere;border-radius:14px 14px 14px 4px;flex-direction:column;align-self:flex-start;gap:2px;max-width:min(80%,520px);padding:9px 12px;font-size:13.5px;line-height:1.4;display:flex}.bubble.mine{background:color-mix(in oklab,var(--accent) 18%,var(--elev2));border-radius:14px 14px 4px;align-self:flex-end}.bubble time{color:var(--fg-faint);align-self:flex-end;font-size:10.5px}.chat-trade{border:1px solid var(--line2);background:var(--elev);color:var(--fg-soft);font:inherit;cursor:pointer;border-radius:999px;align-self:center;align-items:center;gap:8px;padding:7px 12px;font-size:12.5px;display:inline-flex}.chat-trade:hover{color:var(--fg);border-color:var(--fg-soft)}.chat-trade svg{width:14px;height:14px}.chat-form{gap:var(--s2);padding:var(--s3) var(--s5);border-top:1px solid var(--line);background:var(--elev);flex:none;display:flex}.chat-input{padding-left:14px}.chat-form .btn{padding:10px 20px}.chat-msg{padding:0 var(--s5) var(--s3);background:var(--elev)}.tm-head{align-items:center;gap:var(--s3);padding-right:var(--s6);display:flex}.tm-head h2{font:700 20px/1.2 var(--display)}@media (width>=1000px){.main:has(>.view>.pulls>.pull-ready){height:100dvh}.view:has(>.pulls>.pull-ready){min-height:0;padding-block:var(--s4) var(--s5);flex-direction:column;flex:1;display:flex}.pulls:has(>.pull-ready){flex-direction:column;flex:1;min-height:0;display:flex}.pull-ready{gap:var(--s4);flex:1;min-height:0}.pull-ready .booster-stage{flex:1;min-height:0}.pull-ready .booster{width:auto;height:100%;min-height:180px;max-height:620px}.main:has(>.view>.pulls>.reveal){height:100dvh}.view:has(>.pulls>.reveal){min-height:0;padding-block:var(--s4) var(--s5);flex-direction:column;flex:1;display:flex}.pulls:has(>.reveal){flex-direction:column;flex:1;min-height:0;display:flex}.reveal:not(.reveal-all){gap:var(--s4);flex:1;min-height:0}.reveal:not(.reveal-all) .stage{aspect-ratio:5/7;flex:1 1 0;width:auto;max-width:520px;min-height:200px;max-height:728px}.main:has(.tr-split){height:100dvh}.view:has(>.tr-split){min-height:0;padding-top:var(--s4);flex-direction:column;flex:1;max-width:2200px;padding-bottom:72px;display:flex}.tr-head{margin-bottom:var(--s3);flex-wrap:nowrap}.tr-head>div{align-items:baseline;gap:4px var(--s3);flex-wrap:wrap;min-width:0;display:flex}.tr-head h1{font-size:clamp(22px,2vw,28px)}.tr-head .meta{margin:0}.tr-head .btn{padding:10px 20px}.tr-split{grid-template-columns:var(--tr-list) minmax(0,1fr);--tr-list:300px;flex:1;min-height:0}.tr-col{min-height:0}.tr-rows{flex:1;min-height:0}.tr-col-empty .tr-empty{display:none}.tr-col-none{display:block}.tp-back{display:none}}@media (width>=1280px){.tr-split{--tr-list:clamp(340px,24vw,380px)}}@media (width<=999.98px){.tr-pane{display:none}.tr-split.reading .tr-pane{z-index:2147483600;border:0;border-radius:0;animation:.15s fade;display:flex;position:fixed;inset:0}.tr-col-empty{display:flex}.tr-split:not(.reading) .tr-row.on{background:0 0;border-color:#0000}.tr-split:not(.reading) .tr-row.on:before{display:none}.tp-foot,.chat-form{padding-bottom:calc(var(--s3) + env(safe-area-inset-bottom))}}@media (width<=560px){.tr-head .btn{justify-content:center;width:100%}}@container tpane (width<=560px){.tp-head{padding:var(--s3) var(--s4);flex-wrap:wrap}.tp-mode{flex:100%;order:4;display:flex}.tp-mode button{flex:1;justify-content:center}.tp-foot{padding-inline:var(--s4)}.chat-feed{padding:var(--s4)}.chat-form{padding-inline:var(--s4)}}@container tpane (width<=520px){.tp-title h2{font-size:17px}.tp-actions{flex:1}.tp-actions .btn{padding-inline:var(--s2);flex:1}.tp-confirm .af-actions,.tp-confirm .tp-actions{flex:100%}}@media (prefers-reduced-motion:reduce){.tr-split.reading .tr-pane{animation:none}}.modal.composer{text-align:left;grid-template:\"pick head\"\"pick offer\"minmax(0,1fr)/minmax(0,1fr) clamp(340px,26vw,440px);place-items:stretch stretch;gap:0;max-width:min(2000px,96vw);height:94dvh;max-height:none;padding:0;overflow:hidden}.modal.composer.pick-friend{max-width:560px;height:auto;max-height:calc(100dvh - 2 * var(--s4));padding:var(--s6);gap:var(--s4);flex-direction:column;align-items:stretch;display:flex;overflow:auto}.composer:not(.pick-friend)>.tm-head{padding:var(--s4) var(--s7) var(--s3) var(--s4);border-left:1px solid var(--line);background:var(--elev);grid-area:head}.composer:not(.pick-friend)>.tm-head h2{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:17px;overflow:hidden}.composer-sub{color:var(--fg-soft);margin-top:calc(-1 * var(--s2));font-size:14px}.composer-pick{min-width:0;min-height:0;padding:var(--s4) var(--s4) 0 var(--s5);flex-direction:column;grid-area:pick;display:flex}.composer-tab{flex-direction:column;flex:1;min-height:0;display:flex}.composer-tab[hidden]{display:none}.composer-tabs{flex:none;align-self:center;margin:0}.composer-tabs button{white-space:nowrap;align-items:center;padding:8px 14px;display:inline-flex}.composer-tabs button.on .tab-n{background:color-mix(in oklab,var(--accent-ink) 22%,transparent);color:var(--accent-ink)}.picker{gap:var(--s3);flex-direction:column;flex:1;min-height:0;display:flex;container-type:inline-size}.picker>*{flex:none}.picker-bar{align-items:center;gap:var(--s2);min-width:0;display:flex}.picker-bar .search-wrap{flex:160px;min-width:140px;max-width:420px}.picker-bar .isel{flex:none;margin-left:auto}[data-fade-axis]{--fade-to:to right;--fade:40px}[data-fade-axis=y]{--fade-to:to bottom;--fade:48px}[data-fade=end]{-webkit-mask-image:linear-gradient(var(--fade-to),#000 calc(100% - var(--fade)),transparent);mask-image:linear-gradient(var(--fade-to),#000 calc(100% - var(--fade)),transparent)}[data-fade=start]{-webkit-mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade));mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade))}[data-fade=both]{-webkit-mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade),#000 calc(100% - var(--fade)),transparent);mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade),#000 calc(100% - var(--fade)),transparent)}.picker-chips{scrollbar-width:none;min-width:0;scroll-padding-inline:var(--s5);flex-wrap:nowrap;flex:0 auto;gap:6px;overflow-x:auto}.picker-chips::-webkit-scrollbar{display:none}.picker-chips .rl{white-space:nowrap;flex:none;padding:8px 11px}.rl-code,.picker-chips.compact .rl-full{display:none}.picker-chips.compact .rl-code{display:inline}.picker-bar:has(>.picker-chips.wrap){row-gap:var(--s2);flex-wrap:wrap}.picker-chips.wrap{flex:100%;order:3}.picker-chips.wrap.compact{gap:4px}.picker-chips.wrap.compact .rl{flex:1 0 auto;justify-content:center;gap:5px;padding:8px 6px}@container (width<=720px){.picker-chips.wrap{flex:55%}.picker-bar .isel{order:4}}.picker-scroll{scrollbar-width:thin;scrollbar-color:var(--line2) transparent;min-height:0;padding:6px 8px var(--s5) 4px;gap:var(--s4);flex-direction:column;flex:1;margin-left:-4px;display:flex;overflow:auto}.picker-grid{gap:var(--s4);grid-template-columns:repeat(auto-fill,minmax(168px,1fr))}.picker-grid .empty{grid-column:1/-1;min-height:260px}.picker-more{align-items:center;gap:var(--s2);flex-direction:column;display:flex}.picker .card-btn.picking .wc{opacity:1}.picker .pick-overlay.on{box-shadow:none;background:color-mix(in oklab,var(--accent) 10%,transparent);border-color:#0000}.picker .card-btn.picked .wc{border-color:var(--rc);box-shadow:0 0 0 2px var(--rc),0 0 34px -4px color-mix(in oklab,var(--rc) 80%,transparent)}.card-btn:disabled{opacity:.35;cursor:not-allowed}.pick-lock{z-index:11;white-space:nowrap;max-width:90%;color:var(--fg);text-align:center;background:#060806d9;border-radius:999px;padding:5px 10px;font-size:11.5px;font-weight:600;line-height:1.25;position:absolute;top:42%;left:50%;transform:translate(-50%,-50%)}.offer{background:var(--elev);border-left:1px solid var(--line);flex-direction:column;grid-area:offer;min-width:0;min-height:0;display:flex}.offer-bar{display:none}.offer-panel{gap:var(--s3);min-height:0;padding:0 var(--s4) var(--s4);flex-direction:column;flex:1;display:flex}.offer-title{display:none}.offer-sides{overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line2) transparent;gap:var(--s3);min-height:0;margin-right:calc(-1 * var(--s2));padding-right:var(--s2);scroll-padding-block:var(--fade,48px);flex-direction:column;flex:0 auto;display:flex;overflow:auto}.oside{gap:var(--s2);padding:var(--s3);border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);flex-direction:column;display:flex}.oside-head{justify-content:space-between;align-items:center;gap:var(--s2);letter-spacing:.05em;text-transform:uppercase;min-width:0;color:var(--fg-soft);white-space:nowrap;font-size:11.5px;font-weight:700;display:flex}.oside-head>span:first-child{align-items:center;display:inline-flex}.oside-total{text-transform:none;letter-spacing:0;color:var(--fg);font:700 15px/1 var(--display);font-variant-numeric:tabular-nums}.oside-list{margin:0 calc(-1 * var(--s1));flex-direction:column;gap:2px;padding:0;list-style:none;display:flex}.oside-row{padding:5px var(--s1);border-radius:10px;grid-template-columns:44px minmax(0,1fr) 28px;align-items:center;gap:10px;transition:background .15s;display:grid}.oside-row:hover{background:var(--elev2)}.oside-txt{flex-direction:column;gap:3px;min-width:0;line-height:1.25;display:flex}.oside-txt b{-webkit-line-clamp:2;overflow-wrap:anywhere;-webkit-box-orient:vertical;font-size:13.5px;font-weight:600;display:-webkit-box;overflow:hidden}.oside-sub{align-items:center;gap:var(--s2);min-width:0;display:flex}.oside-cat{min-width:0;color:var(--fg-faint);text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;overflow:hidden}.oside-val{color:var(--r-l);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none;align-items:center;gap:5px;font-size:12.5px;font-weight:700;display:inline-flex}.oside-val:before{content:\"\";background:var(--coin);border-radius:50%;width:8px;height:8px}.oside-val.none{color:var(--fg-faint);font-weight:500}.oside-val.none:before{display:none}.oside-x{width:28px;height:28px;color:var(--fg-faint);cursor:pointer;opacity:.7;background:0 0;border:0;border-radius:8px;justify-content:center;align-items:center;transition:all .15s;display:flex}.oside-row:hover .oside-x,.oside-x:focus-visible{opacity:1}.oside-x:hover{background:var(--line);color:var(--fg)}.oside-x svg{width:13px;height:13px}.oside-hint{min-height:40px;padding:0 var(--s3);border:1px dashed var(--line2);color:var(--fg-faint);font:inherit;text-align:left;cursor:pointer;text-overflow:ellipsis;white-space:nowrap;background:0 0;border-radius:10px;align-items:center;font-size:13px;transition:all .15s;display:flex;overflow:hidden}.oside-hint:hover{color:var(--accent);border-color:color-mix(in oklab,var(--accent) 50%,var(--line2))}.oside .coins-add{align-self:flex-start;height:36px;font-size:13px}.oside .coins-field{flex:none;align-self:stretch}.cthumb{background:var(--card-bg);border:2px solid var(--rc);width:44px;height:44px;box-shadow:0 0 12px -4px color-mix(in oklab,var(--rc) 70%,transparent);border-radius:10px;flex:none;display:block;position:relative;overflow:hidden}.cthumb img{object-fit:cover;object-position:50% 22%;width:100%;height:100%;display:block}.cthumb.paper img{object-fit:contain;background:#e4e2db;padding:4px}.cthumb.art img{transform:scale(1.8)}.cthumb.art[data-r=C] img,.cthumb.art[data-r=PC] img{filter:brightness(.6)saturate(1.2)}.cthumb.shiny{box-shadow:inset 0 0 0 1px #e9c15a8c,0 0 10px #e9c15a66}.cthumb.shiny:after{content:\"\";mix-blend-mode:screen;background:linear-gradient(135deg,#0000 30%,#fff8e055 50%,#0000 70%);position:absolute;inset:0}.cthumb-r{z-index:1;background:var(--rc);color:var(--accent-ink);font:800 9px/1 var(--display);letter-spacing:.02em;border-top-right-radius:6px;padding:2px 4px 1px 3px;position:absolute;bottom:0;left:0}.offer-sum{gap:var(--s2);flex-direction:column;flex:none;display:flex}.offer .tm-verdict{min-width:0;padding:14px var(--s3);border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);flex-flow:wrap;justify-content:center;align-self:stretch;gap:4px 10px}.offer .tm-verdict svg{width:18px;height:18px}.offer .tm-verdict b{font-size:15px}.offer .tm-verdict span{font:700 15px/1.2 var(--display);font-variant-numeric:tabular-nums}.offer .tm-verdict[data-k=advantage]{background:color-mix(in oklab,var(--accent) 9%,var(--surface));border-color:color-mix(in oklab,var(--accent) 35%,var(--line))}.offer .tm-verdict[data-k=disadvantage]{background:color-mix(in oklab,var(--bad) 8%,var(--surface));border-color:color-mix(in oklab,var(--bad) 32%,var(--line))}.offer-sum-empty{padding:var(--s3);border-radius:var(--radius);border:1px dashed var(--line2);color:var(--fg-faint);text-align:center;margin:0;font-size:12.5px;line-height:1.45}.offer-sum .modal-msg{text-align:center}.offer-actions{gap:var(--s2);padding-top:var(--s3);border-top:1px solid var(--line);flex:none;margin-top:auto;display:flex}.offer-actions .btn{padding:12px 14px;font-size:14px}.offer-actions .btn.primary{text-overflow:ellipsis;flex:1;min-width:0;overflow:hidden}.coins-add{flex:none}.coins-add svg,.coins-ico{width:16px;height:16px;color:var(--r-l);flex:none}.coins-field{flex:0 0 200px}.coins-field .coins-ico{pointer-events:none;position:absolute;left:12px}.coins-field .af-input{font-variant-numeric:tabular-nums;border-color:color-mix(in oklab,var(--r-l) 40%,var(--line2));height:42px;padding:0 64px 0 36px;font-weight:600}.coins-field .af-unit{right:40px}.af-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}.af-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}.af-input[type=number]{appearance:textfield}.coins-x{width:26px;height:26px;color:var(--fg-faint);cursor:pointer;background:0 0;border:0;border-radius:7px;justify-content:center;align-items:center;display:flex;position:absolute;right:8px}.coins-x:hover{background:var(--elev2);color:var(--fg)}.coins-x svg{width:13px;height:13px}@media (height<=800px) and (width>=901px){.composer:not(.pick-friend)>.tm-head{padding-top:var(--s3);padding-bottom:var(--s2)}.offer-panel{gap:var(--s2);padding-bottom:var(--s3)}.offer-sides{gap:var(--s2)}.oside{padding:10px var(--s3);gap:6px}.oside-list{gap:0}.oside-row{padding:3px var(--s1);grid-template-columns:36px minmax(0,1fr) 28px}.oside .cthumb{border-radius:8px;width:36px;height:36px}.oside-txt{gap:1px}.oside-txt b{-webkit-line-clamp:1}.oside .coins-add{height:32px}.oside .coins-field .af-input{height:36px}.oside-hint{min-height:34px}.offer .tm-verdict{padding:9px var(--s3)}.offer-actions{padding-top:var(--s2)}.offer-actions .btn{padding:10px 14px}}.friend-list{gap:var(--s3);grid-template-columns:repeat(auto-fill,minmax(112px,1fr));display:grid}.friend-list .empty,.friend-list .loading-more{grid-column:1/-1;min-height:120px}.friend{align-items:center;gap:var(--s2);padding:var(--s4) var(--s2);border-radius:var(--radius);border:1px solid var(--line);background:var(--elev);color:var(--fg);font:inherit;cursor:pointer;flex-direction:column;transition:border-color .15s,background .15s;display:flex}.friend b{text-overflow:ellipsis;white-space:nowrap;max-width:100%;font-size:13.5px;font-weight:600;overflow:hidden}.friend:hover{border-color:var(--accent);background:var(--elev2)}@media (width<=900px){.modal.composer:not(.pick-friend){border:0;border-radius:0;grid-template:\"head\"\"pick\"minmax(0,1fr)\"offer\"/minmax(0,1fr);width:auto;max-width:none;height:auto;position:fixed;inset:0}.composer:not(.pick-friend)>.tm-head{padding:var(--s3) var(--s7) var(--s2) var(--s4);background:0 0;border-left:0}.composer:not(.pick-friend)>.modal-close{top:10px;right:10px}.composer-pick{padding:0 var(--s3)}.picker-bar{row-gap:var(--s2);flex-wrap:wrap}.composer-tabs{flex:100%;display:flex}.composer-tabs button{text-overflow:ellipsis;flex:1;justify-content:center;min-width:0;overflow:hidden}.picker-bar .search-wrap{flex:1 1 0;min-width:0}.picker-chips{flex:100%;order:3}.picker-bar .isel{order:0}.picker-chips .rl-full{display:inline}.picker-chips .rl-code{display:none}.picker-grid{gap:var(--s3);grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}.picker-scroll{padding-bottom:var(--s4)}.offer{border-left:0;border-top:1px solid var(--line2);background:var(--surface);position:relative}.offer-bar{align-items:center;gap:var(--s2);padding:var(--s2) var(--s3) calc(var(--s2) + env(safe-area-inset-bottom));display:flex}.offer-bar .btn{padding:11px 18px;font-size:14px}.offer-peek{align-items:center;gap:var(--s2);min-width:0;color:var(--fg);font:inherit;text-align:left;background:0 0;border:0;flex:1;padding:6px 4px;display:flex}.offer-peek-txt{flex-direction:column;flex:1;min-width:0;line-height:1.3;display:flex}.offer-peek-txt b{font:700 15px/1.25 var(--display);text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.offer-peek-txt span{color:var(--fg-soft);text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;overflow:hidden}.offer-peek-txt span[data-k=advantage]{color:var(--accent)}.offer-peek-txt span[data-k=disadvantage]{color:var(--bad)}.offer-chev{width:18px;height:18px;color:var(--fg-soft);flex:none;transition:transform .2s;transform:rotate(-90deg)}.offer.open .offer-chev{transform:rotate(90deg)}.offer-panel{max-height:calc(100dvh - 120px);padding:var(--s4);background:var(--surface);border-top:1px solid var(--line2);border-radius:var(--radius-lg) var(--radius-lg) 0 0;animation:.18s toast-in;display:none;position:absolute;bottom:100%;left:0;right:0;box-shadow:0 -24px 48px -16px #000}.offer.open .offer-panel{display:flex}.offer-title{font:700 16px/1.2 var(--display);display:block}.offer-sides{flex:0 auto}.offer-panel .offer-actions{display:none}}@media (prefers-reduced-motion:reduce){.offer-panel{animation:none}.offer-chev{transition:none}}@keyframes fade-in{0%{opacity:0}to{opacity:1}}@media (width<=560px){.modal-backdrop{align-items:stretch;padding:0!important}.modal:not(.composer),.auc{width:100%;max-width:none;height:100dvh;max-height:none;padding-top:calc(var(--s5) + env(safe-area-inset-top));padding-bottom:calc(var(--s6) + env(safe-area-inset-bottom));border:0;border-radius:0}.modal:not(.composer)>.modal-close,.auc>.modal-close{top:calc(var(--s3) + env(safe-area-inset-top));right:var(--s3);background:color-mix(in oklab,var(--surface) 94%,transparent);border:1px solid var(--line2);border-radius:50%;place-items:center;width:40px;height:40px;display:grid;position:fixed}.modal-info,.modal-panel{justify-self:stretch;width:100%}.fact{flex:28%}.meta.lead{display:none}.coll-head>div:has(>.meta.lead){display:none}.lbl-long{display:none}}.lbl-short{display:none}@media (width<=560px){.lbl-short{display:inline}}";
+	var styles_default = ":host,:root{--bg:#0c0d0c;--surface:#141613;--elev:#191c18;--elev2:#20241f;--line:#262a26;--line2:#333833;--fg:#eceee9;--fg-soft:#98a29a;--fg-faint:#7d857c;--accent:#3ccb8e;--accent-ink:#07130e;--bad:#f6867a;--r-c:#7fd8b4;--r-pc:#7fb0e6;--r-r:#b18fe0;--r-sr:#e46f9f;--r-ur:#f0912f;--r-l:#e8c93a;--card-bg:#0f110e;--coin:radial-gradient(circle at 35% 30%,#ffe680,var(--r-l));--display:\"Outfit\",system-ui,sans-serif;--body:\"Inter\",system-ui,sans-serif;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;--radius:14px;--radius-lg:18px;--sidebar:268px}:where(#wm-app-root,#wm-app-root *){box-sizing:border-box;margin:0;padding:0}[data-r=C]{--rc:var(--r-c)}[data-r=PC]{--rc:var(--r-pc)}[data-r=R]{--rc:var(--r-r)}[data-r=SR]{--rc:var(--r-sr)}[data-r=UR]{--rc:var(--r-ur)}[data-r=L]{--rc:var(--r-l)}#wm-app-root{--lightningcss-light: ;--lightningcss-dark:initial;color-scheme:dark;scrollbar-color:var(--line2) transparent;caret-color:var(--accent);font-family:var(--body);color:var(--fg);-webkit-font-smoothing:antialiased;line-height:1.5}#wm-app-root button{cursor:pointer;font-family:inherit}#wm-app-root ::selection{background:color-mix(in oklab,var(--accent) 32%,transparent);color:var(--fg)}#wm-app-root img{display:block}#wm-app-root a{color:inherit;text-decoration:none}#wm-app-root :is(a,button,input,select,textarea,[tabindex]:not([tabindex=\"-1\"])):focus-visible{outline:2px solid var(--accent);outline-offset:2px}#wm-app-root .modal:focus,#wm-app-root .modal:focus-visible{outline:none}.card-btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--radius)}.app{grid-template-columns:var(--sidebar) 1fr;background:var(--bg);min-height:100vh;display:grid}.side{background:var(--surface);border-right:1px solid var(--line);padding:var(--s5) var(--s4);gap:var(--s5);flex-direction:column;height:100vh;display:flex;position:sticky;top:0;overflow:hidden}.brand{padding:0 var(--s3);align-items:center;gap:10px;display:flex}.brand .mk{background:var(--accent);border-radius:3px;width:9px;height:9px}.brand b{font-family:var(--display);letter-spacing:-.01em;font-size:19px;font-weight:700}.nav{scrollbar-width:none;flex-direction:column;flex:1;gap:2px;min-height:0;display:flex;overflow-y:auto}.nav::-webkit-scrollbar{display:none}.nav button{align-items:center;gap:var(--s3);color:var(--fg-soft);cursor:pointer;text-align:left;background:0 0;border:0;border-radius:11px;width:100%;padding:10px 12px;font-family:inherit;font-size:14px;font-weight:500;transition:background .15s,color .15s;display:flex}.nav button svg{opacity:.85;flex:none;width:19px;height:19px}.nav button:hover{background:var(--elev);color:var(--fg)}.nav button.on{background:color-mix(in oklab,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}.nav button.on svg{opacity:1}.nav-sep{letter-spacing:.12em;text-transform:uppercase;color:var(--fg-faint);padding:var(--s4) 12px var(--s2);font-size:10px}.nav-grid{grid-template-columns:repeat(3,1fr);gap:2px;display:grid}.nav-grid a{color:var(--fg-soft);text-align:center;border-radius:10px;flex-direction:column;align-items:center;gap:6px;padding:10px 2px 9px;font-size:11px;line-height:1.1;transition:background .15s,color .15s;display:flex}.nav-grid a svg{opacity:.55;width:17px;height:17px}.nav-grid a:hover{background:var(--elev);color:var(--fg)}.nav-grid a:hover svg{opacity:.9}.side-foot{gap:var(--s2);padding:var(--s3) 12px 0;border-top:1px solid var(--line);flex-direction:column;display:flex}.ghost{border:1px solid var(--line2);color:var(--fg-soft);background:0 0;border-radius:10px;padding:9px;font-size:13px;font-weight:500;transition:all .15s}.ghost:hover{border-color:var(--fg-soft);color:var(--fg)}.foot-link{color:var(--fg-soft);font:inherit;cursor:pointer;text-align:left;background:0 0;border:0;align-items:center;gap:8px;padding:0;font-size:12.5px;display:flex}.foot-link svg{width:14px;height:14px}.foot-link:hover{color:var(--fg)}.hintline{color:var(--fg-faint);align-items:center;gap:8px;font-size:11.5px;display:flex}.hintline:before{content:\"\";background:var(--accent);border-radius:50%;width:6px;height:6px}@media (height<=760px) and (width>=901px){.side{padding:var(--s4) var(--s3);gap:var(--s3)}.nav button{padding:8px 12px}.nav-sep{padding:var(--s3) 12px 6px}.nav-grid a{gap:4px;padding:7px 2px 6px}}.main{flex-direction:column;min-width:0;display:flex}.topbar{justify-content:space-between;align-items:center;gap:var(--s4);padding:var(--s5) clamp(var(--s5),4vw,var(--s7));border-bottom:1px solid var(--line);z-index:5;background:color-mix(in oklab,var(--bg) 96%,transparent);display:flex;position:sticky;top:0}.crumb{font-family:var(--display);letter-spacing:-.01em;font-size:16px;font-weight:600}.wallet{align-items:center;gap:var(--s2);display:flex}.wallet .menu-btn,.nav-short{display:none}.stats-toggle span{font:800 10.5px/1 var(--display);letter-spacing:.06em}.stats-toggle.off{color:var(--fg-faint)}.stats-toggle.off span{text-decoration:line-through;text-decoration-thickness:1.5px}.chip{color:var(--fg-soft);background:var(--elev);border:1px solid var(--line);border-radius:999px;align-items:center;gap:8px;padding:9px 15px;font-size:13.5px;display:flex}.chip b{color:var(--fg);font-weight:600}.chip .cico{flex:none;width:14px;height:14px}.chip .cico.pk{color:var(--accent)}.chip .cico.coin{color:var(--r-l)}.pk-ring{place-items:center;width:22px;height:22px;margin:-4px -3px -4px -4px;display:grid;position:relative}.pk-chip.regen .pk-ring:before{content:\"\";background:conic-gradient(var(--accent) calc(var(--p) * 1turn),var(--line2) 0);border-radius:50%;position:absolute;inset:0;-webkit-mask:radial-gradient(farthest-side,#0000 calc(100% - 2px),#000 calc(100% - 1.5px));mask:radial-gradient(farthest-side,#0000 calc(100% - 2px),#000 calc(100% - 1.5px))}.pk-chip.regen .pk-ring .cico{width:12px;height:12px}.pk-next{border-left:1px solid var(--line2);color:var(--fg-soft);font-variant-numeric:tabular-nums;white-space:nowrap;margin-left:1px;padding-left:8px;font-size:12px;font-weight:500}.pk-next.ready{color:var(--accent);font-weight:600}.pk-pro{font:700 10.5px/1 var(--display);letter-spacing:.03em;color:var(--accent-ink);background:var(--r-l);white-space:nowrap;border-radius:999px;padding:3px 7px}button.pk-chip{font:inherit;cursor:pointer;transition:border-color .15s}button.pk-chip:hover{border-color:var(--line2)}.pk-chip{position:relative}@media (width<=560px){.pk-pro{width:9px;height:9px;box-shadow:0 0 0 2px var(--elev);padding:0;font-size:0;position:absolute;top:4px;left:26px}}.badge{font-family:var(--display);letter-spacing:.04em;border-radius:999px;align-items:center;padding:6px 11px;font-size:11px;font-weight:700;display:inline-flex}.badge.pro{background:var(--accent);color:var(--accent-ink)}.loadbar{z-index:2147483603;pointer-events:none;opacity:0;height:3px;transition:opacity .35s;position:fixed;top:0;left:0;right:0;overflow:hidden}.loadbar.on{opacity:1}.loadbar:before{content:\"\";background:linear-gradient(90deg,transparent,var(--accent) 30%,#b6f5d8 60%,var(--accent) 85%,transparent);width:45%;box-shadow:0 0 12px color-mix(in oklab,var(--accent) 70%,transparent),0 0 3px var(--accent);border-radius:0 3px 3px 0;position:absolute;inset:0 auto 0 0}.loadbar.on:before{animation:1.25s cubic-bezier(.45,.05,.4,.95) infinite loadbar}@keyframes loadbar{0%{transform:translate(-110%)}to{transform:translate(330%)}}.loadcap{z-index:2147483602;background:color-mix(in oklab,var(--elev2) 92%,transparent);border:1px solid var(--line2);width:max-content;max-width:calc(100vw - 32px);color:var(--fg);opacity:0;pointer-events:none;border-radius:999px;align-items:center;gap:10px;margin-inline:auto;padding:10px 16px 10px 14px;font-size:13px;font-weight:500;transition:opacity .25s,transform .25s;display:flex;position:fixed;bottom:24px;left:0;right:0;transform:translateY(10px);box-shadow:0 18px 40px -18px #000}.loadcap.on{opacity:1;transform:none}.loadcap .spin{color:var(--accent);width:14px;height:14px}.loadcap:not(.on) .spin{animation:none}.loadcap.slow .spin{color:var(--r-ur)}.loadcap-txt{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.loadcap-t{color:var(--fg-faint);font-variant-numeric:tabular-nums;flex:none}@media (width<=560px){.loadcap{bottom:calc(var(--tabbar,0px) + 12px);border-radius:16px}.loadcap-txt{white-space:normal;line-height:1.35}}@media (prefers-reduced-motion:reduce){.loadbar:before{opacity:.8;width:100%;animation:none}.loadcap{transition:none}}.health{color:var(--r-ur);background:color-mix(in oklab,var(--r-ur) 12%,transparent);border:1px solid color-mix(in oklab,var(--r-ur) 30%,transparent);white-space:nowrap;border-radius:999px;align-self:center;align-items:center;gap:8px;padding:6px 12px;font-size:12.5px;font-weight:500;animation:.3s fade;display:inline-flex}.health-dot{background:var(--r-ur);border-radius:50%;width:7px;height:7px;animation:1.4s ease-in-out infinite auc-pulse}@media (width<=560px){.health{padding:9px}.health-txt{display:none}}@media (prefers-reduced-motion:reduce){.health-dot{animation:none}}.notif{display:flex;position:relative}.bell{border:1px solid var(--line);background:var(--elev);width:38px;height:38px;color:var(--fg-soft);cursor:pointer;border-radius:999px;justify-content:center;align-items:center;transition:all .15s;display:flex;position:relative}.bell:hover{color:var(--fg);border-color:var(--line2)}.bell.has{color:var(--fg)}.bell svg{width:18px;height:18px}.bell-badge{color:#fff;min-width:18px;height:18px;font-family:var(--display);text-align:center;box-shadow:0 0 0 2px var(--bg);background:#f26d6d;border-radius:999px;padding:0 5px;font-size:10.5px;font-weight:700;line-height:18px;position:absolute;top:-3px;right:-3px}.notif-scrim{z-index:30;position:fixed;inset:0}.sheet-scrim{z-index:60;background:#0000008c;animation:.18s fade-in;position:fixed;inset:0}.sheet{z-index:61;overscroll-behavior:contain;max-height:86dvh;padding:var(--s2) var(--s4) calc(var(--s4) + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line2);border-radius:var(--radius-lg) var(--radius-lg) 0 0;animation:.2s toast-in;position:fixed;bottom:0;left:0;right:0;overflow:auto;box-shadow:0 -24px 60px -20px #000}.sheet-grab{background:var(--line2);width:40px;height:4px;margin:4px auto var(--s3);border-radius:2px}.sheet-sec{padding:var(--s3) 0}.sheet-sec+.sheet-sec{border-top:1px solid var(--line)}.sheet-row{justify-content:space-between;align-items:center;gap:var(--s3);display:flex}.sheet-row b{font-size:15px;display:block}.sheet-row span{color:var(--fg-faint);font-size:12.5px}.sheet-title{letter-spacing:.08em;text-transform:uppercase;color:var(--fg-faint);margin-bottom:var(--s2);font-size:12px;display:block}.sheet-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;display:grid}.sheet-grid a{min-height:64px;color:var(--fg-soft);text-align:center;border-radius:12px;flex-direction:column;justify-content:center;align-items:center;gap:6px;padding:8px 2px;font-size:12px;display:flex}.sheet-grid a:active,.sheet-grid a:hover{background:var(--elev);color:var(--fg)}.sheet-grid a svg{width:20px;height:20px}.sheet-reset{width:100%;margin-top:var(--s2)}.snd{display:flex;position:relative}.snd-panel{width:min(300px,calc(100vw - 2 * var(--s4)));z-index:31;gap:var(--s3);padding:var(--s4);background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);flex-direction:column;display:flex;position:absolute;top:46px;right:0;box-shadow:0 24px 60px -24px #000}.snd-head{justify-content:space-between;align-items:center;display:flex}.snd-head b{font:700 14px var(--display)}.snd-switch{border:1px solid var(--line2);background:var(--elev2);cursor:pointer;border-radius:999px;width:40px;height:24px;transition:background .15s,border-color .15s;position:relative}.snd-switch span{background:var(--fg-soft);border-radius:50%;width:16px;height:16px;transition:transform .18s cubic-bezier(.3,.7,.3,1),background .15s;position:absolute;top:3px;left:3px}.snd-switch[aria-checked=true]{background:color-mix(in oklab,var(--accent) 30%,var(--elev2));border-color:var(--accent)}.snd-switch[aria-checked=true] span{background:var(--accent);transform:translate(16px)}.snd-vol{color:var(--fg-soft);grid-template-columns:auto 1fr auto auto;align-items:center;gap:10px;transition:opacity .15s;display:grid}.snd-vol.off{opacity:.5}.snd-vol svg{width:16px;height:16px}.snd-vol input{cursor:pointer;appearance:none;background:0 0;width:100%;height:20px;margin:0}.snd-vol input::-webkit-slider-runnable-track{background:linear-gradient(var(--accent),var(--accent)) 0/var(--pct) 100% no-repeat,var(--line2);border-radius:2px;height:4px}.snd-vol input::-moz-range-track{background:var(--line2);border-radius:2px;height:4px}.snd-vol input::-moz-range-progress{background:var(--accent);border-radius:2px;height:4px}.snd-vol input::-webkit-slider-thumb{-webkit-appearance:none;background:var(--fg);border:none;border-radius:50%;width:14px;height:14px;margin-top:-5px;transition:transform .12s;box-shadow:0 1px 4px #0008}.snd-vol input::-moz-range-thumb{background:var(--fg);border:none;border-radius:50%;width:14px;height:14px;transition:transform .12s;box-shadow:0 1px 4px #0008}.snd-vol input:hover::-webkit-slider-thumb{transform:scale(1.15)}.snd-vol input:active::-webkit-slider-thumb{transform:scale(1.15)}.snd-vol input:hover::-moz-range-thumb{transform:scale(1.15)}.snd-vol input:active::-moz-range-thumb{transform:scale(1.15)}.snd-vol output{text-align:right;font-variant-numeric:tabular-nums;min-width:4ch;color:var(--fg);font-size:13px}.snd-note{color:var(--fg-faint);font-size:12px;line-height:1.4}.notif-panel{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);z-index:31;width:min(340px,86vw);max-height:66vh;padding:var(--s2);overscroll-behavior:contain;position:absolute;top:46px;right:0;overflow:auto;box-shadow:0 24px 60px -24px #000}.notif-head{font-family:var(--display);align-items:center;gap:8px;padding:8px 10px 10px;font-size:14px;font-weight:700;display:flex}.notif-count{background:color-mix(in oklab,var(--accent) 16%,transparent);color:var(--accent);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700}.notif-empty{text-align:center;color:var(--fg-faint);padding:24px;font-size:13px}.notif-item{border-radius:12px;gap:10px;padding:11px 10px;transition:background .15s;display:flex}.notif-item:hover{background:var(--elev)}.notif-item.unread{background:color-mix(in oklab,var(--accent) 7%,transparent)}.notif-dot{background:var(--accent);border-radius:50%;flex:none;width:7px;height:7px;margin-top:6px}.notif-item:not(.unread) .notif-body{margin-left:17px}.notif-body{min-width:0}.notif-title{font-size:13.5px;font-weight:600;line-height:1.3}.notif-msg{color:var(--fg-soft);margin-top:2px;font-size:12.5px;line-height:1.4}.notif-time{color:var(--fg-faint);margin-top:4px;font-size:11px}.view{padding:clamp(var(--s5),3.5vw,var(--s7));padding-bottom:max(clamp(var(--s5),3.5vw,var(--s7)),72px);width:100%;max-width:1600px;margin:0 auto}.view:has(>.pulls>.reveal-all){max-width:none}.side-toggle{width:30px;height:30px;color:var(--fg-faint);cursor:pointer;background:0 0;border:0;border-radius:8px;place-items:center;margin-left:auto;transition:color .15s,background .15s;display:grid}.side-toggle:hover{color:var(--fg);background:var(--elev)}.side-toggle svg{width:18px;height:18px}@media (width>=901px){.app{transition:grid-template-columns .22s}.app.rail{--sidebar:72px}.app.rail .side{padding-inline:var(--s2)}.app.rail .brand{justify-content:center;padding:0}.app.rail .brand .mk,.app.rail .brand b,.app.rail .side .nav-long,.app.rail .nav-lbl,.app.rail .foot-txt,.app.rail .hintline,.app.rail .side-foot .ghost{display:none}.app.rail .side-toggle{margin:0}.app.rail .nav button{justify-content:center;padding-inline:0}.app.rail .nav-sep{margin:var(--s3) 10px;border-top:1px solid var(--line);padding:0;font-size:0}.app.rail .nav-grid{grid-template-columns:1fr}.app.rail .side-foot{align-items:center;padding-inline:0}}@media (prefers-reduced-motion:reduce){.app{transition:none}}.app-version{color:var(--fg-faint);font-variant-numeric:tabular-nums;margin-left:auto;font-size:11px;text-decoration:none}.app-version:hover{color:var(--fg-soft);text-decoration:underline}.sheet-version{margin:var(--s3) auto 0;text-align:center;width:max-content;display:block}@media (width>=901px){.app.rail .app-version{display:none}}.app-update{color:var(--accent);background:color-mix(in oklab,var(--accent) 12%,transparent);border:1px solid color-mix(in oklab,var(--accent) 35%,transparent);white-space:nowrap;border-radius:999px;align-items:center;gap:6px;margin-left:auto;padding:3px 9px 3px 7px;font-size:11px;font-weight:600;text-decoration:none;display:inline-flex}.app-update:hover{background:color-mix(in oklab,var(--accent) 20%,transparent)}.upd-dot{background:var(--accent);width:7px;height:7px;box-shadow:0 0 0 0 color-mix(in oklab,var(--accent) 60%,transparent);border-radius:50%;flex:none;animation:2.4s ease-out infinite upd-pulse}@keyframes upd-pulse{70%{box-shadow:0 0 0 6px #0000}to{box-shadow:0 0 #0000}}@media (prefers-reduced-motion:reduce){.upd-dot{animation:none}}.upd-dot.on-icon{border:2px solid var(--surface);position:absolute;top:7px;right:7px}.menu-btn{position:relative}.sheet-update{justify-content:center;align-items:center;gap:8px;text-decoration:none;display:flex}.sheet-update .upd-dot{background:currentColor}@media (width>=901px){.app.rail .app-update{background:0 0;border:none;gap:0;padding:0;font-size:0}}.pulls{position:relative}.pull-ready{justify-content:center;align-items:center;gap:var(--s5);text-align:center;flex-direction:column;min-height:64vh;display:flex}.pull-ready h1{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(26px,3vw,36px);font-weight:700}.special-note{background:color-mix(in oklab,var(--r-l) 12%,var(--elev));border:1px solid color-mix(in oklab,var(--r-l) 32%,var(--line));color:var(--fg);border-radius:12px;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;padding:10px 16px;font-size:13px;display:flex}.link-btn{color:var(--accent);font:inherit;cursor:pointer;text-underline-offset:3px;background:0 0;border:none;font-weight:600;text-decoration:underline}.pull-ready .sub{color:var(--fg-soft);margin-top:calc(-1 * var(--s3));font-size:15px}.booster-stage{width:100%;padding:var(--s3) 0;justify-content:center;align-items:center;display:flex;position:relative;overflow-x:clip}.booster{width:clamp(200px,min(calc((100dvh - 540px - var(--tabs-h,0px)) * .773),62vw),480px);aspect-ratio:2550/3300;cursor:pointer;filter:drop-shadow(0 34px 54px #0009);background:0 0;border:none;padding:0;transition:transform .3s cubic-bezier(.2,.7,.3,1);position:relative}.booster:hover:not(:disabled):not(.opening){transform:translateY(-8px)}.booster:disabled{cursor:default}.booster-main{transform-origin:50% 60%;animation:5.5s ease-in-out infinite booster-float;position:absolute;inset:0}.booster-img{background:var(--pack) center/contain no-repeat;position:absolute;inset:0}.booster-shine{pointer-events:none;mix-blend-mode:screen;opacity:0;-webkit-mask:var(--pack) center/contain no-repeat;-webkit-mask:var(--pack) center/contain no-repeat;mask:var(--pack) center/contain no-repeat;background:linear-gradient(115deg,#0000 40%,#ffffffd9 47%,#96d2ffb3 50%,#ffecb4b3 53%,#0000 60%) 0 0/260% 260% no-repeat;animation:5s ease-in-out infinite booster-sheen;position:absolute;inset:0}@keyframes booster-sheen{0%{opacity:0;background-position:130% 0}30%{opacity:.95}52%{opacity:.95;background-position:-30% 100%}72%,to{opacity:0;background-position:-30% 100%}}@keyframes booster-float{0%,to{transform:translateY(0)rotate(-1.2deg)}50%{transform:translateY(-12px)rotate(1.2deg)}}.booster-back{background:var(--pack) center/contain no-repeat;filter:brightness(.62)grayscale(.25);position:absolute;inset:0}.booster-back.b1{opacity:.7;transform:translate(11px,9px)rotate(4deg)scale(.985)}.booster-back.b2{opacity:.4;transform:translate(22px,18px)rotate(8deg)scale(.97)}.booster.is-empty .booster-main{filter:grayscale(.7)brightness(.55);opacity:.8;animation-play-state:paused}.booster.is-empty .booster-shine{display:none}.booster.opening{cursor:default}.booster.opening .booster-main{animation:.9s cubic-bezier(.3,.6,.2,1) forwards booster-open}@keyframes booster-open{0%{transform:translateY(0)rotate(0)}14%{transform:rotate(-5deg)}28%{transform:rotate(5deg)}42%{transform:rotate(-4deg)}56%{transform:rotate(3deg)scale(1.03)}68%{transform:rotate(0)scale(1.06)}to{opacity:0;filter:brightness(2.2);transform:scale(1.5)}}.booster.opening:after{content:\"\";pointer-events:none;opacity:0;background:radial-gradient(circle,#fff6e0f2,#fff6e040 45%,#0000 66%);border-radius:50%;animation:.9s ease-out forwards booster-burst;position:absolute;inset:-25%}@keyframes booster-burst{0%,52%{opacity:0;transform:scale(.5)}74%{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(1.5)}}.pack-count{flex-direction:column;align-items:center;gap:2px;display:flex}.pc-num{font-family:var(--display);color:var(--accent);font-variant-numeric:tabular-nums;font-size:clamp(36px,5vw,54px);font-weight:800;line-height:1}.pack-wait{flex-direction:column;align-items:center;gap:4px;display:flex}.pw-time{font-family:var(--display);color:var(--fg);font-variant-numeric:tabular-nums;font-size:clamp(34px,4.4vw,50px);font-weight:800;line-height:1}.pw-lbl{color:var(--fg-soft);font-size:15px}.pw-sub{color:var(--fg-faint);margin-top:var(--s2);font-size:12.5px}.pc-lbl{color:var(--fg-soft);font-size:14px}.regen-line{color:var(--fg-soft);font-size:13.5px}.regen-line b{color:var(--fg);font-weight:600}.regen-line.err{color:#f0a3a3}.btn.big{padding:14px 34px;font-size:16px}.btn{font-family:var(--display);white-space:nowrap;border:1px solid var(--line2);color:var(--fg);background:0 0;border-radius:12px;padding:13px 28px;font-size:15px;font-weight:600;transition:all .15s}.btn:hover{border-color:var(--fg-soft)}.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}.btn.primary:hover{filter:brightness(1.06)}.btn:disabled,.iconbtn:disabled,.modal-close:disabled{opacity:.45;cursor:not-allowed}.btn svg{vertical-align:-3px;flex:none;width:17px;height:17px}.pull-actions{gap:var(--s3);flex-wrap:wrap;justify-content:center;display:flex}.pull-ready.has-tabs{--tabs-h:56px}.pull-tabs{justify-content:center;width:min(100%,520px);margin-bottom:0}.tab-ready{background:var(--accent);vertical-align:2px;border-radius:50%;width:7px;height:7px;margin-left:7px;display:inline-block}.pull-ready[data-kind=pro]{--kind:var(--r-r)}.pull-ready[data-kind=special]{--kind:var(--r-l)}.pull-ready[data-kind=pro] .tab-ready,.pull-ready[data-kind=pro] .tabs button.on,.pull-ready[data-kind=special] .tabs button.on{border-bottom-color:var(--kind)}.pull-ready:not([data-kind=normal]) .booster-img{filter:drop-shadow(0 0 28px color-mix(in oklab,var(--kind) 55%,transparent)) drop-shadow(0 0 70px color-mix(in oklab,var(--kind) 30%,transparent))}.pull-ready:not([data-kind=normal]) .btn.primary{background:var(--kind);border-color:var(--kind);color:#15121c}.pull-ready:not([data-kind=normal]) .pw-time{color:var(--kind)}.booster-mark{font:800 13px/1 var(--display);letter-spacing:.12em;color:#15121c;background:var(--kind);box-shadow:0 4px 18px color-mix(in oklab,var(--kind) 50%,transparent);border-radius:999px;padding:5px 14px;position:absolute;bottom:9%;left:50%;transform:translate(-50%)}.pill-picks{flex-wrap:wrap;justify-content:center;gap:8px;display:flex}.pill-picks button{font:600 13.5px var(--body);color:var(--fg-soft);background:var(--elev);border:1px solid var(--line);cursor:pointer;border-radius:999px;padding:7px 16px;transition:color .15s,border-color .15s}.pill-picks button:hover{color:var(--fg);border-color:var(--line2)}.pill-picks button.on{color:var(--fg);border-color:var(--kind,var(--accent));background:color-mix(in oklab,var(--kind,var(--accent)) 12%,var(--elev))}.market-recent ol{border:1px solid var(--line);border-radius:var(--radius);margin:0;padding:0;list-style:none;overflow:hidden}.market-recent li{justify-content:space-between;align-items:center;gap:var(--s3);color:var(--fg-soft);font-variant-numeric:tabular-nums;padding:8px 14px;font-size:13px;display:flex}.market-recent li+li{border-top:1px solid var(--line)}.market-recent b{color:var(--r-l);align-items:center;gap:6px;display:inline-flex}.session-recap{color:var(--fg-faint);margin-top:var(--s2);font-size:12.5px}.reveal{justify-content:center;align-items:center;gap:var(--s6);flex-direction:column;min-height:64vh;display:flex}.reveal .count{color:var(--fg-soft);font-size:14px}.reveal .count b{color:var(--accent);font-family:var(--display);margin:0 3px;font-size:18px}.stage{width:clamp(250px,min(71.4dvh - 342.72px,40vw),520px);max-width:100%;position:relative}.stage-aura{z-index:0;pointer-events:none;background:radial-gradient(closest-side, color-mix(in oklab,var(--rc) 60%, transparent), transparent 72%);filter:blur(34px);opacity:.35;border-radius:50%;animation:.55s cubic-bezier(.3,.8,.3,1) aurapop;position:absolute;inset:-14% -10%}.stage-aura[data-r=C]{opacity:.26}.stage-aura[data-r=PC]{opacity:.34}.stage-aura[data-r=R]{opacity:.46}.stage-aura[data-r=SR]{opacity:.58}.stage-aura[data-r=UR]{opacity:.72;inset:-18% -12%}.stage-aura[data-r=L]{opacity:.85;inset:-20% -14%}@keyframes aurapop{0%{transform:scale(.7)}to{transform:scale(1)}}.stage .flip-in{z-index:1;position:relative}.reveal-rarity{font-family:var(--display);letter-spacing:.06em;color:var(--rc);font-size:16px;font-weight:700;animation:.45s rarityin}.reveal-rarity[data-r=UR],.reveal-rarity[data-r=L]{letter-spacing:.1em;font-size:19px}@keyframes rarityin{0%{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}.dots{gap:var(--s2);align-items:center;display:flex}.dots .d{background:var(--line2);border-radius:50%;width:8px;height:8px;transition:all .2s}.dots .d.on{background:var(--accent);transform:scale(1.15)}.dots .d.seen{background:var(--fg-faint)}.navrow{align-items:center;gap:var(--s5);display:flex}.arrow{border:1px solid var(--line2);background:var(--elev);width:46px;height:46px;color:var(--fg);border-radius:50%;justify-content:center;align-items:center;transition:all .15s;display:flex}.arrow svg{width:20px;height:20px}.arrow:hover{border-color:var(--fg-soft)}.arrow:disabled{opacity:.3;cursor:not-allowed}.flip-in{animation:.5s cubic-bezier(.3,.8,.3,1) flipin}@keyframes flipin{0%{opacity:0;transform:rotateY(-14deg)translateY(14px)}to{opacity:1;transform:none}}.reveal-skip{color:var(--fg-faint);cursor:pointer;text-underline-offset:3px;background:0 0;border:none;padding:4px;font-size:13px;text-decoration:underline}.reveal-skip:hover{color:var(--fg-soft)}.reveal-all{gap:var(--s5)}.reveal-all-head{text-align:center;flex-direction:column;gap:4px;display:flex}.reveal-all-head h2{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(22px,2.4vw,28px);font-weight:700}.reveal-all-head .sub{color:var(--fg-soft);font-size:14px}.reveal-grid{--rg-w:clamp(170px,min(calc((100% - (var(--cols) - 1) * var(--s5)) / var(--cols)),calc((100dvh - 380px - (var(--rows) - 1) * var(--s5)) / var(--rows) * .714)),440px);grid-template-columns:repeat(auto-fit,var(--rg-w));gap:var(--s5);width:100%;max-width:calc(var(--cols) * var(--rg-w) + (var(--cols) - 1) * var(--s5));justify-content:center;margin-inline:auto;display:grid}@media (width<=560px){.reveal-grid{--rg-w:calc((100% - var(--s3)) / 2);gap:var(--s3)}}.rg-card{perspective:900px;position:relative}.rg-card.dealt .card-btn{animation:rgflip .5s var(--d) both cubic-bezier(.2,.8,.3,1)}.rg-card.dealt .rg-aura{animation:rgbloom .9s var(--d) both ease-out}.rg-aura{z-index:0;pointer-events:none;background:radial-gradient(closest-side,color-mix(in oklab,var(--rc) 55%,transparent),transparent 72%);filter:blur(26px);opacity:.3;border-radius:50%;position:absolute;inset:-10% -8%}.rg-aura[data-r=C]{opacity:.16}.rg-aura[data-r=PC]{opacity:.22}.rg-aura[data-r=R]{opacity:.34}.rg-aura[data-r=SR]{opacity:.46}.rg-aura[data-r=UR]{opacity:.6}.rg-aura[data-r=L]{opacity:.72}.rg-card .card-btn{z-index:1;position:relative}@keyframes rgflip{0%{opacity:0;transform:translateY(18px)rotateY(-70deg)scale(.92)}60%{opacity:1}to{opacity:1;transform:none}}@keyframes rgbloom{0%{opacity:0;scale:.6}45%{opacity:var(--bloom,.9);scale:1.08}}@media (prefers-reduced-motion:reduce){.rg-card.dealt .card-btn,.rg-card.dealt .rg-aura{animation:none}}.wc{aspect-ratio:5/7;border-radius:var(--radius-lg);background:var(--card-bg);border:3.5px solid color-mix(in oklab,var(--rc) 65%,var(--line));cursor:pointer;transition:transform .2s cubic-bezier(.2,.7,.3,1),border-color .2s,box-shadow .2s;position:relative;overflow:hidden;container-type:inline-size}.wc[data-r=C]{box-shadow:0 6px 18px -12px color-mix(in oklab,var(--r-c) 45%,transparent)}.wc[data-r=PC]{box-shadow:0 6px 20px -12px color-mix(in oklab,var(--r-pc) 55%,transparent)}.wc[data-r=R]{box-shadow:0 8px 24px -12px color-mix(in oklab,var(--r-r) 62%,transparent)}.wc[data-r=SR]{box-shadow:0 8px 26px -11px color-mix(in oklab,var(--r-sr) 70%,transparent)}.wc[data-r=UR]{box-shadow:0 10px 30px -11px color-mix(in oklab,var(--r-ur) 78%,transparent)}.wc[data-r=L]{box-shadow:0 12px 36px -10px color-mix(in oklab,var(--r-l) 85%,transparent)}.wc[data-r=SR],.wc[data-r=UR],.wc[data-r=L]{border-color:color-mix(in oklab,var(--rc) 88%,var(--line))}.wc:hover{border-color:var(--rc);box-shadow:0 18px 42px -20px color-mix(in oklab,var(--rc) 42%,#000);transform:translateY(-5px)}.wc-face{background:linear-gradient(#181c16,#0d0f0c);position:absolute;inset:0}.wc:before{content:\"\";z-index:5;pointer-events:none;border-radius:inherit;position:absolute;inset:0;box-shadow:inset 0 1px #ffffff29,inset 0 0 0 1px #ffffff08,inset 0 -44px 52px -44px #0000008c}.wc:not(.is-noimg) .wc-face:after{content:\"\";pointer-events:none;background:linear-gradient(180deg, color-mix(in oklab,var(--rc) 26%, transparent), transparent 28%);position:absolute;inset:0}.wc-blur{object-fit:cover;filter:blur(22px)saturate(1.1)brightness(.5);z-index:0;width:100%;height:100%;position:absolute;inset:0;transform:scale(1.2)}.wc.is-noimg .wc-blur{display:none}.wc-photo{object-fit:contain;z-index:1;width:100%;height:100%;position:absolute;inset:0}.wc-bg{object-fit:cover;z-index:0;width:100%;height:100%;position:absolute;inset:0;transform:scale(1.8)}.wc-bg.onyx{transform:none}.wc[data-r=C] .wc-bg,.wc[data-r=PC] .wc-bg{filter:brightness(.6)saturate(1.2)}.wc-sky{z-index:1;width:100%;height:100%;position:absolute;inset:0}.wc-sky .ray{fill:var(--rc)}.wc-sky .core{fill:#fff;fill-opacity:.92}.wc-sky .glow-mid{stop-color:var(--rc);stop-opacity:.4}.wc-sky .glow-out{stop-color:var(--rc);stop-opacity:0}.wc-sky .spark{fill:#fff;fill-opacity:.85}.wc.is-shiny .wc-sky .core{fill-opacity:1}.wc-meteor{z-index:1;height:var(--w);border-radius:var(--w);transform-origin:0;transform:rotate(var(--a));will-change:transform;background:linear-gradient(90deg,#0000,#ffffff80 60%,#fff);animation:2.6s cubic-bezier(.35,.1,.45,1) infinite meteor;position:absolute;box-shadow:0 0 3px #ffffff59}@keyframes meteor{0%{transform:rotate(var(--a)) translateX(-140%);opacity:0}15%,70%{opacity:1}to{transform:rotate(var(--a)) translateX(90%);opacity:0}}@media (prefers-reduced-motion:reduce){.wc-meteor{animation:none}}.wc.is-noimg .wc-holo{display:none}.wc.is-noimg .wc-cap{background:linear-gradient(#0000,#050605b3 38%,#050605f0)}.wc-photo.onyx-photo{object-fit:cover;z-index:1}.wc.paper .wc-blur{display:none}.wc.paper .wc-photo{background:#e4e2db;padding:12% 10% 34%}.wc.is-noimg .wc-face{background:radial-gradient(110% 80% at 50% 30%,color-mix(in oklab,var(--rc) 14%,#05070d),#020306 80%)}.wc.is-shiny{box-shadow:inset 0 0 0 1px #e9c15a8c,0 0 16px #e9c15a4d,0 0 30px #00000080}.wc.is-shiny:hover{box-shadow:inset 0 0 0 1px #e9c15acc,0 0 22px #e9c15a80,0 18px 42px -20px #000}.wc-holo{z-index:2;pointer-events:none;mix-blend-mode:screen;opacity:.7;background:radial-gradient(circle at 50% 45%,#fff8e0 0%,#fff8e033 20%,#0000 46%) 0 0/175% 175% no-repeat;animation:6.5s ease-in-out infinite alternate paused shiny-drift;position:absolute;inset:0}.wc-holo.onyx{mix-blend-mode:soft-light;opacity:.9}@keyframes shiny-drift{0%{background-position:16% 12%}to{background-position:84% 82%}}@media (prefers-reduced-motion:reduce){.wc-holo{opacity:.5;background-position:50% 42%;animation:none}}.ox{z-index:1;pointer-events:none;position:absolute;inset:0}.ox-shade{mix-blend-mode:multiply;background:#2e2b36}.ox-tint{mix-blend-mode:color;background:#3b3b42}.ox-wash{background:radial-gradient(120% 80% at 50% 30%,#0000 40%,#05040866 78%,#050408cc 100%),linear-gradient(#0b0a12ec 0%,#0d0c15dd 55%,#0b0a1255 78%,#0b0a12bb 100%)}.ox-lines{opacity:.62;mix-blend-mode:screen;background:linear-gradient(160deg,#fff0b3 0%,#e9c15a 35%,#fff6d0 55%,#d7a93c 80%,#ffe9a6 100%);-webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat}.ox-shine{mix-blend-mode:screen;opacity:.95;background:radial-gradient(circle at 50% 45%,#fffbe8 0%,#f6d98aa6 16%,#e9c15a26 34%,#0000 52%) 0 0/210% 210% no-repeat;animation:5.5s ease-in-out infinite alternate paused onyx-shimmer;-webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat}@keyframes onyx-shimmer{0%{background-position:12% 8%}to{background-position:88% 86%}}@media (prefers-reduced-motion:reduce){.ox-shine{opacity:.7;background-position:42% 30%;animation:none}}.card-btn:hover :is(.wc-holo,.ox-shine),.card-btn:focus-visible :is(.wc-holo,.ox-shine),.wc-big :is(.wc-holo,.ox-shine){animation-play-state:running}.wc-scrim{pointer-events:none;background:linear-gradient(#0000 20%,#05060533 32%,#050605b3 50%,#050605fb 68%,#050605 100%);position:absolute;inset:0}.wc.bare .wc-cap,.wc.bare .wc-scrim{display:none}.wc-top{z-index:3;justify-content:space-between;align-items:flex-start;gap:6px;display:flex;position:absolute;top:11px;left:11px;right:11px}.wc-rtag{font-family:var(--display);color:var(--accent-ink);background:var(--rc);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;box-shadow:0 1px 5px #0006}.wc-flags{align-items:center;gap:5px;display:flex}.wc-count{color:#fff;background:#000000b8;border:1px solid #ffffff2e;border-radius:6px;padding:2px 7px;font-size:10.5px;font-weight:600}.wc-new{background:var(--accent);color:var(--accent-ink);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700}.wc-shiny{color:#f3d27a;background:#111014;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex;box-shadow:inset 0 0 0 1px #d7a93c,0 0 10px #e9c15a73}.wc-star{border:1px solid color-mix(in oklab,var(--r-l) 55%,#ffffff4d);color:var(--r-l);background:#000000b8;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex}.wc-cap{z-index:3;gap:var(--s1);background:linear-gradient(#0000,#0506058c 28%,#050605eb);flex-direction:column;padding:14px 14px 16px;display:flex;position:absolute;bottom:0;left:0;right:0}.wc.bare .wc-cap{background:0 0}.wc-name{font-family:var(--display);color:#fff;text-shadow:0 1px 10px #000000a6;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:15px;font-weight:700;line-height:1.18;display:-webkit-box;overflow:hidden}.wc-cat{color:#ffffffd1;white-space:nowrap;text-overflow:ellipsis;text-shadow:0 1px 6px #000000b3;font-size:10.5px;line-height:1.3;overflow:hidden}.wc-meta{border-top:1px solid #ffffff38;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:4px 8px;margin-top:9px;padding-top:9px;display:flex}.wc-stats{white-space:nowrap;color:#ffffffd9;letter-spacing:.02em;text-shadow:0 1px 6px #000000b3;gap:.9em;font-size:11px;display:flex}.wc-stats b{color:#fff;font-variant-numeric:tabular-nums;font-weight:700}.wc-val{color:var(--r-l);font-variant-numeric:tabular-nums;text-shadow:0 1px 6px #000000b3;white-space:nowrap;align-items:center;gap:4px;font-size:11px;font-weight:700;display:inline-flex}.wc-val:before{content:\"\";background:var(--coin);width:9px;height:9px;box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent);border-radius:50%}.wc-name{font-size:clamp(15px,7cqw,30px)}.wc-cat{font-size:clamp(10.5px,4.6cqw,16px)}.wc-stats,.wc-val{font-size:clamp(11px,4.8cqw,17px)}.wc-cap{padding:clamp(14px,6.5cqw,24px) clamp(14px,6.5cqw,24px) clamp(16px,7.5cqw,28px)}.wc-top{top:clamp(11px,5cqw,18px);left:clamp(11px,5cqw,18px);right:clamp(11px,5cqw,18px)}.wc-rtag,.wc-new{padding:.3em .8em;font-size:clamp(10px,4.2cqw,14px)}.wc-big .wc-cat{white-space:normal}.coll-head{justify-content:space-between;align-items:flex-start;gap:var(--s4);margin-bottom:var(--s5);flex-wrap:wrap;display:flex}.coll-head h1{font-family:var(--display);letter-spacing:-.02em;font-size:clamp(24px,2.6vw,32px);font-weight:700}.coll-head .meta{color:var(--fg-soft);margin-top:6px;font-size:14px}.avatar{width:var(--s);height:var(--s);background:hsl(var(--h) 35% 26%);color:hsl(var(--h) 70% 85%);font:700 calc(var(--s) * .42)/1 var(--display);border-radius:50%;flex:none;justify-content:center;align-items:center;display:inline-flex;overflow:hidden}.avatar img{object-fit:cover;width:100%;height:100%}.coll-tools{gap:var(--s3);flex-wrap:wrap;flex:460px;justify-content:flex-end;align-items:center;display:flex}.search-wrap{flex:300px;align-items:center;min-width:220px;display:flex;position:relative}.search-ico{width:17px;height:17px;color:var(--fg-faint);pointer-events:none;position:absolute;left:14px}.search{background:var(--elev);border:1px solid var(--line);width:100%;color:var(--fg);font-family:var(--body);border-radius:11px;padding:11px 38px 11px 40px;font-size:14px}.search::placeholder,.af-input::placeholder{color:var(--fg-faint)}.search:focus{border-color:var(--fg-soft);background:var(--elev2)}.search::-webkit-search-cancel-button{display:none}.search-clear{width:24px;height:24px;color:var(--fg-faint);background:0 0;border:none;border-radius:7px;justify-content:center;align-items:center;font-size:18px;line-height:1;display:flex;position:absolute;right:8px}.search-clear:hover{background:var(--elev2);color:var(--fg)}.tool-actions{gap:var(--s2);flex-wrap:wrap;align-items:center;display:flex}.isel{background:var(--elev);border:1px solid var(--line);border-radius:11px;align-items:center;gap:8px;height:42px;padding:0 12px;transition:all .15s;display:inline-flex;position:relative}.isel:hover,.isel:focus-within{border-color:var(--line2)}.isel svg{width:16px;height:16px;color:var(--fg-soft);flex:none}.isel select{appearance:none;color:var(--fg);font-family:var(--body);cursor:pointer;background:0 0;border:none;outline:none;height:100%;padding:0 18px 0 0;font-size:14px;font-weight:500}#wm-app-root option{background:var(--elev);color:var(--fg)}@supports (appearance:base-select){#wm-app-root select{appearance:base-select}#wm-app-root ::picker(select){appearance:base-select}#wm-app-root select{align-items:center;display:inline-flex}#wm-app-root select::picker-icon{display:none}#wm-app-root ::picker(select){background:var(--elev);border:1px solid var(--line2);min-width:anchor-size(width);opacity:0;transition:opacity .15s ease,translate .15s ease,overlay .15s allow-discrete,display .15s allow-discrete;border-radius:12px;margin-block:6px;padding:4px;translate:0 -4px;box-shadow:0 18px 40px -16px #000}#wm-app-root select:open::picker(select){opacity:1;translate:0}@starting-style{#wm-app-root select:open::picker(select){opacity:0;translate:0 -4px}}#wm-app-root option{color:var(--fg-soft);font:500 14px/1.2 var(--body);cursor:pointer;background:0 0;border-radius:8px;padding:9px 12px;transition:background .12s,color .12s}#wm-app-root option::checkmark{display:none}#wm-app-root option:hover,#wm-app-root option:focus-visible{background:var(--elev2);color:var(--fg);outline:none}#wm-app-root option:checked{color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,transparent)}}.isel:after{content:\"\";border-right:2px solid var(--fg-soft);border-bottom:2px solid var(--fg-soft);pointer-events:none;width:8px;height:8px;position:absolute;right:12px;transform:rotate(45deg)translateY(-2px)}.iconbtn{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);height:42px;font-family:var(--body);white-space:nowrap;border-radius:11px;align-items:center;gap:8px;padding:0 14px;font-size:14px;font-weight:500;transition:all .15s;display:inline-flex}.iconbtn svg{flex:none;width:17px;height:17px}.iconbtn:hover{color:var(--fg);border-color:var(--line2)}.iconbtn.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}.sort-hint{margin:-8px 0 var(--s4);color:var(--fg-soft);font-size:12.5px}.rarity-panel{gap:var(--s3);margin-bottom:var(--s6);flex-direction:column;display:flex}.rarity-meter{gap:5px;height:9px;display:flex}.rm-seg{background:var(--rc);cursor:pointer;border:none;border-radius:999px;min-width:14px;height:100%;padding:0;transition:flex-grow .45s cubic-bezier(.2,.7,.3,1),opacity .2s,filter .2s,transform .15s}.rm-seg:hover{filter:brightness(1.18)}.rm-seg.sel{filter:brightness(1.2);transform:scaleY(1.5)}.rm-seg.dim{opacity:.28}.rarity-legend{gap:var(--s2);flex-wrap:wrap;align-items:center;display:flex}.rl{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);border-radius:999px;align-items:center;gap:8px;padding:7px 13px;font-size:13px;font-weight:500;transition:all .15s;display:inline-flex}.rl:hover{color:var(--fg);border-color:var(--line2)}.rl.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}.rl-dot{border-radius:3px;flex:none;width:9px;height:9px}.rl-n{color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}.rl-sep{background:var(--line2);width:1px;height:22px;margin:0 4px}.rl-ico{flex:none;width:14px;height:14px}.rl.fav.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}.rl.fav.on .rl-ico{fill:var(--r-l);stroke:var(--r-l)}.rl.shiny.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}.card-btn{text-align:left;cursor:pointer;content-visibility:auto;contain-intrinsic-size:auto 300px;overflow-clip-margin:40px;background:0 0;border:none;width:100%;margin:0;padding:0;display:block;position:relative}.card-btn.picking .wc{opacity:.55;transition:opacity .15s}.card-btn.picked .wc{opacity:1}.pick-overlay{z-index:10;border-radius:var(--radius-lg);pointer-events:none;border:3px solid #0000;justify-content:flex-end;align-items:flex-start;padding:9px;transition:all .15s;display:flex;position:absolute;inset:0}.pick-overlay .pick-check{color:#fff;background:#0000008c;border:2px solid #ffffffe6;border-radius:50%;justify-content:center;align-items:center;width:28px;height:28px;font-size:15px;font-weight:800;display:flex}.pick-overlay.on{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 22%,transparent);box-shadow:0 0 0 2px var(--accent) inset}.pick-check svg{width:16px;height:16px}.pick-overlay.on .pick-check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}.loading-more{color:var(--fg-faint);padding:var(--s3) 0;text-align:center;font-size:13px}.bulk-bar{z-index:40;max-width:calc(100vw - 2 * var(--s4));background:var(--elev2);border:1px solid var(--line2);border-radius:999px;align-items:center;gap:12px;padding:8px 10px 8px 18px;display:flex;position:fixed;bottom:20px;left:50%;transform:translate(-50%);box-shadow:0 18px 44px -18px #000}.bulk-text{color:var(--fg);white-space:nowrap;font-size:13.5px}.bulk-text b{color:var(--r-l)}.bulk-bar .btn{padding:9px 18px}.grid{gap:var(--s5);grid-template-columns:repeat(auto-fill,minmax(200px,1fr));display:grid}.empty{justify-content:center;align-items:center;gap:var(--s3);min-height:44vh;color:var(--fg-soft);text-align:center;flex-direction:column;display:flex}.empty b{font-family:var(--display);color:var(--fg);font-size:19px}.loading{color:var(--fg-faint);padding:var(--s7);text-align:center}.wc.skeleton{border:1px solid var(--line);background:linear-gradient(100deg,#141613 30%,#1c201c 50%,#141613 70%) 0 0/200% 100%;animation:1.2s ease-in-out infinite sk}@keyframes sk{to{background-position:-200% 0}}.grid-more{height:1px}.modal-backdrop{z-index:2147483600;padding:var(--s4) var(--s5);background:#060806d6;justify-content:center;align-items:flex-start;animation:.18s fade;display:flex;position:fixed;inset:0}@keyframes fade{0%{opacity:0}to{opacity:1}}.modal{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);width:100%;max-width:clamp(740px,46vw,960px);max-height:calc(100dvh - 2 * var(--s4));gap:var(--s6);padding:var(--s6);grid-template-columns:minmax(0,1fr) minmax(0,1.618fr);align-items:start;display:grid;position:relative;overflow:auto}.modal-card{width:100%}.modal-close{color:var(--fg-soft);cursor:pointer;z-index:2;background:0 0;border:none;font-size:28px;line-height:1;position:absolute;top:12px;right:16px}.modal-close:hover{color:var(--fg)}.modal-info{gap:var(--s4);flex-direction:column;justify-content:flex-start;min-width:0;display:flex}.modal-rar{color:var(--rc);font-family:var(--display);letter-spacing:.04em;font-size:12px;font-weight:700}.modal-name{font-family:var(--display);letter-spacing:-.01em;font-size:26px;font-weight:700;line-height:1.15}.modal-cat{color:var(--fg-soft);font-size:14px;line-height:1.45}.modal-sum{color:var(--fg-soft);-webkit-line-clamp:4;-webkit-box-orient:vertical;font-size:13.5px;line-height:1.55;display:-webkit-box;overflow:hidden}.modal-sum.muted{color:var(--fg-faint)}.modal .btn{text-align:center;text-decoration:none}.modal-panel{align-items:stretch;gap:var(--s4);flex-direction:column;display:flex}.modal-card{align-self:start;position:sticky;top:0}.mk-h,.modal .cmp-head h3{font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);margin:0 0 var(--s2)}.mk-price{background:var(--elev);border:1px solid var(--line);border-radius:var(--radius);padding:var(--s4)}.mk-kpis{gap:var(--s2);grid-template-columns:repeat(auto-fit,minmax(130px,1fr));display:grid}.mk-kpi{min-width:0;padding:var(--s3) var(--s3) 10px;background:var(--elev);border:1px solid var(--line);text-align:left;color:var(--fg);font:inherit;border-radius:12px;flex-direction:column;align-items:flex-start;gap:2px;display:flex}.mk-kpi .mk-h{margin:0}.mk-kpi b{font:700 24px/1.15 var(--display);font-variant-numeric:tabular-nums}.mk-kpi b.gold{color:var(--r-l)}.mk-kpi small{color:var(--fg-faint);align-items:center;gap:4px;font-size:12px;line-height:1.3;display:inline-flex}.mk-kpi small svg{flex:none;width:12px;height:12px}.mk-kpi.buy{cursor:pointer;transition:border-color .15s,background .15s}.mk-kpi.buy:hover{border-color:var(--line2);background:var(--elev2)}.mk-kpi.buy.good{border-color:color-mix(in oklab,var(--accent) 40%,var(--line));background:color-mix(in oklab,var(--accent) 7%,var(--elev))}.mk-kpi.buy.good small{color:var(--accent);font-weight:600}.mk-sell{justify-content:space-between;align-items:center;gap:var(--s3);padding:10px 10px 10px var(--s4);border:1px dashed var(--line2);color:var(--fg-soft);border-radius:12px;flex-wrap:wrap;font-size:13px;display:flex}.mk-sell b{color:var(--fg)}.mk-sell span{flex:200px}.mk-sell .btn{margin-left:auto;padding-block:8px}.modal .cmp{background:0 0;border:none;padding:0}.modal .cmp-head{margin-bottom:var(--s2);flex-direction:column;align-items:flex-start;gap:2px}.modal .cmp-head h3{margin:0}.modal .cmp-list{max-height:none;overflow:visible}.modal .cmp-row{grid-template-columns:minmax(72px,auto) minmax(0,1fr) auto minmax(0,auto);row-gap:0}.modal .cmp-gap{text-align:left}.modal .cmp-time{flex-wrap:nowrap}.modal .cmp-tag{display:none}.modal .cmp .auc-empty{padding-top:0}.modal-wiki{color:var(--accent);align-self:flex-start;font-size:13.5px;font-weight:600;text-decoration:none}.modal-wiki:hover{text-decoration:underline}.actions{border-top:1px solid var(--line);padding-top:var(--s4)}.modal-credit{color:var(--fg-faint);font-size:11px}.mk-price-head{justify-content:space-between;align-items:baseline;gap:var(--s3);display:flex}.mk-price-head .mk-h{margin:0}.mk-price-head .link-btn,.mk-all-go{color:var(--accent);align-items:center;gap:4px;font-size:12.5px;font-weight:600;display:inline-flex}.mk-price-head .link-btn svg,.mk-all-go svg{width:12px;height:12px}.mk-all{justify-content:space-between;align-items:center;gap:var(--s3);width:100%;padding:12px var(--s4);border:1px solid var(--line);background:var(--elev);color:var(--fg-soft);font:500 13px var(--body);cursor:pointer;border-radius:12px;transition:border-color .15s,background .15s;display:flex}.mk-all:hover{border-color:var(--line2);background:var(--elev2)}.mk-all b{color:var(--fg);font-variant-numeric:tabular-nums}.modal-star{z-index:3;border:1px solid color-mix(in oklab,var(--fg) 18%,transparent);background:color-mix(in oklab,var(--bg) 55%,transparent);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);width:38px;height:38px;color:var(--fg-soft);cursor:pointer;border-radius:12px;place-items:center;transition:color .15s,transform .15s,background .15s;display:grid;position:absolute;bottom:10px;right:10px}.modal-star svg{width:20px;height:20px}.modal-star:hover{color:var(--fg);transform:scale(1.06)}.modal-star.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 50%,transparent)}.modal-tags{flex-direction:column;gap:6px;display:flex}.modal-tags .mk-h{margin:0}.tag-row{flex-wrap:wrap;align-items:center;gap:6px;display:flex}.tag-chip{--tc:var(--accent);font:600 12.5px var(--body);color:color-mix(in oklab,var(--tc) 70%,var(--fg));background:color-mix(in oklab,var(--tc) 16%,transparent);border:1px solid color-mix(in oklab,var(--tc) 40%,transparent);border-radius:999px;align-items:center;gap:4px;padding:3px 4px 3px 10px;display:inline-flex}.tag-chip button{width:18px;height:18px;color:inherit;cursor:pointer;opacity:.7;background:0 0;border:none;border-radius:50%;place-items:center;padding:0;display:grid}.tag-chip button:hover{opacity:1;background:color-mix(in oklab,var(--tc) 25%,transparent)}.tag-chip svg{width:10px;height:10px}.tag-add{flex:140px;min-width:120px}.tag-add input{border:1px dashed var(--line2);width:100%;color:var(--fg);font:500 12.5px var(--body);background:0 0;border-radius:999px;padding:6px 10px}.tag-add input:focus{border-style:solid;border-color:var(--accent);outline:none}.pc-plot{height:150px;margin:var(--s4) 0 0 42px;position:relative}.pc.full .pc-plot{height:clamp(220px,38vh,380px)}.pc-grid{border-top:1px dashed color-mix(in oklab,var(--line2) 70%,transparent);pointer-events:none;position:absolute;left:0;right:0}.pc-grid span{color:var(--fg-faint);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:10.5px;position:absolute;top:-.65em;right:calc(100% + 8px)}.pc-plot svg{width:100%;height:100%;display:block;position:absolute;inset:0}.pc-avg{border-top:1px dashed color-mix(in oklab,var(--r-l) 55%,transparent);pointer-events:none;position:absolute;left:0;right:0}.pc-avg span{background:var(--elev);color:color-mix(in oklab,var(--r-l) 80%,transparent);border-radius:4px;padding:0 4px;font-size:10px;font-weight:600;position:absolute;bottom:3px;right:0}.pc-slice{cursor:crosshair;background:0 0;border:none;padding:0;position:absolute;top:0;bottom:0}.pc-slice:before{content:\"\";left:var(--x);border-left:1px solid var(--line2);opacity:0;transition:opacity .12s;position:absolute;top:0;bottom:0}.pc-slice:after{content:\"\";left:var(--x);top:var(--y);background:var(--surface);border:2px solid var(--accent);border-radius:50%;width:7px;height:7px;transition:scale .12s;position:absolute;translate:-50% -50%}.pc-slice.on:before{opacity:1}.pc-slice.on:after{background:var(--accent);scale:1.4}.pc-slice.dense:after{opacity:0;width:6px;height:6px}.pc-slice.dense.on:after{opacity:1}#wm-app-root .pc-slice:focus-visible{outline:none}#wm-app-root .pc-slice:focus-visible:after{box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 40%,transparent)}.pc-tip{background:var(--elev2);border:1px solid var(--line2);color:var(--fg-soft);white-space:nowrap;pointer-events:none;z-index:1;border-radius:9px;flex-direction:column;align-items:center;gap:1px;padding:6px 10px;font-size:11px;display:flex;position:absolute;translate:-50% calc(-100% - 12px);box-shadow:0 10px 24px -12px #000}.pc-tip b{font:700 14px/1.2 var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:5px;display:inline-flex}.pc-tip.flip{translate:calc(16px - 100%) calc(-100% - 12px)}.pc-tip.flop{translate:-16px calc(-100% - 12px)}.pc-x{height:1.4em;margin:var(--s2) 0 0 42px;color:var(--fg-faint);font-size:11px;position:relative}.pc-x span{white-space:nowrap;position:absolute;top:0;translate:-50%}.pc-x span:first-child{translate:0}.pc-x span:last-child:not(:first-child){translate:-100%}.pc-dot{background:color-mix(in oklab,var(--accent) 45%,transparent);pointer-events:none;border-radius:50%;width:5px;height:5px;position:absolute;translate:-50% -50%}.pc-dot.out{border:1.5px solid var(--r-ur);background:0 0;width:7px;height:7px}.pc-vol{height:38px;margin:var(--s2) 0 0 42px;border-bottom:1px solid var(--line);position:relative}.pc-vol span{background:color-mix(in oklab,var(--fg-faint) 45%,transparent);border-radius:2px 2px 0 0;min-height:2px;transition:background .12s;position:absolute;bottom:0;translate:-50%}.pc-vol span.on{background:var(--accent)}.ma{z-index:2147483601;background:var(--bg);outline:none;flex-direction:column;animation:.18s ease-out ma-in;display:flex;position:fixed;inset:0}@keyframes ma-in{0%{opacity:0;transform:translateY(8px)}}.ma-head{padding-top:max(var(--s4),env(safe-area-inset-top))}.ma-rar{color:var(--rc);font-weight:700}.ma-body{overscroll-behavior:contain;gap:var(--s5);min-height:0;padding:var(--s5) max(var(--s5),calc((100% - 1180px) / 2)) max(var(--s6),env(safe-area-inset-bottom));flex-direction:column;flex:1;display:flex;overflow-y:auto}.ma-periods{justify-content:flex-start}.ma-figs{gap:var(--s2);grid-template-columns:repeat(6,minmax(0,1fr));display:grid}.ma-fig{min-width:0;padding:var(--s3);background:var(--elev);border:1px solid var(--line);border-radius:12px;flex-direction:column;gap:2px;display:flex}.ma-fig .mk-h{margin:0}.ma-fig b{font:700 22px/1.15 var(--display);font-variant-numeric:tabular-nums;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.ma-chart{background:var(--elev);border:1px solid var(--line);border-radius:var(--radius);padding:var(--s4) var(--s5) var(--s3)}.ma-chart .pc-plot{margin-top:var(--s2)}.ma-legend{gap:6px var(--s4);margin:var(--s3) 0 0;color:var(--fg-faint);flex-wrap:wrap;font-size:12px;display:flex}.ma-legend span{align-items:center;gap:6px;display:inline-flex}.ma-legend i{flex:none;display:inline-block}.lg-line{background:var(--accent);border-radius:2px;width:14px;height:2px}.lg-band{background:color-mix(in oklab,var(--accent) 20%,transparent);border-radius:3px;width:12px;height:10px}.lg-dot{background:color-mix(in oklab,var(--accent) 45%,transparent);border-radius:50%;width:6px;height:6px}.lg-avg{border-top:1px dashed var(--r-l);width:14px}.ma-main{gap:var(--s4);grid-template-columns:minmax(0,1.75fr) minmax(300px,1fr);align-items:stretch;display:grid}.ma-sales{contain:size;background:var(--elev);border:1px solid var(--line);border-radius:var(--radius);flex-direction:column;min-height:0;display:flex;overflow:hidden}.ma-sales-head{justify-content:space-between;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4) var(--s2);display:flex}.ma-sales-head .mk-h{margin:0}.ma-sales-head .mk-h span{letter-spacing:0;color:var(--fg-soft);margin-left:4px}.ma-hint{color:var(--fg-faint);text-align:right;font-size:11.5px}.ma-day{border:1px solid color-mix(in oklab,var(--accent) 45%,var(--line));background:color-mix(in oklab,var(--accent) 12%,var(--elev));color:var(--fg);font:600 12px var(--body);cursor:pointer;border-radius:999px;align-items:center;gap:6px;padding:4px 8px 4px 10px;display:inline-flex}.ma-day svg{width:11px;height:11px}.ma-sort{margin:0 var(--s4) var(--s2);background:var(--surface);border:1px solid var(--line);border-radius:9px;gap:2px;padding:2px;display:flex}.ma-sort button{color:var(--fg-faint);font:600 12px var(--body);cursor:pointer;white-space:nowrap;background:0 0;border:none;border-radius:7px;flex:1;padding:5px 6px}.ma-sort button.on{background:var(--elev2);color:var(--fg)}.ma-list{overscroll-behavior:contain;min-height:0;padding:0 0 var(--s2);border-top:1px solid var(--line);flex:1;margin:0;list-style:none;overflow-y:auto}.ma-list li{align-items:center;gap:var(--s3);padding:6px var(--s4);font-variant-numeric:tabular-nums;grid-template-columns:1fr auto 64px;font-size:12.5px;display:grid}.ma-list li:nth-child(2n){background:color-mix(in oklab,var(--surface) 55%,transparent)}.ma-when{color:var(--fg-soft)}.ma-gap{color:var(--fg-faint);text-align:right;font-size:11.5px}.ma-gap.up{color:var(--r-ur)}.ma-gap.down{color:var(--accent)}.ma-list b{justify-content:flex-end;align-items:center;gap:5px;font-weight:700;display:inline-flex}.ma-note{padding:var(--s2) var(--s4);border-top:1px solid var(--line);text-align:center;color:var(--fg-faint);flex:none;margin:0;font-size:11.5px}@media (width<=900px){.ma-main{grid-template-columns:minmax(0,1fr)}.ma-sales{contain:none;max-height:min(460px,62dvh)}}@media (width<=560px){.ma-body{padding-inline:var(--s4);gap:var(--s4)}.ma-figs{grid-template-columns:repeat(3,minmax(0,1fr))}.ma-fig b{font-size:18px}.ma-chart{padding:var(--s3) var(--s3) var(--s2)}.ma-chart .pc-plot,.ma-chart .pc-vol,.ma-chart .pc-x{margin-left:34px}}.pc-tip b small{font:600 10px var(--body);color:var(--fg-faint);letter-spacing:.03em;margin-left:2px}.ma-back{flex:none;justify-content:center;width:42px;padding:0}.lg-out{border:1.5px solid var(--r-ur);border-radius:50%;width:7px;height:7px}.pc-slice.pickable{cursor:pointer}@media (prefers-reduced-motion:reduce){.flip-in,.stage-aura,.reveal-rarity,.rg-card,.booster-main,.booster-shine{animation:none}.booster,.wc{transition:none}}@media (width<=900px){:host,:root{--sidebar:100%;--tabbar:calc(64px + env(safe-area-inset-bottom))}.app{grid-template-columns:1fr}.side{z-index:20;height:auto;padding:6px max(6px,env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-right));border-right:0;border-top:1px solid var(--line);background:color-mix(in oklab,var(--surface) 97%,transparent);flex-direction:row;gap:0;position:fixed;inset:auto 0 0}.side .brand,.nav-sep,.nav-grid,.side-foot{display:none}.nav{flex:1;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;display:grid;overflow:visible}.nav button{white-space:nowrap;border-radius:12px;flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;font-size:11px;font-weight:600;overflow:hidden}.nav button svg{width:22px;height:22px}.nav button.on{background:0 0}.nav-long{display:none}.nav-short{text-overflow:ellipsis;max-width:100%;display:block;overflow:hidden}.main{padding-bottom:var(--tabbar)}.topbar{padding:calc(var(--s2) + env(safe-area-inset-top)) var(--s4) var(--s2);gap:var(--s3)}.crumb{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:18px;font-weight:700;overflow:hidden}.wallet .stats-toggle,.wallet .snd{display:none}.wallet .menu-btn{display:grid}.wallet{position:relative}.notif{position:static}.notif-panel{width:min(340px,calc(100vw - 2 * var(--s4)))}.coll-head h1,.page-head h1{display:none}.coll-head .meta{margin-top:0}.coll-tools,.coll-tools .search-wrap{flex:100%;min-width:0}.tool-actions{scrollbar-width:none;flex-wrap:nowrap;width:100%;min-width:0;overflow-x:auto}.pager{gap:var(--s2)}.pager-btn{min-width:0;padding-inline:var(--s3);flex:1 1 0;justify-content:center}.pager-info{flex:none}.tool-actions>*{flex:1 0 auto;justify-content:center;padding-inline:10px}.rarity-legend:not(.picker-chips){scrollbar-width:none;margin-inline:calc(-1 * var(--s4));padding-inline:var(--s4);flex-wrap:nowrap;overflow-x:auto}.rarity-legend:not(.picker-chips)>*{flex:none}.toasts,.bulk-bar{bottom:calc(var(--tabbar) + 12px)}}@media (width<=560px){.chip{padding:8px 12px}.badge.pro{display:none}.wallet{gap:6px}.wallet .bell{width:34px;height:34px}.chip-cap{display:none}}@media (width<=400px){.wallet{gap:4px}.chip{gap:6px;padding:7px 10px}}@media (width<=340px){.bulk-bar{left:var(--s4);right:var(--s4);justify-content:flex-end;gap:var(--s2) var(--s3);border-radius:var(--radius-lg);max-width:none;padding:var(--s3);flex-wrap:wrap;transform:none}.bulk-text{white-space:normal;flex:auto;min-width:0;padding-left:6px;line-height:1.35}.bulk-bar:has(.btn+.btn) .bulk-text{flex-basis:100%}.bulk-bar .btn{padding-inline:var(--s3);flex:1 1 0}}@media (width<=560px){.modal{justify-items:center;gap:var(--s4);padding:var(--s5);grid-template-columns:1fr}.modal-card{width:190px;position:static}.fact{flex-basis:40%}.grid{gap:var(--s3);grid-template-columns:repeat(2,minmax(0,1fr))}}.actions{gap:var(--s2);margin-top:var(--s2);display:flex}.actions .btn{padding-inline:var(--s3);flex:1}.btn.danger{color:#f0a0a0;border-color:#5a2b2b}.btn.danger:hover{color:#f8caca;border-color:#f26d6d}.af-input-row{align-items:center;display:flex;position:relative}.af-input{background:var(--surface);border:1px solid var(--line2);color:var(--fg);font-family:var(--body);border-radius:9px;flex:1;width:100%;padding:9px 40px 9px 12px;font-size:14px}.af-unit{color:var(--fg-faint);pointer-events:none;font-size:13px;position:absolute;right:12px}.af-input:focus{border-color:var(--accent)}.af-actions{gap:8px;margin-top:4px;display:flex}.af-actions .btn{padding-inline:var(--s3);flex:1}.modal-msg{color:#f0a0a0;font-size:12.5px}.modal-msg.ok{color:var(--accent)}.confirm{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:12px;flex-direction:column;gap:10px;padding:14px;display:flex}.confirm-text{color:var(--fg);font-size:14px;line-height:1.4}.confirm-text b{color:var(--r-l);font-weight:700}.sell2{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:14px;flex-direction:column;gap:14px;padding:16px;display:flex}.sell2-head{font-family:var(--display);color:var(--fg);font-size:15px;font-weight:700}.sell2-block{flex-direction:column;gap:8px;display:flex}.sell2-lab{letter-spacing:.02em;color:var(--fg-soft);text-transform:uppercase;justify-content:space-between;align-items:center;font-size:12px;font-weight:600;display:flex}.sell2-suggest{background:color-mix(in oklab,var(--r-l) 15%,transparent);border:1px solid color-mix(in oklab,var(--r-l) 30%,transparent);color:var(--r-l);cursor:pointer;text-transform:none;letter-spacing:0;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;transition:all .12s}.sell2-suggest:hover{background:color-mix(in oklab,var(--r-l) 24%,transparent)}.sell2 .af-input{font-variant-numeric:tabular-nums;font-size:16px;font-weight:600}.sell2-durs{grid-template-columns:repeat(7,1fr);gap:6px;display:grid}.sell2-dur{white-space:nowrap;background:var(--elev2);border:1px solid var(--line);color:var(--fg-soft);cursor:pointer;font-variant-numeric:tabular-nums;border-radius:9px;padding:9px 2px;font-size:12px;font-weight:600;transition:all .12s}.sell2-dur:hover{color:var(--fg);border-color:var(--line2)}.sell2-dur.on{background:color-mix(in oklab,var(--accent) 16%,transparent);border-color:var(--accent);color:var(--accent)}.modal-tabs{background:var(--elev);border:1px solid var(--line);border-radius:10px;align-self:flex-start;gap:4px;margin-top:2px;padding:3px;display:inline-flex}.modal-tabs button{color:var(--fg-soft);font-family:var(--display);cursor:pointer;background:0 0;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;transition:all .15s}.modal-tabs button.on{background:var(--accent);color:var(--accent-ink)}.mc-plot{align-items:stretch;gap:8px;display:flex}.mc-y{text-align:right;min-width:30px;color:var(--fg-faint);font-variant-numeric:tabular-nums;flex-direction:column;justify-content:space-between;padding:2px 0;font-size:10px;display:flex}.mc-plot svg{background:var(--elev);border:1px solid var(--line);border-radius:10px;flex:1;height:56px;display:block}.mc-x{color:var(--fg-faint);justify-content:space-between;margin-top:4px;margin-left:38px;font-size:10px;display:flex}.facts{gap:var(--s2);flex-wrap:wrap;display:flex}.fact{background:var(--elev);border:1px solid var(--line);border-radius:11px;flex:112px;padding:10px 13px}.fk{color:var(--fg-faint);font-size:11px}.fv{font-family:var(--display);font-variant-numeric:tabular-nums;margin-top:3px;font-size:18px;font-weight:700;line-height:1.15}.fv.atk{color:#f26d6d}.fv.def{color:#5aa2ff}.fv.val{color:var(--r-l)}.modal-obtained{color:var(--fg-faint);margin-top:calc(-1 * var(--s2));font-size:12px}.modal-backdrop,.modal{overscroll-behavior:contain}.wc.is-unowned{filter:saturate(.72)brightness(.9)}.card-btn:hover .wc.is-unowned{filter:saturate()brightness()}.wc-wish{border:1px solid color-mix(in oklab,var(--r-sr) 60%,#ffffff4d);color:var(--r-sr);background:#000000b8;border-radius:6px;justify-content:center;align-items:center;width:22px;height:20px;font-size:12px;font-weight:700;display:inline-flex}.wc.is-nsfw .wc-photo,.wc.is-nsfw .wc-blur{filter:blur(18px)saturate(.7);transform:scale(1.2)}.wc-nsfw{z-index:3;font:600 11px/1 var(--display);color:var(--fg);border:1px solid var(--line2);white-space:nowrap;background:#0009;border-radius:999px;padding:6px 12px;position:absolute;top:44%;left:50%;transform:translate(-50%,-50%)}.grid{position:relative}.grid>*{transition:opacity .2s}.grid.dim{pointer-events:none}.grid.dim>*{opacity:.45}.grid.dim:before{content:\"\";left:0;right:0;top:calc(-1 * var(--s4));z-index:2;background:linear-gradient(90deg,transparent,var(--accent) 40%,var(--accent) 60%,transparent) no-repeat,color-mix(in oklab,var(--accent) 14%,transparent);background-size:40% 100%,100% 100%;border-radius:3px;height:3px;animation:1.1s ease-in-out infinite load-bar;position:absolute}.grid.dim:after{content:\"\";z-index:2;pointer-events:none;background:linear-gradient(100deg,#0000 30%,#ffffff0d 50%,#0000 70%) 0 0/220% 100%;animation:1.4s ease-in-out infinite reverse sk;position:absolute;inset:0}@keyframes load-bar{0%{background-position:-40% 0,0 0}to{background-position:140% 0,0 0}}.spin{border:2px solid color-mix(in oklab,currentColor 22%,transparent);border-top-color:currentColor;border-radius:50%;flex:none;width:15px;height:15px;animation:.7s linear infinite spin;display:inline-block}.search-wrap .spin.search-ico{width:16px;height:16px;color:var(--accent)}@keyframes spin{to{transform:rotate(360deg)}}.sync{color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,transparent);font-variant-numeric:tabular-nums;vertical-align:1px;border-radius:999px;align-items:center;gap:7px;margin-left:10px;padding:2px 10px 2px 8px;font-size:12px;display:inline-flex}.sync .spin{width:11px;height:11px}.cmp-row.sk{cursor:default;background:linear-gradient(100deg,var(--elev2) 30%,color-mix(in oklab,var(--elev2) 70%,#fff 6%) 50%,var(--elev2) 70%);background-size:200% 100%;animation:1.2s ease-in-out infinite sk}.wc-photo,.wc-blur,.wc-bg{opacity:0;transition:opacity .35s}.wc.is-ready .wc-photo,.wc.is-ready .wc-blur,.wc.is-ready .wc-bg{opacity:1}.wc:not(.is-ready):not(.skeleton) .wc-face:before{content:\"\";z-index:0;background:linear-gradient(100deg,#0000 30%,#ffffff0f 50%,#0000 70%) 0 0/200% 100%;animation:1.2s ease-in-out infinite sk;position:absolute;inset:0}@media (prefers-reduced-motion:reduce){.grid.dim:before{background-size:100% 100%,100% 100%;animation:none}.grid.dim:after,.wc-face:before,.cmp-row.sk{animation:none}.spin{animation-duration:2s}.wc-photo,.wc-blur,.wc-bg{transition:none}}.pager{justify-content:center;align-items:center;gap:var(--s4);margin:var(--s6) 0 var(--s5);display:flex}.mine-cap{margin:var(--s6) 0 var(--s5);text-align:center;color:var(--fg-faint);font-size:13px}.pager-info{color:var(--fg-soft);font-variant-numeric:tabular-nums;font-size:13.5px}.auc-item{flex-direction:column;gap:6px;display:flex}.auc-item .card-btn{width:100%}.auc-meta{justify-content:space-between;align-items:center;gap:8px;padding:0 2px;display:flex}.auc-bid{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:5px;font-size:14px;font-weight:700;display:inline-flex}.auc-coin{background:var(--coin);width:11px;height:11px;box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent);border-radius:50%;flex:none}.auc-end{color:var(--fg-soft);font-variant-numeric:tabular-nums;font-size:12.5px}.auc-seller{color:var(--fg-faint);white-space:nowrap;text-overflow:ellipsis;padding:0 2px;font-size:11.5px;overflow:hidden}.auc-seller.lead{color:var(--accent);font-weight:600}.auc-foot{justify-content:space-between;align-items:center;gap:8px;min-width:0;display:flex}.auc-foot .auc-seller{min-width:0}.auc-dup{font:700 11px/1 var(--display);color:var(--fg);background:var(--elev2);border:1px solid var(--line2);font-variant-numeric:tabular-nums;border-radius:999px;flex:none;padding:4px 8px}.cmp-head{justify-content:space-between;align-items:baseline;gap:var(--s3);margin-bottom:var(--s2);flex-wrap:wrap;display:flex}.cmp-head h3,.auc-panel .cmp-head h3{margin:0}.cmp-sum{color:var(--fg-soft);font-size:12.5px}.cmp-sum b{color:var(--fg);font-variant-numeric:tabular-nums}.cmp-list{scrollbar-width:thin;scrollbar-color:var(--line2) transparent;flex-direction:column;gap:4px;max-height:220px;margin:0;padding:0;list-style:none;display:flex;overflow:auto}.cmp-row{align-items:center;gap:var(--s3);background:var(--elev2);width:100%;min-height:40px;color:var(--fg);font:inherit;text-align:left;cursor:pointer;border:1px solid #0000;border-radius:10px;grid-template-columns:minmax(80px,1fr) minmax(96px,1fr) minmax(120px,1.4fr) minmax(0,1.2fr);padding:8px 12px;font-size:13px;transition:border-color .15s,background .15s;display:grid}.cmp-row:hover:not(:disabled){border-color:var(--line2)}.cmp-row.here{cursor:default;border-color:color-mix(in oklab,var(--accent) 45%,var(--line));background:color-mix(in oklab,var(--accent) 8%,var(--elev2))}.cmp-price{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:6px;font-size:15px;font-weight:700;display:inline-flex}.cmp-shiny{color:#f3d27a;display:inline-flex}.cmp-shiny svg{width:12px;height:12px}.cmp-gap{font-variant-numeric:tabular-nums;color:var(--fg-soft)}.cmp-gap.best{color:var(--accent);font-weight:600}.cmp-time{font-variant-numeric:tabular-nums;flex-wrap:wrap;align-items:center;gap:8px;display:inline-flex}.cmp-time.soon{color:var(--bad)}.cmp-tag{color:var(--fg-soft);background:var(--elev);border:1px solid var(--line2);white-space:nowrap;border-radius:999px;padding:2px 7px;font-size:10.5px;font-weight:700}.cmp-who{color:var(--fg-faint);white-space:nowrap;text-overflow:ellipsis;text-align:right;overflow:hidden}.cmp{container-type:inline-size}@container (width<=520px){.cmp-row{grid-template-columns:auto 1fr;row-gap:6px}.cmp-gap{text-align:right}.cmp-time{justify-content:flex-start}}@media (width<=560px){.cmp-list{max-height:none;overflow:visible}}.auc-end.soon{color:var(--bad)}.mkt-filter{margin-bottom:var(--s5)}.tabs{gap:var(--s5);border-bottom:1px solid var(--line);margin-bottom:var(--s5);scrollbar-width:none;display:flex;overflow-x:auto}.tabs button{color:var(--fg-soft);font:inherit;white-space:nowrap;cursor:pointer;background:0 0;border:0;border-bottom:2px solid #0000;margin-bottom:-1px;padding:0 0 12px;font-size:14px;font-weight:500;transition:color .15s,border-color .15s}.tabs button:hover{color:var(--fg)}.tabs button.on{color:var(--fg);border-bottom-color:var(--accent);font-weight:600}.auc{width:min(900px,94vw);max-height:calc(100dvh - 2 * var(--s4));background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);padding:var(--s6);gap:var(--s5);flex-direction:column;display:flex;position:relative;overflow:auto;box-shadow:0 40px 90px -30px #000}.auc-top{gap:var(--s6);grid-template-columns:minmax(0,1fr) minmax(0,1.618fr);align-items:start;display:grid}.auc-card .wc{border-radius:14px}.auc-body{gap:var(--s4);flex-direction:column;min-width:0;display:flex}.auc-name{font-family:var(--display);letter-spacing:-.02em;margin-top:6px;font-size:clamp(22px,2.6vw,30px);font-weight:700;line-height:1.1}.auc-cat{color:var(--fg-soft);margin-top:4px;font-size:14px}.auc-by{color:var(--fg-faint);margin-top:6px;font-size:12.5px}.auc-state{background:var(--elev);border:1px solid var(--line);border-radius:14px;flex-direction:column;gap:6px;padding:16px 18px;display:flex}.auc-state[data-phase=sold]{border-color:color-mix(in oklab,var(--accent) 40%,var(--line));background:color-mix(in oklab,var(--accent) 6%,var(--elev))}.auc-row{justify-content:space-between;gap:var(--s4);flex-wrap:wrap;display:flex}.auc-k{color:var(--fg-soft);letter-spacing:.02em;font-size:12px}.auc-price{font-family:var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;align-items:center;gap:9px;font-size:34px;font-weight:800;line-height:1.1;display:inline-flex}.auc-price.muted{color:var(--fg-soft)}.auc-price .auc-coin{width:17px;height:17px}.auc-clock{text-align:right}.auc-time{font-family:var(--display);font-variant-numeric:tabular-nums;font-size:26px;font-weight:800;line-height:1.2}.auc-clock[data-u=warn] .auc-time{color:var(--r-ur)}.auc-clock[data-u=crit] .auc-time{color:var(--bad);animation:1s ease-in-out infinite auc-pulse}.auc-clock[data-u=end] .auc-time{color:var(--fg-faint)}.auc-sub{color:var(--fg-faint);flex-wrap:wrap;align-items:center;gap:10px;font-size:12.5px;display:flex}.auc-live{color:var(--accent);align-items:center;gap:6px;display:inline-flex}.auc-dot{background:var(--accent);border-radius:50%;width:7px;height:7px;animation:1.8s ease-out infinite auc-live}.auc-flag{border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600}.auc-flag.lead{background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--accent)}.auc-flag.out{background:color-mix(in oklab,var(--bad) 14%,transparent);color:var(--bad)}.auc-act{flex-direction:column;gap:10px;display:flex}.auc-inline{gap:8px;display:flex}.auc-inline .af-input-row{flex:1}.auc-inline .btn{padding:10px 22px}.auc-cta{width:100%;padding:12px}.auc-quick{flex-wrap:wrap;gap:6px;display:flex}.auc-quick button{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);cursor:pointer;border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;transition:all .12s}.auc-quick button:hover{color:var(--fg);border-color:var(--line2)}.auc-bal{color:var(--fg-faint);font-size:12px}.auc-bal.low{color:var(--bad)}.auc-note{color:var(--fg-soft);font-size:13px}.auc-bottom{gap:var(--s4);grid-template-columns:1fr 1fr;display:grid}.auc-panel{background:var(--elev);border:1px solid var(--line);border-radius:14px;min-width:0;padding:14px 16px}.auc-panel h3{font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);margin-bottom:var(--s2)}.auc-chart{height:130px;margin-left:36px;position:relative}.auc-chart svg{width:100%;height:100%;display:block;overflow:visible}.auc-chart .mc-y{position:absolute;top:0;bottom:0;left:-36px}.auc-pt{background:var(--accent);width:6px;height:6px;box-shadow:0 0 0 2px var(--elev);border-radius:50%;margin:-3px 0 0 -3px;position:absolute}.auc-axis{color:var(--fg-faint);justify-content:space-between;margin:8px 0 0 36px;font-size:11px;display:flex}.auc-empty{color:var(--fg-faint);padding:2px 0 4px;font-size:13px}.auc-feed{max-height:176px;margin:0;padding:0;list-style:none;overflow:auto}.auc-feed li{border-top:1px solid var(--line);align-items:center;gap:8px;padding:7px 0;font-size:13px;display:flex}.auc-feed li:first-child{border-top:0}.auc-feed .who{white-space:nowrap;text-overflow:ellipsis;flex:1;min-width:0;font-weight:500;overflow:hidden}.auc-feed .me .who{color:var(--accent)}.auc-feed .tag{letter-spacing:.03em;color:var(--accent-ink);background:var(--accent);border-radius:999px;padding:2px 7px;font-size:10.5px;font-weight:700}.auc-feed .amt{color:var(--r-l);font-variant-numeric:tabular-nums;font-weight:700}.auc-feed li:not(.top) .amt{color:color-mix(in oklab,var(--r-l) 70%,var(--fg-soft))}.auc-feed .when{color:var(--fg-faint);text-align:right;min-width:74px;font-size:11.5px}.auc,.auc-feed,.modal,.notif-panel{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}@keyframes auc-pulse{50%{opacity:.55}}@keyframes auc-live{0%{box-shadow:0 0 0 0 color-mix(in oklab,var(--accent) 55%,transparent)}70%{box-shadow:0 0 0 7px #0000}to{box-shadow:0 0 #0000}}@media (width<=760px){.auc-top,.auc-bottom{grid-template-columns:1fr}.auc-card{width:180px;margin:0 auto}}@media (prefers-reduced-motion:reduce){.auc-clock[data-u=crit] .auc-time,.auc-dot{animation:none}}.wc-wish svg,.wc-star svg,.wc-shiny svg{width:12px;height:12px;display:block}.pager-btn{align-items:center;gap:7px;display:inline-flex}.pager-btn svg{width:15px;height:15px}.modal-close .x-ico{width:16px;height:16px}.search-clear .x-ico{width:13px;height:13px}.toasts{z-index:2147483601;flex-direction:column;gap:10px;width:min(360px,100vw - 40px);display:flex;position:fixed;bottom:68px;right:16px}.toast{background:var(--elev2);border:1px solid var(--line2);color:var(--fg);cursor:pointer;border-radius:14px;align-items:flex-start;gap:12px;padding:14px 16px;animation:.25s toast-in;display:flex;box-shadow:0 20px 50px -20px #000}.toast svg{width:18px;height:18px;color:var(--accent);flex:none;margin-top:1px}.toast-wrap{animation:.25s toast-in;position:relative}.toast-wrap .toast{padding-right:40px;animation:none}.toast-x{width:26px;height:26px;color:var(--fg-faint);cursor:pointer;background:0 0;border:0;border-radius:8px;justify-content:center;align-items:center;transition:background .15s,color .15s;display:flex;position:absolute;top:8px;right:8px}.toast-x:hover{background:var(--elev);color:var(--fg)}.toast-x svg{width:13px;height:13px}.toast b{font-size:13.5px;font-weight:600;display:block}.toast span{color:var(--fg-soft);margin-top:2px;font-size:12.5px;line-height:1.4;display:block}@keyframes toast-in{0%{opacity:0;transform:translateY(8px)}}.kbd{border:1px solid var(--line2);background:var(--elev);min-width:22px;height:22px;font:600 11.5px/1 var(--body);color:var(--fg);border-bottom-width:2px;border-radius:6px;justify-content:center;align-items:center;padding:0 6px;display:inline-flex}.kbd-help-scrim{z-index:2147483601;background:#06080699;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}.kbd-help{background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);flex-direction:column;gap:10px;min-width:300px;padding:22px 26px;display:flex}.kbd-help h3{font-family:var(--display);margin-bottom:4px;font-size:16px}.kbd-row{color:var(--fg-soft);align-items:center;gap:12px;font-size:13.5px;display:flex}.kbd-row .kbd{min-width:58px}@media (prefers-reduced-motion:reduce){.toast,.toast-wrap{animation:none}}.hc-backdrop{z-index:2147483602}.modal.hc{gap:var(--s3);text-align:center;grid-template-columns:1fr;justify-items:center;max-width:420px}.hc-title{font-family:var(--display);font-size:20px}.hc-sub{color:var(--fg-soft);align-items:center;gap:8px;font-size:13.5px;display:inline-flex}.hc-box{justify-content:center;min-height:70px;display:flex}.hc-cancel{color:var(--fg-faint);font-weight:500}.tab-n{min-width:18px;height:18px;font:700 11px/1 var(--display);background:color-mix(in oklab,var(--accent) 18%,transparent);color:var(--accent);border-radius:999px;justify-content:center;align-items:center;margin-left:6px;padding:0 6px;display:inline-flex}.nowrap{white-space:nowrap}.trade-status{background:var(--elev2);color:var(--fg-soft);white-space:nowrap;border-radius:999px;align-items:center;padding:4px 9px;font-size:11.5px;font-weight:700;line-height:1;display:inline-flex}.trade-status[data-s=pending]{background:color-mix(in oklab,var(--r-l) 14%,transparent);color:var(--r-l)}.trade-status[data-s=accepted]{background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--accent)}.trade-status[data-s=declined]{background:color-mix(in oklab,var(--bad) 15%,transparent);color:var(--bad)}.trade-status[data-s=cancelled]{color:var(--fg-faint)}.tr-head{margin-bottom:var(--s4);align-items:center}.tr-split{gap:var(--s4);grid-template-columns:minmax(0,1fr);display:grid}.tr-col,.tr-pane{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);min-width:0}.tr-col{flex-direction:column;display:flex;overflow:hidden}.tr-tabs{padding:0 var(--s2);flex:none;gap:0;margin:0}.tr-tabs button{padding:var(--s4) var(--s2) 14px;flex:1;justify-content:center;align-items:center;display:inline-flex}.tr-rows{padding:var(--s2);overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line2) transparent;flex-direction:column;gap:2px;display:flex;overflow:auto}.tr-row{align-items:center;gap:var(--s3);width:100%;min-height:68px;padding:10px var(--s3);color:var(--fg);font:inherit;text-align:left;cursor:pointer;background:0 0;border:1px solid #0000;border-radius:12px;grid-template-columns:40px minmax(0,1fr) auto;transition:background .15s,border-color .15s;display:grid;position:relative}.tr-row:hover{background:var(--elev)}.tr-row.on{background:var(--elev2);border-color:var(--line2)}.tr-row.on:before{content:\"\";background:var(--accent);border-radius:0 3px 3px 0;width:3px;position:absolute;top:14px;bottom:14px;left:-1px}.tr-row.sk{cursor:default;background:linear-gradient(100deg,var(--surface) 30%,var(--elev) 50%,var(--surface) 70%);background-size:200% 100%;height:68px;animation:1.2s ease-in-out infinite sk}.tr-row-main{flex-direction:column;gap:5px;min-width:0;display:flex}.tr-row-top{align-items:baseline;gap:var(--s2);min-width:0;display:flex}.tr-row-top b{text-overflow:ellipsis;white-space:nowrap;flex:0 auto;min-width:0;font-size:14.5px;font-weight:600;overflow:hidden}.tr-row-when{text-overflow:ellipsis;min-width:0;color:var(--fg-faint);flex:0 1000 auto;margin-left:auto;font-size:12px;overflow:hidden}.tr-row-line{min-width:0;color:var(--fg-soft);-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:13px;line-height:1.35;display:-webkit-box;overflow:hidden}.tr-col-none{padding:var(--s5) var(--s4);text-align:center;color:var(--fg-faint);font-size:13.5px;display:none}.tr-badge{text-align:center;min-width:46px;font:700 13px/1 var(--display);font-variant-numeric:tabular-nums;white-space:nowrap;background:var(--elev2);color:var(--fg-soft);border-radius:9px;padding:6px 9px}.tr-row.on .tr-badge[data-k=balanced],.tr-row.on .tr-badge[data-k=unknown]{background:var(--line)}.tr-badge[data-k=advantage]{background:color-mix(in oklab,var(--accent) 15%,transparent);color:var(--accent)}.tr-badge[data-k=disadvantage]{background:color-mix(in oklab,var(--bad) 15%,transparent);color:var(--bad)}.tr-badge[data-k=unknown]{color:var(--fg-faint)}.tr-row>.trade-status{padding:6px 9px}.tr-empty{justify-content:center;align-items:center;gap:var(--s2);min-height:340px;padding:var(--s6) var(--s5);text-align:center;color:var(--fg-soft);flex-direction:column;flex:1;font-size:14px;display:flex}.tr-empty b{font:700 19px/1.3 var(--display);color:var(--fg)}.tr-empty .btn{margin-top:var(--s3)}.tr-empty-ico{width:64px;height:64px;margin-bottom:var(--s2);color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,var(--elev));border:1px solid color-mix(in oklab,var(--accent) 28%,var(--line));border-radius:50%;justify-content:center;align-items:center;display:flex}.tr-empty-ico svg{width:28px;height:28px}.tr-pane{flex-direction:column;display:flex;overflow:hidden;container:tpane/inline-size}.tr-pane-sk{padding:var(--s5);gap:var(--s5);flex-direction:column;display:flex}.tr-pane-sk .sk-line{background:var(--elev);border-radius:12px;width:min(320px,70%);height:44px;animation:1.2s ease-in-out infinite sk}.tr-pane-sk .sk-cards{justify-content:center;gap:var(--s7);grid-template-columns:repeat(2,minmax(0,220px));display:grid}.tr-pane-sk .wc{aspect-ratio:5/7}.tp{flex-direction:column;flex:1;min-height:0;display:flex}.tp-head{align-items:center;gap:var(--s3);padding:var(--s4) var(--s5);border-bottom:1px solid var(--line);flex:none;display:flex}.tp-back{flex:none;justify-content:center;width:42px;padding:0}.tp-title{flex-direction:column;flex:1;gap:5px;min-width:0;display:flex}.tp-title h2{font:700 20px/1.2 var(--display);letter-spacing:-.01em;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.tp-sub{align-items:center;gap:4px var(--s2);color:var(--fg-faint);flex-wrap:wrap;font-size:12.5px;display:flex}.tp-mode{flex:none;align-self:center;margin:0}.tp-mode button{align-items:center;gap:7px;display:inline-flex}.tp-mode svg{width:15px;height:15px}.tp-body{overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line2) transparent;min-height:0;padding:clamp(var(--s3),2.5cqi,var(--s5));gap:var(--deal-bodyGap);flex-direction:column;flex:1;display:flex;overflow:auto}.tp-body>:first-child{margin-top:auto}.tp-body>:last-child{margin-bottom:auto}.tp-sides{justify-content:center;align-items:stretch;gap:var(--deal-gap);display:flex}.tp-sides.measuring{visibility:hidden}.tp-sides.stacked{flex-direction:column}.tside{gap:var(--s3);min-width:0;padding:calc(var(--deal-pad) - 1px);border-radius:var(--radius);background:var(--elev);border:1px solid var(--line);flex-direction:column;flex:none;display:flex}.tside-head{justify-content:space-between;align-items:baseline;gap:4px var(--s2);white-space:nowrap;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-soft);flex-wrap:wrap;font-size:11.5px;font-weight:700;display:flex}.tside-total{text-transform:none;letter-spacing:0;color:var(--fg);font:700 16px/1 var(--display);font-variant-numeric:tabular-nums;white-space:nowrap}.tside-total.is-none{font:500 13px var(--body);color:var(--fg-faint)}.tside-none{color:var(--fg-faint);padding:var(--s3) 0;width:var(--card-w);font-size:13px}.tside-cards{align-content:flex-start;gap:var(--deal-gap);width:calc(var(--cols,1) * var(--card-w) + (var(--cols,1) - 1) * var(--deal-gap));flex-wrap:wrap;margin-inline:auto;display:flex}.tside-cards>*{width:var(--card-w);flex:none}.tside>:nth-child(2){margin-top:auto}.tside>:last-child{margin-bottom:auto}.stacked .tside-none{width:auto}.tp-sides:not(.stacked) .tside{width:min-content}.tp-sides.scrolls:not(.stacked){align-items:flex-start}.tp-sides.scrolls .tside>*{margin-block:0}.tp-sides.scrolls:not(.stacked) .tm-verdict{top:var(--s4);margin-top:calc(var(--card-w) * .5);align-self:flex-start;position:sticky}.tside-coins{aspect-ratio:5/7;border-radius:var(--radius-lg);border:1px dashed color-mix(in oklab,var(--r-l) 45%,var(--line2));background:color-mix(in oklab,var(--r-l) 8%,var(--surface));color:var(--r-l);flex-direction:column;justify-content:center;align-items:center;gap:6px;display:flex}.tside-coins svg{flex:none;width:26px;height:26px}.tside-chip{height:calc(var(--deal-chip) - var(--s3));justify-content:center;align-items:center;gap:var(--s2);padding:0 var(--s3);border:1px dashed color-mix(in oklab,var(--r-l) 45%,var(--line2));background:color-mix(in oklab,var(--r-l) 8%,var(--surface));color:var(--fg-soft);white-space:nowrap;border-radius:999px;flex:none;font-size:13px;display:flex}.tside-chip svg{width:16px;height:16px;color:var(--r-l);flex:none}.tside-chip b{font:700 15px/1 var(--display);color:var(--r-l);font-variant-numeric:tabular-nums}.tside-coins b{font:800 26px/1 var(--display);font-variant-numeric:tabular-nums}.tside-coins span{color:var(--fg-soft);font-size:12px}.tm-verdict{text-align:center;color:var(--fg-soft);flex-direction:column;align-self:center;align-items:center;gap:6px;min-width:120px;display:flex}.tm-verdict svg{width:22px;height:22px}.tm-verdict b{font:700 14px/1.2 var(--display);color:var(--fg)}.tm-verdict span{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.tm-verdict[data-k=advantage] b,.tm-verdict[data-k=advantage] span{color:var(--accent)}.tm-verdict[data-k=disadvantage] b,.tm-verdict[data-k=disadvantage] span{color:var(--bad)}.tp .tm-verdict{width:var(--deal-verdictW);flex:none;min-width:0}.tp .tm-verdict svg{box-sizing:content-box;background:var(--elev2);border:1px solid var(--line2);border-radius:50%;padding:12px}.tp .tm-verdict[data-k=advantage] svg{background:color-mix(in oklab,var(--accent) 14%,var(--elev));border-color:color-mix(in oklab,var(--accent) 40%,var(--line))}.tp .tm-verdict[data-k=disadvantage] svg{background:color-mix(in oklab,var(--bad) 13%,var(--elev));border-color:color-mix(in oklab,var(--bad) 38%,var(--line))}.tp .tm-verdict b{font-size:13px}.tp .tm-verdict span{font:700 15px/1.2 var(--display)}.tp .stacked .tm-verdict{width:auto;min-height:var(--deal-verdictH);justify-content:center;gap:var(--s2) var(--s3);flex-flow:wrap}.tp .stacked .tm-verdict svg{padding:8px;transform:rotate(90deg)}.tp-chain{width:100%;max-width:720px;margin-inline:auto}.tp-chain h3{letter-spacing:.05em;text-transform:uppercase;color:var(--fg-soft);margin-bottom:var(--s2);font-size:11.5px;font-weight:700}.tp-chain ol{--dot:9px;flex-direction:column;margin:0;padding:0;list-style:none;display:flex}.tp-chain li{align-items:center;gap:var(--s3);min-height:34px;padding-left:calc(var(--dot) + var(--s3));color:var(--fg-soft);font-size:13.5px;display:flex;position:relative}.tp-chain li:before{content:\"\";width:var(--dot);height:var(--dot);margin-top:calc(var(--dot) / -2);background:var(--line2);z-index:1;border-radius:50%;position:absolute;top:50%;left:0}.tp-chain li:after{content:\"\";left:calc(var(--dot) / 2 - 1px);background:var(--line);width:2px;position:absolute;top:0;bottom:0}.tp-chain li:first-child:after{top:50%}.tp-chain li:last-child:after{bottom:50%}.tp-chain li:only-child:after{display:none}.tp-chain li.now{color:var(--fg)}.tp-chain li.now:before{background:var(--fg-soft)}.tp-chain li[data-k=accepted]:before{background:var(--accent)}.tp-chain li[data-k=accepted] b{color:var(--accent)}.tp-chain li[data-k=declined]:before{background:var(--bad)}.tp-chain li[data-k=declined] b{color:var(--bad)}.tp-chain li[data-k=pending]:before{background:var(--r-l)}.tp-step{align-items:center;gap:var(--s3);min-width:0;padding:6px var(--s2);border-radius:calc(var(--radius) / 1.618);color:inherit;font:inherit;text-align:left;cursor:pointer;background:0 0;border:0;flex:1;margin-inline-start:calc(-1 * var(--s2));display:flex}.tp-step:hover{background:var(--elev)}.tp-step.on{background:var(--elev);color:var(--fg)}.tp-step-deal{color:var(--fg-faint);font-size:12.5px;display:block}.tp-earlier{justify-content:space-between;align-items:center;gap:var(--s2) var(--s3);width:100%;max-width:720px;padding:6px 6px 6px var(--s4);border-radius:var(--radius);background:color-mix(in oklab,var(--r-l) 10%,var(--surface));border:1px solid color-mix(in oklab,var(--r-l) 30%,var(--line));color:var(--fg-soft);flex-wrap:wrap;margin-inline:auto;font-size:13.5px;display:flex}.tp-earlier b{color:var(--fg)}.tp-earlier .btn{padding:5px 12px;font-size:12.5px}.tr-row-rounds{color:var(--fg-faint);white-space:nowrap;margin-left:.35em}.tp-chain-what{flex:1;min-width:0}.tp-chain li>.tp-chain-when{padding-right:var(--s2)}.tp-chain-when{color:var(--fg-faint);font-variant-numeric:tabular-nums;font-size:12.5px}.tp-foot{justify-content:flex-end;align-items:center;gap:var(--s3);padding:var(--s3) var(--s5);border-top:1px solid var(--line);background:var(--elev);flex-wrap:wrap;flex:none;display:flex}.tp-actions{gap:var(--s2);margin-left:auto;display:flex}.tp-actions .btn{padding:11px 22px}.tp-msg{flex:220px}.tp-confirm{align-items:center;gap:var(--s3);flex-wrap:wrap;flex:1;display:flex}.tp-confirm .confirm-text{flex:300px;margin:0}.chat{flex-direction:column;flex:1;min-height:0;display:flex}.chat-feed{overscroll-behavior:contain;min-height:0;padding:var(--s4) var(--s5);gap:var(--s2);scrollbar-width:thin;scrollbar-color:var(--line2) transparent;flex-direction:column;flex:1;display:flex;overflow:auto}.chat-feed .empty{flex:1;min-height:0}.chat-feed .empty span{font-size:13.5px}.chat-feed .loading-more{margin:auto}.bubble{background:var(--elev2);overflow-wrap:anywhere;border-radius:14px 14px 14px 4px;flex-direction:column;align-self:flex-start;gap:2px;max-width:min(80%,520px);padding:9px 12px;font-size:13.5px;line-height:1.4;display:flex}.bubble.mine{background:color-mix(in oklab,var(--accent) 18%,var(--elev2));border-radius:14px 14px 4px;align-self:flex-end}.bubble time{color:var(--fg-faint);align-self:flex-end;font-size:10.5px}.chat-trade{border:1px solid var(--line2);background:var(--elev);color:var(--fg-soft);font:inherit;cursor:pointer;border-radius:999px;align-self:center;align-items:center;gap:8px;padding:7px 12px;font-size:12.5px;display:inline-flex}.chat-trade:hover{color:var(--fg);border-color:var(--fg-soft)}.chat-trade svg{width:14px;height:14px}.chat-form{gap:var(--s2);padding:var(--s3) var(--s5);border-top:1px solid var(--line);background:var(--elev);flex:none;display:flex}.chat-input{padding-left:14px}.chat-form .btn{padding:10px 20px}.chat-msg{padding:0 var(--s5) var(--s3);background:var(--elev)}.tm-head{align-items:center;gap:var(--s3);padding-right:var(--s6);display:flex}.tm-head h2{font:700 20px/1.2 var(--display)}.tp-sides.compact{flex:none;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:start;display:grid}.tp-sides.compact .tside{flex:initial;width:auto}.tp-sides.compact .tside>*{margin-block:0}.tp-sides.compact .tm-verdict{align-self:center}.tside-sum{align-items:baseline;gap:4px var(--s2);color:var(--fg-soft);flex-wrap:wrap;font-size:13px;display:flex}.tside-sum b{color:var(--fg)}.tside-rar{flex-wrap:wrap;gap:4px;margin-left:auto;display:flex}.tside-rar span{font:700 11px/1.6 var(--body);color:var(--rc);background:color-mix(in oklab,var(--rc) 14%,transparent);font-variant-numeric:tabular-nums;border-radius:999px;padding:1px 7px}.tside-minis{gap:var(--s3) var(--s2);overscroll-behavior:contain;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));max-height:min(62dvh,640px);padding:2px 4px 2px 0;display:grid;overflow-y:auto}.tmini{min-width:0;color:inherit;font:inherit;text-align:left;cursor:pointer;background:0 0;border:none;flex-direction:column;gap:3px;padding:0;display:flex}.tmini .cthumb{aspect-ratio:5/6;border-radius:10px;width:100%;height:auto;transition:transform .15s,box-shadow .15s}.tmini:hover .cthumb{transform:translateY(-2px);box-shadow:0 8px 18px -10px #000}.tmini-t{text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600;line-height:1.25;overflow:hidden}.tmini-v{min-height:1.2em;color:var(--r-l);font-variant-numeric:tabular-nums;font-size:11px}.tmini-more{grid-column:1/-1;height:1px}@media (width<=900px){.tp-sides.compact{grid-template-columns:minmax(0,1fr)}.tside-minis{grid-template-columns:repeat(4,minmax(0,1fr));max-height:none;overflow:visible}.tmini-t{font-size:11px}}.tmini-all{justify-content:center;width:100%}.tr-more{height:1px}.tp-fold{padding:4px 0 4px 22px}.tp-fold .link-btn{color:var(--accent);font-size:12.5px;font-weight:600}.tr-find{gap:var(--s2);padding:var(--s3) var(--s3) var(--s2);border-bottom:1px solid var(--line);flex-direction:column;display:flex}.tr-find>.search-wrap{flex:none}.tr-find-row{gap:var(--s2);min-width:0;display:flex}.tr-find-row .tr-who{flex:1;min-width:0}.tr-who select{white-space:nowrap;text-overflow:ellipsis;width:100%;min-width:0;overflow:hidden}@media (width>=1000px){.main:has(>.view>.pulls>.pull-ready){height:100dvh}.view:has(>.pulls>.pull-ready){min-height:0;padding-block:var(--s4) var(--s5);flex-direction:column;flex:1;display:flex}.pulls:has(>.pull-ready){flex-direction:column;flex:1;min-height:0;display:flex}.pull-ready{gap:var(--s4);flex:1;min-height:0}.pull-ready .booster-stage{flex:1;min-height:0}.pull-ready .booster{width:auto;height:100%;min-height:180px;max-height:620px}.main:has(>.view>.pulls>.reveal){height:100dvh}.view:has(>.pulls>.reveal){min-height:0;padding-block:var(--s4) var(--s5);flex-direction:column;flex:1;display:flex}.pulls:has(>.reveal){flex-direction:column;flex:1;min-height:0;display:flex}.reveal:not(.reveal-all){gap:var(--s4);flex:1;min-height:0}.reveal:not(.reveal-all) .stage{aspect-ratio:5/7;flex:1 1 0;width:auto;max-width:520px;min-height:200px;max-height:728px}.main:has(.tr-split){height:100dvh}.view:has(>.tr-split){min-height:0;padding-top:var(--s4);flex-direction:column;flex:1;max-width:2200px;padding-bottom:72px;display:flex}.tr-head{margin-bottom:var(--s3);flex-wrap:nowrap}.tr-head>div{align-items:baseline;gap:4px var(--s3);flex-wrap:wrap;min-width:0;display:flex}.tr-head h1{font-size:clamp(22px,2vw,28px)}.tr-head .meta{margin:0}.tr-head .btn{padding:10px 20px}.tr-split{grid-template-columns:var(--tr-list) minmax(0,1fr);--tr-list:300px;flex:1;min-height:0}.tr-col{min-height:0}.tr-rows{flex:1;min-height:0}.tr-col-empty .tr-empty{display:none}.tr-col-none{display:block}.tp-back{display:none}}@media (width>=1280px){.tr-split{--tr-list:clamp(340px,24vw,380px)}}@media (width<=999.98px){.tr-pane{display:none}.tr-split.reading .tr-pane{z-index:2147483600;border:0;border-radius:0;animation:.15s fade;display:flex;position:fixed;inset:0}.tr-col-empty{display:flex}.tr-split:not(.reading) .tr-row.on{background:0 0;border-color:#0000}.tr-split:not(.reading) .tr-row.on:before{display:none}.tp-foot,.chat-form{padding-bottom:calc(var(--s3) + env(safe-area-inset-bottom))}}@media (width<=560px){.tr-head .btn{justify-content:center;width:100%}}@container tpane (width<=560px){.tp-head{padding:var(--s3) var(--s4);flex-wrap:wrap}.tp-mode{flex:100%;order:4;display:flex}.tp-mode button{flex:1;justify-content:center}.tp-foot{padding-inline:var(--s4)}.chat-feed{padding:var(--s4)}.chat-form{padding-inline:var(--s4)}}@container tpane (width<=520px){.tp-title h2{font-size:17px}.tp-actions{flex:1}.tp-actions .btn{padding-inline:var(--s2);flex:1}.tp-confirm .af-actions,.tp-confirm .tp-actions{flex:100%}}@media (prefers-reduced-motion:reduce){.tr-split.reading .tr-pane{animation:none}}.modal.composer{text-align:left;grid-template:\"pick head\"\"pick offer\"minmax(0,1fr)/minmax(0,1fr) clamp(340px,26vw,440px);place-items:stretch stretch;gap:0;max-width:min(2000px,96vw);height:94dvh;max-height:none;padding:0;overflow:hidden}.modal.composer.pick-friend{max-width:560px;height:auto;max-height:calc(100dvh - 2 * var(--s4));padding:var(--s6);gap:var(--s4);flex-direction:column;align-items:stretch;display:flex;overflow:auto}.composer:not(.pick-friend)>.tm-head{padding:var(--s4) var(--s7) var(--s3) var(--s4);border-left:1px solid var(--line);background:var(--elev);grid-area:head}.composer:not(.pick-friend)>.tm-head h2{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:17px;overflow:hidden}.composer-sub{color:var(--fg-soft);margin-top:calc(-1 * var(--s2));font-size:14px}.composer-pick{min-width:0;min-height:0;padding:var(--s4) var(--s4) 0 var(--s5);flex-direction:column;grid-area:pick;display:flex}.composer-tab{flex-direction:column;flex:1;min-height:0;display:flex}.composer-tab[hidden]{display:none}.composer-tabs{flex:none;align-self:center;margin:0}.composer-tabs button{white-space:nowrap;align-items:center;padding:8px 14px;display:inline-flex}.composer-tabs button.on .tab-n{background:color-mix(in oklab,var(--accent-ink) 22%,transparent);color:var(--accent-ink)}.picker{gap:var(--s3);flex-direction:column;flex:1;min-height:0;display:flex;container-type:inline-size}.picker>*{flex:none}.picker-bar{align-items:center;gap:var(--s2);min-width:0;display:flex}.picker-bar .search-wrap{flex:160px;min-width:140px;max-width:420px}.picker-bar .isel{flex:none;margin-left:auto}[data-fade-axis]{--fade-to:to right;--fade:40px}[data-fade-axis=y]{--fade-to:to bottom;--fade:48px}[data-fade=end]{-webkit-mask-image:linear-gradient(var(--fade-to),#000 calc(100% - var(--fade)),transparent);mask-image:linear-gradient(var(--fade-to),#000 calc(100% - var(--fade)),transparent)}[data-fade=start]{-webkit-mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade));mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade))}[data-fade=both]{-webkit-mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade),#000 calc(100% - var(--fade)),transparent);mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade),#000 calc(100% - var(--fade)),transparent)}.picker-chips{scrollbar-width:none;min-width:0;scroll-padding-inline:var(--s5);flex-wrap:nowrap;flex:0 auto;gap:6px;overflow-x:auto}.picker-chips::-webkit-scrollbar{display:none}.picker-chips .rl{white-space:nowrap;flex:none;padding:8px 11px}.rl-code,.picker-chips.compact .rl-full{display:none}.picker-chips.compact .rl-code{display:inline}.picker-bar:has(>.picker-chips.wrap){row-gap:var(--s2);flex-wrap:wrap}.picker-chips.wrap{flex:100%;order:3}.picker-chips.wrap.compact{gap:4px}.picker-chips.wrap.compact .rl{flex:1 0 auto;justify-content:center;gap:5px;padding:8px 6px}@container (width<=720px){.picker-chips.wrap{flex:55%}.picker-bar .isel{order:4}}.picker-scroll{scrollbar-width:thin;scrollbar-color:var(--line2) transparent;min-height:0;padding:6px 8px var(--s5) 4px;gap:var(--s4);flex-direction:column;flex:1;margin-left:-4px;display:flex;overflow:auto}.picker-grid{gap:var(--s4);grid-template-columns:repeat(auto-fill,minmax(168px,1fr))}.picker-grid .empty{grid-column:1/-1;min-height:260px}.picker-more{align-items:center;gap:var(--s2);flex-direction:column;display:flex}.picker .card-btn.picking .wc{opacity:1}.picker .pick-overlay.on{box-shadow:none;background:color-mix(in oklab,var(--accent) 10%,transparent);border-color:#0000}.picker .card-btn.picked .wc{border-color:var(--rc);box-shadow:0 0 0 2px var(--rc),0 0 34px -4px color-mix(in oklab,var(--rc) 80%,transparent)}.card-btn:disabled{opacity:.35;cursor:not-allowed}.pick-lock{z-index:11;white-space:nowrap;max-width:90%;color:var(--fg);text-align:center;background:#060806d9;border-radius:999px;padding:5px 10px;font-size:11.5px;font-weight:600;line-height:1.25;position:absolute;top:42%;left:50%;transform:translate(-50%,-50%)}.offer{background:var(--elev);border-left:1px solid var(--line);flex-direction:column;grid-area:offer;min-width:0;min-height:0;display:flex}.offer-bar{display:none}.offer-panel{gap:var(--s3);min-height:0;padding:0 var(--s4) var(--s4);flex-direction:column;flex:1;display:flex}.offer-title{display:none}.offer-sides{overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line2) transparent;gap:var(--s3);min-height:0;margin-right:calc(-1 * var(--s2));padding-right:var(--s2);scroll-padding-block:var(--fade,48px);flex-direction:column;flex:0 auto;display:flex;overflow:auto}.oside{gap:var(--s2);padding:var(--s3);border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);flex-direction:column;display:flex}.oside-head{justify-content:space-between;align-items:center;gap:var(--s2);letter-spacing:.05em;text-transform:uppercase;min-width:0;color:var(--fg-soft);white-space:nowrap;font-size:11.5px;font-weight:700;display:flex}.oside-head>span:first-child{align-items:center;display:inline-flex}.oside-total{text-transform:none;letter-spacing:0;color:var(--fg);font:700 15px/1 var(--display);font-variant-numeric:tabular-nums}.oside-list{margin:0 calc(-1 * var(--s1));flex-direction:column;gap:2px;padding:0;list-style:none;display:flex}.oside-row{padding:5px var(--s1);border-radius:10px;grid-template-columns:44px minmax(0,1fr) 28px;align-items:center;gap:10px;transition:background .15s;display:grid}.oside-row:hover{background:var(--elev2)}.oside-txt{flex-direction:column;gap:3px;min-width:0;line-height:1.25;display:flex}.oside-txt b{-webkit-line-clamp:2;overflow-wrap:anywhere;-webkit-box-orient:vertical;font-size:13.5px;font-weight:600;display:-webkit-box;overflow:hidden}.oside-sub{align-items:center;gap:var(--s2);min-width:0;display:flex}.oside-cat{min-width:0;color:var(--fg-faint);text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;overflow:hidden}.oside-val{color:var(--r-l);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none;align-items:center;gap:5px;font-size:12.5px;font-weight:700;display:inline-flex}.oside-val:before{content:\"\";background:var(--coin);border-radius:50%;width:8px;height:8px}.oside-val.none{color:var(--fg-faint);font-weight:500}.oside-val.none:before{display:none}.oside-x{width:28px;height:28px;color:var(--fg-faint);cursor:pointer;opacity:.7;background:0 0;border:0;border-radius:8px;justify-content:center;align-items:center;transition:all .15s;display:flex}.oside-row:hover .oside-x,.oside-x:focus-visible{opacity:1}.oside-x:hover{background:var(--line);color:var(--fg)}.oside-x svg{width:13px;height:13px}.oside-hint{min-height:40px;padding:0 var(--s3);border:1px dashed var(--line2);color:var(--fg-faint);font:inherit;text-align:left;cursor:pointer;text-overflow:ellipsis;white-space:nowrap;background:0 0;border-radius:10px;align-items:center;font-size:13px;transition:all .15s;display:flex;overflow:hidden}.oside-hint:hover{color:var(--accent);border-color:color-mix(in oklab,var(--accent) 50%,var(--line2))}.oside .coins-add{align-self:flex-start;height:36px;font-size:13px}.oside .coins-field{flex:none;align-self:stretch}.cthumb{background:var(--card-bg);border:2px solid var(--rc);width:44px;height:44px;box-shadow:0 0 12px -4px color-mix(in oklab,var(--rc) 70%,transparent);border-radius:10px;flex:none;display:block;position:relative;overflow:hidden}.cthumb img{object-fit:cover;object-position:50% 22%;width:100%;height:100%;display:block}.cthumb.paper img{object-fit:contain;background:#e4e2db;padding:4px}.cthumb.art img{transform:scale(1.8)}.cthumb.art[data-r=C] img,.cthumb.art[data-r=PC] img{filter:brightness(.6)saturate(1.2)}.cthumb.shiny{box-shadow:inset 0 0 0 1px #e9c15a8c,0 0 10px #e9c15a66}.cthumb.shiny:after{content:\"\";mix-blend-mode:screen;background:linear-gradient(135deg,#0000 30%,#fff8e055 50%,#0000 70%);position:absolute;inset:0}.cthumb-r{z-index:1;background:var(--rc);color:var(--accent-ink);font:800 9px/1 var(--display);letter-spacing:.02em;border-top-right-radius:6px;padding:2px 4px 1px 3px;position:absolute;bottom:0;left:0}.offer-sum{gap:var(--s2);flex-direction:column;flex:none;display:flex}.offer .tm-verdict{min-width:0;padding:14px var(--s3);border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);flex-flow:wrap;justify-content:center;align-self:stretch;gap:4px 10px}.offer .tm-verdict svg{width:18px;height:18px}.offer .tm-verdict b{font-size:15px}.offer .tm-verdict span{font:700 15px/1.2 var(--display);font-variant-numeric:tabular-nums}.offer .tm-verdict[data-k=advantage]{background:color-mix(in oklab,var(--accent) 9%,var(--surface));border-color:color-mix(in oklab,var(--accent) 35%,var(--line))}.offer .tm-verdict[data-k=disadvantage]{background:color-mix(in oklab,var(--bad) 8%,var(--surface));border-color:color-mix(in oklab,var(--bad) 32%,var(--line))}.offer-sum-empty{padding:var(--s3);border-radius:var(--radius);border:1px dashed var(--line2);color:var(--fg-faint);text-align:center;margin:0;font-size:12.5px;line-height:1.45}.offer-sum .modal-msg{text-align:center}.offer-actions{gap:var(--s2);padding-top:var(--s3);border-top:1px solid var(--line);flex:none;margin-top:auto;display:flex}.offer-actions .btn{padding:12px 14px;font-size:14px}.offer-actions .btn.primary{text-overflow:ellipsis;flex:1;min-width:0;overflow:hidden}.coins-add{flex:none}.coins-add svg,.coins-ico{width:16px;height:16px;color:var(--r-l);flex:none}.coins-field{flex:0 0 200px}.coins-field .coins-ico{pointer-events:none;position:absolute;left:12px}.coins-field .af-input{font-variant-numeric:tabular-nums;border-color:color-mix(in oklab,var(--r-l) 40%,var(--line2));height:42px;padding:0 64px 0 36px;font-weight:600}.coins-field .af-unit{right:40px}.af-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}.af-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}.af-input[type=number]{appearance:textfield}.coins-x{width:26px;height:26px;color:var(--fg-faint);cursor:pointer;background:0 0;border:0;border-radius:7px;justify-content:center;align-items:center;display:flex;position:absolute;right:8px}.coins-x:hover{background:var(--elev2);color:var(--fg)}.coins-x svg{width:13px;height:13px}@media (height<=800px) and (width>=901px){.composer:not(.pick-friend)>.tm-head{padding-top:var(--s3);padding-bottom:var(--s2)}.offer-panel{gap:var(--s2);padding-bottom:var(--s3)}.offer-sides{gap:var(--s2)}.oside{padding:10px var(--s3);gap:6px}.oside-list{gap:0}.oside-row{padding:3px var(--s1);grid-template-columns:36px minmax(0,1fr) 28px}.oside .cthumb{border-radius:8px;width:36px;height:36px}.oside-txt{gap:1px}.oside-txt b{-webkit-line-clamp:1}.oside .coins-add{height:32px}.oside .coins-field .af-input{height:36px}.oside-hint{min-height:34px}.offer .tm-verdict{padding:9px var(--s3)}.offer-actions{padding-top:var(--s2)}.offer-actions .btn{padding:10px 14px}}.friend-list{gap:var(--s3);overscroll-behavior:contain;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));max-height:min(60dvh,560px);padding:2px;display:grid;overflow-y:auto}.modal.composer.pick-friend{justify-content:flex-start}.pick-friend>*{flex:none}.pick-friend .friend-list{flex:0 auto;min-height:0}.friend-list .empty,.friend-list .loading-more{grid-column:1/-1;min-height:120px}.friend{align-items:center;gap:var(--s2);padding:var(--s4) var(--s2);border-radius:var(--radius);border:1px solid var(--line);background:var(--elev);color:var(--fg);font:inherit;cursor:pointer;flex-direction:column;transition:border-color .15s,background .15s;display:flex}.friend b{text-overflow:ellipsis;white-space:nowrap;max-width:100%;font-size:13.5px;font-weight:600;overflow:hidden}.friend:hover{border-color:var(--accent);background:var(--elev2)}@media (width<=900px){.modal.composer:not(.pick-friend){border:0;border-radius:0;grid-template:\"head\"\"pick\"minmax(0,1fr)\"offer\"/minmax(0,1fr);width:auto;max-width:none;height:auto;position:fixed;inset:0}.composer:not(.pick-friend)>.tm-head{padding:var(--s3) var(--s7) var(--s2) var(--s4);background:0 0;border-left:0}.composer:not(.pick-friend)>.modal-close{top:10px;right:10px}.composer-pick{padding:0 var(--s3)}.picker-bar{row-gap:var(--s2);flex-wrap:wrap}.composer-tabs{flex:100%;display:flex}.composer-tabs button{text-overflow:ellipsis;flex:1;justify-content:center;min-width:0;overflow:hidden}.picker-bar .search-wrap{flex:1 1 0;min-width:0}.picker-chips{flex:100%;order:3}.picker-bar .isel{order:0}.picker-chips .rl-full{display:inline}.picker-chips .rl-code{display:none}.picker-grid{gap:var(--s3);grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}.picker-scroll{padding-bottom:var(--s4)}.offer{border-left:0;border-top:1px solid var(--line2);background:var(--surface);position:relative}.offer-bar{align-items:center;gap:var(--s2);padding:var(--s2) var(--s3) calc(var(--s2) + env(safe-area-inset-bottom));display:flex}.offer-bar .btn{padding:11px 18px;font-size:14px}.offer-peek{align-items:center;gap:var(--s2);min-width:0;color:var(--fg);font:inherit;text-align:left;background:0 0;border:0;flex:1;padding:6px 4px;display:flex}.offer-peek-txt{flex-direction:column;flex:1;min-width:0;line-height:1.3;display:flex}.offer-peek-txt b{font:700 15px/1.25 var(--display);text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.offer-peek-txt span{color:var(--fg-soft);text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;overflow:hidden}.offer-peek-txt span[data-k=advantage]{color:var(--accent)}.offer-peek-txt span[data-k=disadvantage]{color:var(--bad)}.offer-chev{width:18px;height:18px;color:var(--fg-soft);flex:none;transition:transform .2s;transform:rotate(-90deg)}.offer.open .offer-chev{transform:rotate(90deg)}.offer-panel{max-height:calc(100dvh - 120px);padding:var(--s4);background:var(--surface);border-top:1px solid var(--line2);border-radius:var(--radius-lg) var(--radius-lg) 0 0;animation:.18s toast-in;display:none;position:absolute;bottom:100%;left:0;right:0;box-shadow:0 -24px 48px -16px #000}.offer.open .offer-panel{display:flex}.offer-title{font:700 16px/1.2 var(--display);display:block}.offer-sides{flex:0 auto}.offer-panel .offer-actions{display:none}}@media (prefers-reduced-motion:reduce){.offer-panel{animation:none}.offer-chev{transition:none}}@keyframes fade-in{0%{opacity:0}to{opacity:1}}@media (width<=560px){.modal-backdrop{align-items:stretch;padding:0!important}.modal:not(.composer),.auc{width:100%;max-width:none;height:100dvh;max-height:none;padding-top:calc(var(--s5) + env(safe-area-inset-top));padding-bottom:calc(var(--s6) + env(safe-area-inset-bottom));border:0;border-radius:0}.modal:not(.composer)>.modal-close,.auc>.modal-close{top:calc(var(--s3) + env(safe-area-inset-top));right:var(--s3);background:color-mix(in oklab,var(--surface) 94%,transparent);border:1px solid var(--line2);border-radius:50%;place-items:center;width:40px;height:40px;display:grid;position:fixed}.modal-info,.modal-panel{justify-self:stretch;width:100%}.fact{flex:28%}.meta.lead{display:none}.coll-head>div:has(>.meta.lead){display:none}.lbl-long{display:none}}.lbl-short{display:none}@media (width<=560px){.lbl-short{display:inline}.pick-friend .friend-list{flex:auto;max-height:none}}";
 	if (!window.__wmMounted) {
 		window.__wmMounted = true;
 		initCapture();

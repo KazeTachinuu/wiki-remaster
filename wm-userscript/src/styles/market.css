@@ -43,6 +43,7 @@
 }
 /* pagination */
 .pager{display:flex;align-items:center;justify-content:center;gap:var(--s4);margin:var(--s6) 0 var(--s5)}
+.mine-cap{margin:var(--s6) 0 var(--s5);text-align:center;font-size:13px;color:var(--fg-faint)}
 .pager-info{color:var(--fg-soft);font-size:13.5px;font-variant-numeric:tabular-nums}
 /* wishlist toggle in the card modal */
 /* marketplace auction tiles */

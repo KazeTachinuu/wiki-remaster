@@ -24,7 +24,15 @@ async function crop(rect) {
 // --- one card of each rarity, with a picture, from my collection --------------------------
 await view.evaluate(`localStorage.removeItem("wm-off")`);
 await go("/collection");
-const coll = await ev(async () => (await window.__wm.data.collection()).items.map((i) => ({ title: i.card.title, rarity: i.card.rarity, image: !!i.card.image_url && !i.card.hide_image })));
+// one page per rarity, asked of the server (never the whole collection)
+const coll = await ev(async () => {
+  const out = [];
+  for (const rarity of ["L", "UR", "SR", "R", "PC", "C"]) {
+    out.push(...(await window.__wm.data.myCards({ rarity })).items.map((i) => ({ title: i.card.title, rarity: i.card.rarity, image: !!i.card.image_url && !i.card.hide_image })));
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  return out;
+});
 // per rarity, a few candidates (with a picture first): the first one the original site's search
 // finds is the one shown on both sides
 // A rarity I own none of (often Légendaire) comes from the full catalogue, on both sides.
@@ -237,3 +245,28 @@ for (const [path, name, sel] of [["/collection", "phone-collection", ".grid .car
 await phone.view.evaluate(`localStorage.removeItem("wm-debug")`);
 await phone.close();
 console.log(`${OUT}cards-before-after.png`, before.filter(Boolean).length, "/", picks.length, "originals found", errors.length ? `errors: ${errors.join(" | ")}` : "");
+
+// The Pro market analysis, from the test server (`bun run dev`): this account is not Pro, so the
+// game would not send it the sale history. Skipped when the test server is not running.
+const DEV = process.env.WM_DEV || "http://localhost:5173"; // WM_DEV: another port
+const devUp = await fetch(DEV + "/api/profile").then((r) => r.ok, () => false);
+if (devUp) {
+  await fetch(DEV + "/api/__profile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ is_pro: true }) });
+  const dev = new Bun.WebView({ width: 1440, height: 900 });
+  const at = (expr) => dev.evaluate(`(() => { const r = document.querySelector("#wm-host")?.shadowRoot; return ${expr}; })()`);
+  const until = async (expr, ms = 20000) => { for (const end = Date.now() + ms; Date.now() < end; await Bun.sleep(200)) if (await at(expr).catch(() => false)) return; throw new Error("dev: " + expr); };
+  await dev.navigate(DEV + "/global-collection");
+  await until(`!!r?.querySelector(".grid .card-btn")`);
+  await at(`[...r.querySelectorAll("button")].find((b) => /^Légendaire/.test(b.textContent.trim()))?.click()`);
+  await Bun.sleep(1500);
+  await at(`r.querySelector(".grid .card-btn").click()`);
+  await until(`!!r?.querySelector(".modal [role=tab]")`);
+  await at(`[...r.querySelectorAll(".modal [role=tab]")].find((t) => t.textContent.includes("Marché")).click()`);
+  await until(`[...r.querySelectorAll("button")].some((b) => b.textContent.includes("Analyse complète"))`);
+  await at(`[...r.querySelectorAll("button")].find((b) => b.textContent.includes("Analyse complète")).click()`);
+  await until(`!!r?.querySelector(".ma .pc-plot")`);
+  await Bun.sleep(1200);
+  await Bun.write(`${OUT}analysis.png`, await dev.screenshot());
+  dev.close();
+  console.log(`${OUT}analysis.png (test server)`);
+} else console.error("analysis: the test server is not running (bun run dev), kept the previous shot");

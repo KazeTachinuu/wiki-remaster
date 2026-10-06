@@ -9,7 +9,10 @@
   import TradeComposer from "./TradeComposer.svelte";
   import Icon from "../../components/Icon.svelte";
   import { valueMap } from "../../lib/lazyValues.js";
-  import { data, tradeTabs, chainOf, sideValue, verdict, balanceBadge, balanceLabel, statusLabel, dealLine, stepIn, afterLeaving } from "../../wm/index.js";
+  import { inView } from "../../lib/inView.js";
+  import SearchBox from "../../components/SearchBox.svelte";
+  import { reuse } from "../../lib/reuse.js";
+  import { data, normSearch, tradeTabs, roundsOf, sideValue, verdict, balanceBadge, balanceLabel, statusLabel, dealLine, stepIn, afterLeaving } from "../../wm/index.js";
   import { ago } from "../../lib/format.js";
   let { profile, onwallet } = $props();
 
@@ -34,7 +37,8 @@
   let rowsEl = $state(null);
 
   async function load(quiet = false) {
-    try { trades = await data.trades({ quiet }); error = false; }
+    // unchanged trades keep their objects: a poll redraws only what changed
+    try { trades = reuse(trades ?? [], await data.trades({ quiet })); error = false; }
     catch { if (!trades) error = true; }
   }
   load();
@@ -42,11 +46,44 @@
   $effect(() => { const t = setInterval(() => document.visibilityState === "visible" && load(true), 20000); return () => clearInterval(t); });
   $effect(() => cardValues.load((trades || []).flatMap((t) => [...t.give, ...t.get])));
   const tabs = $derived(trades ? tradeTabs(trades) : null);
-  const shown = $derived(tabs?.[tab] ?? null);
+  const inTab = $derived(tabs?.[tab] ?? null);
+  const roundCount = $derived(trades ? roundsOf(trades) : new Map()); // offers per negotiation, in one pass
+
+  // Finding a trade in a long list: by friend, by any card in it (title or description), newest or
+  // oldest first. Offered once a tab holds more than a handful.
+  const FIND_FROM = 6;
+  let search = $state("");
+  let friend = $state(""); // a friend's id, "" for all
+  let order = $state("new");
+  const finding = $derived((inTab?.length ?? 0) > FIND_FROM);
+  // every friend of this tab, the ones traded with most first, for the friend menu
+  const friendsHere = $derived.by(() => {
+    const n = new Map();
+    for (const t of inTab ?? []) n.set(t.other.id, { f: t.other, n: (n.get(t.other.id)?.n ?? 0) + 1 });
+    return [...n.values()].sort((a, b) => b.n - a.n || a.f.username.localeCompare(b.f.username, "fr", { sensitivity: "base" }));
+  });
+  const searchKey = (t) => normSearch([t.other.username, ...[...t.give, ...t.get].map((it) => `${it.card.title} ${it.card.category}`)].join(" "));
+  const shown = $derived.by(() => {
+    if (!inTab) return null;
+    const q = normSearch(search);
+    const hits = inTab.filter((t) => (!friend || t.other.id === friend) && (!q || searchKey(t).includes(q)));
+    return order === "old" ? hits.reverse() : hits;
+  });
+  // a new tab starts unfiltered
+  $effect(() => { void tab; search = ""; friend = ""; });
+
+  // drawn as the list scrolls (hundreds of trades for a busy player), and always down to the one
+  // selected (arrow keys move past the drawn rows)
+  const STEP = 60;
+  let more = $state(STEP);
+  $effect(() => { void [tab, search, friend, order]; more = STEP; });
+  const drawn = $derived(Math.max(more, (shown?.findIndex((t) => t.id === selected?.id) ?? -1) + 1));
   // a trade that left the tab since (answered elsewhere, or a failed action re-read) stays shown
   // with its real status until another is chosen
   const selected = $derived(shown && (trades.find((t) => t.id === picks[tab]) ?? shown[0] ?? null));
   const balance = (t) => verdict(sideValue(t.give, t.giveCoins, values), sideValue(t.get, t.getCoins, values));
+  // what each drawn row shows, computed here rather than in the markup
+  const rows = $derived((shown ?? []).slice(0, drawn).map((t) => ({ t, b: balance(t), rounds: roundCount.get(t.id) ?? 1 })));
   const tabOf = (t) => (t.status !== "pending" ? "history" : t.incoming ? "incoming" : "outgoing");
 
   function select(t, open = true) {
@@ -108,16 +145,34 @@
           <button role="tab" aria-selected={tab === id} class:on={tab === id} onclick={() => { tab = id; reading = false; }}>{label}{#if tabs && id !== "history" && tabs[id].length}<span class="tab-n">{tabs[id].length}</span>{/if}</button>
         {/each}
       </div>
+      {#if finding}
+        <div class="tr-find">
+          <SearchBox bind:value={search} placeholder="Ami ou carte..." />
+          <div class="tr-find-row">
+            <div class="isel tr-who" title="Ami">
+              <Icon name="friends" />
+              <select bind:value={friend} aria-label="Ami">
+                <option value="">Tous les amis</option>
+                {#each friendsHere as { f, n } (f.id)}<option value={f.id}>{f.username} ({n})</option>{/each}
+              </select>
+            </div>
+            <div class="isel" title="Ordre">
+              <Icon name="sort" />
+              <select bind:value={order} aria-label="Ordre"><option value="new">Récents</option><option value="old">Anciens</option></select>
+            </div>
+          </div>
+        </div>
+      {/if}
       {#if !shown}
         <div class="tr-rows">{#each Array(4) as _, i (i)}<div class="tr-row sk"></div>{/each}</div>
+      {:else if !shown.length && inTab.length}
+        <div class="tr-col-empty"><p class="tr-col-none">Aucun échange ne correspond.</p><button class="btn" onclick={() => { search = ""; friend = ""; }}>Tout afficher</button></div>
       {:else if !shown.length}
         <!-- wide: the pane holds the empty state, the list just says so -->
         <div class="tr-col-empty"><p class="tr-col-none">Rien ici pour l'instant.</p>{@render emptyState()}</div>
       {:else}
         <div class="tr-rows" bind:this={rowsEl}>
-          {#each shown as t (t.id)}
-            {@const b = balance(t)}
-            {@const rounds = chainOf(t, trades).length}
+          {#each rows as { t, b, rounds } (t.id)}
             <button class="tr-row" class:on={selected?.id === t.id} data-id={t.id} aria-current={selected?.id === t.id ? "true" : undefined}
               onclick={() => select(t)} onkeydown={onRowsKey} aria-label="Échange avec {t.other.username}, {dealLine(t.give.length, t.giveCoins, t.get.length, t.getCoins)}, {balanceLabel(b)}">
               <Avatar user={t.other} size={40} />
@@ -130,6 +185,7 @@
               {:else if b.kind !== "unknown"}<span class="tr-badge" data-k={b.kind} title={balanceLabel(b)}>{balanceBadge(b)}</span>{/if}
             </button>
           {/each}
+          {#if shown.length > drawn}<div class="tr-more" aria-hidden="true" use:inView={{ onEnter: () => (more += STEP), key: drawn }}></div>{/if}
         </div>
       {/if}
     </aside>

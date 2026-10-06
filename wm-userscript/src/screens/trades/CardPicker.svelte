@@ -18,12 +18,12 @@
   // above stay and "Réessayer" asks the same page again.
   // values + watch + load: a valueMap; each card's value loads once it scrolls into view, all of
   // them when sorting by value.
-  // onquery: the list is filtered by its server (a friend's cards, paged). The search, rarity and
-  // sort go to onquery({ q, rarity, sort }) instead of filtering here; the estimated value is ours,
-  // not the server's, so that sort first loads the remaining pages, one at a time.
+  // onquery: the server searches, filters and sorts the cards (a page at a time): the search,
+  // rarity and sort go to onquery({ q, rarity, sort }). The estimated value is ours, not the
+  // server's: that order ranks the cards loaded so far (no page is read for it).
   // more: loads the next page, called as the end of the grid comes near.
   let { items = [], picked, locked = new Set(), loading = false, error = false, onretry, onpick,
-        more = null, loadingMore = false, moreError = false, values, watch, load, lead, onquery = null } = $props();
+        more = null, loadingMore = false, moreError = false, values, watch, load, lead, onquery } = $props();
   let q = $state("");
   let rarity = $state("");
   let sort = $state("rarity");
@@ -38,10 +38,9 @@
     void settled;
     ranked = untrack(() => new Map(values));
   });
-  const remote = $derived(!!onquery);
-  const shown = $derived(pickList(items, remote ? { sort, values: ranked, isLocked } : { q, rarity, sort, values: ranked, isLocked }));
+  const shown = $derived(pickList(items, { sort, values: ranked, isLocked }));
 
-  // server-filtered: ask again on each change (the search once typing pauses), never on mount
+  // ask again on each change (the search once typing pauses), never on mount
   let asked = { q: "", rarity: "", sort: "rarity" };
   const ask = (change) => {
     const next = { ...asked, ...change };
@@ -49,12 +48,12 @@
     asked = next;
     onquery(next);
   };
-  debouncedSearch(() => q, (text) => remote && ask({ q: text }));
+  debouncedSearch(() => q, (text) => ask({ q: text }));
   // a rarity or sort change carries the search as typed, so it costs one request, not two
-  $effect(() => { if (remote) ask({ rarity, sort: sort === "name" ? "name" : "rarity", q: untrack(() => q).trim() }); });
+  // the value order is ours: the server reads those pages in its rarity order
+  $effect(() => ask({ rarity, sort: sort === "value" ? "rarity" : sort, q: untrack(() => q).trim() }));
   // (the owner of `more` paces those requests)
-  const filling = $derived(remote && sort === "value" && !!more && !moreError);
-  $effect(() => { if (filling && !loadingMore) untrack(() => more()); });
+
 </script>
 
 <div class="picker">
@@ -68,6 +67,7 @@
     </div>
   </div>
   <div class="picker-scroll">
+    {#if sort === "value" && more}<p class="sort-hint">Classées par valeur parmi les {items.length} cartes chargées.</p>{/if}
     <div class="grid picker-grid" class:dim={loading}>
       {#each shown as it (it.id)}
         {@const off = isLocked(it)}
