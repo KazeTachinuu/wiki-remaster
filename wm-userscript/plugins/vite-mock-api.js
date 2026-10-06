@@ -11,7 +11,8 @@ const PACK_SIZE = 5;
 const PACK_CAP = 10;
 const REGEN_SECONDS = 45;
 const SHINY_CHANCE = 0.03;
-const MAX_AUCTIONS = 5;
+// active auctions at once: the game's MAX_CONCURRENT_AUCTIONS_REGULAR / _PRO
+const MAX_AUCTIONS = { base: 5, pro: 10 };
 const START_BALANCE = 113;
 const PRICE = { C: 8, PC: 20, R: 45, SR: 110, UR: 260, L: 600 };
 const RANK = { L: 5, UR: 4, SR: 3, R: 2, PC: 1, C: 0 };
@@ -45,7 +46,9 @@ export default function mockApiPlugin() {
 
       let seq = 0;
       const state = {
-        profile: { username: "Toi", packs_remaining: PACK_CAP, packs_last_regen_at: Date.now(), wikibidous_balance: START_BALANCE, pity_counter: 0, is_pro: true },
+        profile: { username: "Toi", packs_remaining: PACK_CAP, packs_last_regen_at: Date.now(), wikibidous_balance: START_BALANCE, pity_counter: 0, is_pro: true, is_vip: false, special_packs: false },
+        proDaily: null, // the calendar day the Pro daily pack was claimed
+        specialAt: 0, // when the next special pack can be opened
         collection: new Map(), // user card id -> { id, card, count, is_shiny, starred, obtained_at }
         bids: new Map(), // auction id -> [{ id, amount, bidder, bidder_id, placed_at }]
         listings: new Map(), // my auctions: id -> raw auction
@@ -139,6 +142,14 @@ export default function mockApiPlugin() {
         for (const [rar, w] of Object.entries(RARITY_WEIGHTS)) if ((r -= w) <= 0) return rar;
         return "C";
       }
+      // cards of the given rarities, owned once drawn (the Pro and special packs)
+      function topCards(rarities, n) {
+        const pool = CATALOG.filter((c) => rarities.includes(c.rarity));
+        const cards = Array.from({ length: n }, (_, i) => pool[(Math.floor(Math.random() * pool.length) + i) % pool.length]);
+        for (const c of cards) addOwned(c, false);
+        return cards;
+      }
+
       function drawOne(exclude) {
         const pool = byRarity[pickRarity()] || byRarity.C;
         const candidates = pool.filter((c) => !exclude.has(c.id));
@@ -178,9 +189,14 @@ export default function mockApiPlugin() {
         const card = CATALOG.find((c) => String(c.id) === cid);
         return card ? synthAuction(card, Number(k || 0)) : null;
       };
+      // A card's sales by the rarity they sold at: about a third of the cards also sold at the
+      // rarity just below (a card's rarity can change), like the live summary keyed by rarity.
+      const RARITY_BELOW = { PC: "C", R: "PC", SR: "R", UR: "SR", L: "UR" };
+      const soldRarities = (card) => { const next = rng(card.id + "r"); return next() < 0.35 && RARITY_BELOW[card.rarity] ? [card.rarity, RARITY_BELOW[card.rarity]] : [card.rarity]; };
       const summary = (card) => {
         const next = rng(card.id);
-        return next() < 0.3 ? {} : { [card.rarity]: { average: Math.round(PRICE[card.rarity] * (0.7 + next() * 0.8)) } };
+        if (next() < 0.3) return {};
+        return Object.fromEntries(soldRarities(card).map((r) => [r, { average: Math.round(PRICE[r] * (0.7 + next() * 0.8)) }]));
       };
 
       // --- http ---------------------------------------------------------------------
@@ -231,6 +247,7 @@ export default function mockApiPlugin() {
         if (p === "/api/reset" && m === "POST") {
           state.collection.clear(); state.listings.clear(); state.bids.clear();
           Object.assign(p_, { packs_remaining: PACK_CAP, wikibidous_balance: START_BALANCE, pity_counter: 0 });
+          state.proDaily = null; state.specialAt = 0;
           seedCollection(); seedTrades();
           return send(res, 200, { ok: true });
         }
@@ -243,9 +260,47 @@ export default function mockApiPlugin() {
           if (p_.packs_remaining <= 0) return send(res, 409, { error: "Plus de paquets disponibles.", packs_remaining: 0 });
           p_.packs_remaining -= 1;
           const seen = new Set();
-          return send(res, 200, { cards: Array.from({ length: PACK_SIZE }, () => drawOne(seen)), packs_remaining: p_.packs_remaining });
+          const cards = Array.from({ length: PACK_SIZE }, () => drawOne(seen));
+          // like the live route: every copy I own of the pack's cards, counted after the opening
+          const ids = new Set(cards.map((c) => c.id));
+          const owned_copies = [...state.collection.values()].filter((u) => ids.has(u.card.id)).map((u) => ({ id: u.id, card_id: u.card.id, starred: u.starred, is_shiny: u.is_shiny }));
+          return send(res, 200, { cards, owned_copies, packs_remaining: p_.packs_remaining });
         }
-        if (p === "/api/packs/special") return send(res, 200, { packs: [], available: false });
+        // Pro daily pack, special packs and the V.I.P. grace, shaped like the live routes (the game's
+        // own client reads them so): see docs/API_REFERENCE.md
+        if (p === "/api/packs/pro-daily") {
+          if (!p_.is_pro) return send(res, 403, { error: "Réservé aux membres PRO." });
+          const today = new Date().toLocaleDateString("en-CA", { timeZone: req.headers["x-wiki-calendar-tz"] || "UTC" });
+          const claimed = state.proDaily === today;
+          if (m !== "POST") return send(res, 200, { eligible: !claimed, claimed_today: claimed, claim_date: state.proDaily });
+          if (claimed) return send(res, 409, { error: "Pack PRO déjà réclamé aujourd'hui.", claim_date: today });
+          state.proDaily = today;
+          // the game's Pro panel: "15 cartes de rareté ++" (R or better here)
+          const cards = topCards(["R", "SR", "UR", "L"], PRO_PACK_SIZE);
+          return send(res, 200, { cards, eligible: false, claimed_today: true, claim_date: today });
+        }
+        if (p === "/api/packs/special") {
+          const available = p_.is_vip || Date.now() >= state.specialAt;
+          const next_available_at = available ? null : iso(state.specialAt);
+          // the live site sends none (the game's feature switch is off): sample packs only when a dev
+          // turns them on with /api/__profile { special_packs: true }
+          const offered = p_.special_packs ? SAMPLE_SPECIAL_PACKS : [];
+          if (m !== "POST") return send(res, 200, { packs: offered, available: available && offered.length > 0, is_vip: !!p_.is_vip, next_available_at });
+          const { packId } = await readBody(req);
+          const pack = offered.find((x) => x.id === packId);
+          if (!pack) return send(res, 404, { error: "Pack introuvable." });
+          if (!available) return send(res, 429, { error: "Prochain pack spécial plus tard.", next_available_at });
+          if (!p_.is_vip) state.specialAt = Date.now() + SPECIAL_EVERY_MS;
+          const cards = topCards(["SR", "UR", "L"], PACK_SIZE); // "SR+"
+          return send(res, 200, { cards, next_available_at: p_.is_vip ? null : iso(state.specialAt) });
+        }
+        if (p === "/api/packs/grace" && m === "POST") {
+          if (!p_.is_vip) return send(res, 403, { error: "Fonctionnalité V.I.P." });
+          p_.packs_remaining = PACK_CAP; p_.packs_last_regen_at = Date.now();
+          return send(res, 200, { packs_remaining: p_.packs_remaining, packs_last_regen_at: iso(p_.packs_last_regen_at) });
+        }
+        // dev only: switch the account's Pro / V.I.P. status (and the sample special packs) to see every variant
+        if (p === "/api/__profile" && m === "POST") { Object.assign(p_, await readBody(req)); return send(res, 200, { ok: true }); }
 
         if (p === "/api/my-collection") {
           const all = [...state.collection.values()].sort((a, b) => RANK[b.card.rarity] - RANK[a.card.rarity]);
@@ -289,7 +344,7 @@ export default function mockApiPlugin() {
             const mine = [...state.listings.values()];
             const bidding = [...state.bids.keys()].map(findAuction).filter((a) => a && a.status === "active");
             return send(res, 200, {
-              auctions: [], page: 1, limit: 1, hasMore: false, mine: true, maxConcurrentAuctions: MAX_AUCTIONS,
+              auctions: [], page: 1, limit: 1, hasMore: false, mine: true, maxConcurrentAuctions: MAX_AUCTIONS[p_.is_pro ? "pro" : "base"],
               selling: mine.filter((a) => a.status === "active"), bidding, won: [], history: mine.filter((a) => a.status !== "active"),
             });
           }
@@ -306,7 +361,7 @@ export default function mockApiPlugin() {
           const uc = state.collection.get(b.card_id); // the user card id, like the real server
           if (!uc) return send(res, 409, { error: "Vous ne possédez pas cette carte" });
           if (!(b.base_amount >= 1)) return send(res, 400, { error: "Prix invalide." });
-          if ([...state.listings.values()].filter((a) => a.status === "active").length >= MAX_AUCTIONS) return send(res, 409, { error: "Limite de ventes atteinte." });
+          if ([...state.listings.values()].filter((a) => a.status === "active").length >= MAX_AUCTIONS[p_.is_pro ? "pro" : "base"]) return send(res, 409, { error: "Limite de ventes atteinte." });
           state.collection.delete(uc.id);
           const aid = "mine_" + ++seq;
           const now = Date.now();
@@ -371,9 +426,12 @@ export default function mockApiPlugin() {
           if (!card) return send(res, 404, { error: "Carte introuvable." });
           if (q("scope") === "summary") return send(res, 200, { wikipedia_title: card.wikipedia_title, summary: summary(card), isPro: p_.is_pro });
           const next = rng(card.id + "sales");
-          const sales = Array.from({ length: 3 + Math.floor(next() * 6) }, (_, i) => ({
-            final_price: Math.round(PRICE[card.rarity] * (0.7 + next() * 0.8)), settled_at: iso(Date.now() - (9 - i) * 86400000),
-          }));
+          // each sale keeps the rarity it sold at (the older ones at the rarity below, when it changed)
+          const rs = soldRarities(card);
+          const sales = Array.from({ length: 3 + Math.floor(next() * 6) }, (_, i) => {
+            const rarity = i < 2 ? rs.at(-1) : rs[0];
+            return { id: `${card.id}_s${i}`, rarity, final_price: Math.round(PRICE[rarity] * (0.7 + next() * 0.8)), settled_at: iso(Date.now() - (9 - i) * 86400000) };
+          });
           return send(res, 200, { sales });
         }
 
@@ -477,6 +535,14 @@ export default function mockApiPlugin() {
 }
 
 const ago = (ms) => iso(Date.now() - ms);
+const SPECIAL_EVERY_MS = 6 * 3600e3;
+const PRO_PACK_SIZE = 15;
+// made-up samples (the real packs, when the game offers some, have their own ids and names)
+const SAMPLE_SPECIAL_PACKS = [
+  { id: "sciences", name: "Sciences", description: "Cinq cartes Super Rare ou mieux." },
+  { id: "histoire", name: "Histoire", description: "Cinq cartes Super Rare ou mieux." },
+  { id: "arts", name: "Arts", description: "Cinq cartes Super Rare ou mieux." },
+];
 // Shaped like the live rows (types, titles and data keys recorded by test:prod, see
 // docs/api-shapes.json): every row carries its own data.title and data.message.
 const NOTIFS = [

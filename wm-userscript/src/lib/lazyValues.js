@@ -28,16 +28,18 @@ export function lazyValues(onvalue, { concurrency = 5 } = {}) {
     return { update: (c) => (node.__card = c), destroy: () => io?.unobserve(node) };
   }
 
-  return { load, watch, destroy: () => io?.disconnect() };
+  // leaving the screen drops the values it queued and never asked for (a value sort queues a
+  // whole collection): they must not hold the shared lane for screens still open
+  return { load, watch, destroy: () => { io?.disconnect(); queue.clear(); } };
 }
 
 /**
  * Values for a known set of cards (trade sides): a reactive Map card id -> value, filled as the
  * values arrive (absent while loading or unknown). Each card is fetched once. `watch` loads a
- * card once it scrolls into view (grids).
+ * card once it scrolls into view (grids). Call `destroy` when the screen goes away.
  */
 export function valueMap() {
   const values = new SvelteMap();
   const lazy = lazyValues((id, v) => values.set(id, v));
-  return { values, load: (items) => { for (const it of items) lazy.load(it.card); }, watch: lazy.watch };
+  return { values, load: (items) => { for (const it of items) lazy.load(it.card); }, watch: lazy.watch, destroy: lazy.destroy };
 }

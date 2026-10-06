@@ -10,6 +10,7 @@
   import { data } from "../wm/index.js";
   import { nf, countdown, secondsUntil } from "./format.js";
   import { PagedList, debouncedSearch } from "./paged.svelte.js";
+  import { scrollFade } from "./scrollFade.js";
   import { settings } from "./settings.svelte.js";
 
   let { profile, onwallet, openId = null } = $props();
@@ -60,10 +61,11 @@
     return a.status === "cancelled" ? "Annulée" : "Invendue";
   }
 
+  // [id, label, phone label]: a phone shows the short names, the row scrolls with a fading edge
   const tabs = $derived([
-    ["browse", "Toutes les ventes"],
+    ["browse", "Toutes les ventes", "Tout"],
     ["selling", `Mes ventes ${mine ? `${mine.selling.length}/${mine.max}` : ""}`],
-    ["bidding", `Mes enchères ${mine?.bidding.length || ""}`],
+    ["bidding", `Mes enchères ${mine?.bidding.length || ""}`, `Enchères ${mine?.bidding.length || ""}`],
     ["won", `Remportées ${mine?.won.length || ""}`],
     ["history", "Historique"],
   ]);
@@ -82,7 +84,7 @@
 <div class="coll-head">
   <div>
     <h1>Marché</h1>
-    <div class="meta">Enchérissez sur des cartes ou vendez les vôtres contre des WikiBidous</div>
+    <div class="meta lead">Enchérissez sur des cartes ou vendez les vôtres contre des WikiBidous</div>
   </div>
   {#if tab === "browse"}
     <div class="coll-tools">
@@ -99,9 +101,9 @@
   {/if}
 </div>
 
-<div class="tabs" role="tablist">
-  {#each tabs as [id, label]}
-    <button role="tab" aria-selected={tab === id} class:on={tab === id} onclick={() => (tab = id)}>{label}</button>
+<div class="tabs" role="tablist" use:scrollFade={{ axis: "x" }}>
+  {#each tabs as [id, label, short]}
+    <button role="tab" aria-selected={tab === id} class:on={tab === id} onclick={() => (tab = id)}><span class="lbl-long">{label}</span><span class="lbl-short">{short ?? label}</span></button>
   {/each}
 </div>
 

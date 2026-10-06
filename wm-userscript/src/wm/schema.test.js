@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { normSearch, nCard, nAuction, nBid, notifHref, countsFrom, validateCards, RNAME } from "./schema.js";
+import { nNotification, plainText, newInPack, normSearch, nCard, nAuction, nBid, notifHref, countsFrom, validateCards, RNAME } from "./schema.js";
 
 describe("normSearch", () => {
   it("strips accents, lowercases, and collapses whitespace", () => {
@@ -109,4 +109,27 @@ describe("RNAME", () => {
   it("covers every rarity code", () => {
     expect(Object.keys(RNAME)).toEqual(["C", "PC", "R", "SR", "UR", "L"]);
   });
+});
+
+describe("newInPack", () => {
+  it("marks a card new when every copy I own came from this pack", () => {
+    const owned = [{ card_id: "a" }, { card_id: "b" }, { card_id: "b" }, { card_id: "c" }, { card_id: "c" }];
+    // a: only the copy just drawn; b: one copy before this pack; c: drawn twice, nothing before
+    expect([...newInPack(["a", "b", "c", "c"], owned)].sort()).toEqual(["a", "c"]);
+  });
+  it("marks nothing when the response has no list", () => expect(newInPack(["a"], undefined)).toBe(null));
+});
+
+describe("nNotification", () => {
+  const n = (type, data) => nNotification({ id: 1, type, data, read: false, created_at: "t" });
+  it("tells each known type in plain words from its data", () => {
+    expect(n("trade_offer", { title: "🔄 Nouvelle offre d'échange !", initiator_username: "doobii" })).toMatchObject({ title: "Offre d'échange", message: "de doobii" });
+    expect(n("marketplace_auction_sold", { title: "💰 Carte vendue !", card_title: "Marie Curie", final_price: 1210 })).toMatchObject({ title: "Carte vendue", message: "Marie Curie pour 1\u202f210 WikiBidous" });
+    expect(n("marketplace_outbid", { card_title: "Einstein", new_bid: 640 }).message).toBe("Einstein, nouvelle offre de 640 WikiBidous");
+  });
+  it("keeps the game's text, cleaned, for an unknown type or missing data", () => {
+    expect(n("custom", { title: "✅ Bravo !", message: "Tout va bien 🎉" })).toMatchObject({ title: "Bravo", message: "Tout va bien" });
+    expect(n("trade_offer", { title: "x", message: "🔄 Offre reçue !" }).message).toBe("Offre reçue");
+  });
+  it("strips emoji, joiners and trailing exclamation marks", () => expect(plainText("  ↩️ Contre-offre reçue !! ")).toBe("Contre-offre reçue"));
 });

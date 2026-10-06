@@ -45,8 +45,9 @@ snapshot_rarity/atk/def, is_shiny, seller{username}, card{...}, owned`.
 | Call | Notes |
 |---|---|
 | `POST /api/packs/open` | `{ cards[5], owned_copies[], packs_remaining }`. Errors carry `packs_remaining` and `human_verification_required` (Turnstile, required again 12 h after `pack_human_verified_at`). |
-| `GET /api/packs/special` | `{ packs[], available, is_vip, next_available_at }`. Opening is `POST { packId }` (left to the native site). |
-| `GET /api/packs/pro-daily` | `{ eligible, claimed_today, claim_date }` (Pro only). |
+| `GET /api/packs/special` | `{ packs[], available, is_vip, next_available_at }`; a pack is `{ id, name, description }`, "SR+". `POST { packId }` opens one: `{ cards[], next_available_at }`. Behind the game's feature switch (`NEXT_PUBLIC_FEATURE_SPECIAL_PACKS`): live, `packs` is empty and `available` false (recorded). Free once per 6 h, unlimited for V.I.P. (the game's own wording). |
+| `GET /api/packs/pro-daily` | Pro only, header `x-wiki-calendar-tz`: `{ eligible, claimed_today, claim_date }`. `POST` claims it: `{ cards[15], eligible, claimed_today, claim_date }`, 409 when already claimed today (this device's day). From the game's client; not yet seen live (no Pro account to read it with). |
+| `POST /api/packs/grace` | V.I.P. out of packs: `{ packs_remaining, packs_last_regen_at }`. From the game's client, not seen live. |
 | `GET /api/wikibidous` | `{ balance }`. |
 
 ### Marketplace

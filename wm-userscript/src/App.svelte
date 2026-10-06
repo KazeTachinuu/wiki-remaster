@@ -9,6 +9,8 @@
   import Trades from "./lib/Trades.svelte";
   import LoadBar from "./lib/LoadBar.svelte";
   import SoundControl from "./lib/SoundControl.svelte";
+  import SoundSettings from "./lib/SoundSettings.svelte";
+  import { settings, toggleHideStats, useOriginalSite } from "./lib/settings.svelte.js";
   import HumanCheck from "./lib/HumanCheck.svelte";
   import { ago } from "./lib/format.js";
   import { tabTicks } from "./lib/sfx.js";
@@ -16,9 +18,9 @@
 
   // Rebuilt screens. Order matters for matching: "/global-collection" contains "collection".
   const VIEWS = [
-    { id: "pulls", path: "/pulls", label: "Ouvrir des paquets", icon: "pulls" },
-    { id: "collection", path: "/collection", label: "Ma collection", icon: "collection" },
-    { id: "catalog", path: "/global-collection", label: "Toutes les cartes", icon: "catalog" },
+    { id: "pulls", path: "/pulls", label: "Ouvrir des paquets", short: "Paquets", icon: "pulls" },
+    { id: "collection", path: "/collection", label: "Ma collection", short: "Collection", icon: "collection" },
+    { id: "catalog", path: "/global-collection", label: "Toutes les cartes", short: "Cartes", icon: "catalog" },
     { id: "market", path: "/marketplace", label: "Marché", icon: "market" },
     { id: "trades", path: "/trades", label: "Échanges", icon: "trades" },
   ];
@@ -64,11 +66,19 @@
 
   // Profile: re-read whenever the app's own Supabase sync is captured.
   let profile = $state(null);
-  const loadProfile = () => data.profile().then((p) => (profile = p), () => {});
+  // Loads of one kind running at once share one request (a pack open patches the profile and
+  // reports a change back to back). The app's own sync re-reads packs, not coins.
+  const profileLoads = new Map();
+  function loadProfile(opts = {}) {
+    const key = JSON.stringify(opts);
+    if (!profileLoads.has(key)) profileLoads.set(key, data.profile(opts).then((p) => (profile = p), () => {}).finally(() => profileLoads.delete(key)));
+    return profileLoads.get(key);
+  }
   loadProfile();
   $effect(() => {
-    window.addEventListener("wm:profile", loadProfile);
-    return () => window.removeEventListener("wm:profile", loadProfile);
+    const onSync = () => loadProfile({ balance: false });
+    window.addEventListener("wm:profile", onSync);
+    return () => window.removeEventListener("wm:profile", onSync);
   });
 
   let collKey = $state(0);
@@ -140,6 +150,7 @@
   // every tab bar of the app (dialogs included) ticks when it switches
   $effect(() => tabTicks(appEl.getRootNode()));
   let help = $state(false);
+  let menuOpen = $state(false);
   const SHORTCUTS = [["/", "Rechercher"], ["1 à 5", "Changer d'écran"], ["Espace", "Ouvrir un paquet"], ["Flèches", "Parcourir les cartes révélées"], ["Échap", "Fermer"], ["?", "Afficher cette aide"]];
   function onKey(e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -149,7 +160,7 @@
       return;
     }
     // a closing overlay consumes the key: the screen under it must not act on it too
-    if (e.key === "Escape") { if (help || notifOpen) e.preventDefault(); help = false; notifOpen = false; return; }
+    if (e.key === "Escape") { if (help || notifOpen || menuOpen) e.preventDefault(); help = false; notifOpen = false; menuOpen = false; return; }
     if (appEl?.querySelector(".modal-backdrop")) return; // a dialog owns the keyboard
     if (e.key === "?") help = !help;
     else if (e.key === "/") { e.preventDefault(); appEl?.querySelector("input.search")?.focus(); }
@@ -165,7 +176,7 @@
     <div class="brand"><span class="mk"></span><b>WikiMasters</b></div>
     <nav class="nav" bind:this={navEl} use:scrollFade={{ axis: "x" }}>
       {#each VIEWS as v}
-        <button type="button" class:on={view === v.id} onclick={() => go(v)}><Icon name={v.icon} width={1.7} />{v.label}</button>
+        <button type="button" class:on={view === v.id} aria-current={view === v.id ? "page" : undefined} onclick={() => go(v)}><Icon name={v.icon} width={1.7} /><span class="nav-long">{v.label}</span><span class="nav-short">{v.short ?? v.label}</span></button>
       {/each}
       <div class="nav-sep">Le reste du site</div>
       <div class="nav-grid">
@@ -183,14 +194,19 @@
 
   <main class="main">
     <header class="topbar">
-      <div class="crumb">{current.label}</div>
+      <div class="crumb"><span class="nav-long">{current.label}</span><span class="nav-short">{current.short ?? current.label}</span></div>
       <div class="wallet">
         {#if unstable}
           <span class="health" role="status" title="Le serveur du jeu répond mal : nouvelle tentative automatique, vos données restent affichées.">
             <span class="health-dot"></span><span class="health-txt">Serveur du jeu instable</span>
           </span>
         {/if}
+        <!-- ATK/DEF everywhere at once, one tap from every screen (phones too) -->
+        <button class="bell stats-toggle" class:off={settings.hideStats} aria-pressed={!settings.hideStats} onclick={toggleHideStats}
+          aria-label={settings.hideStats ? "Afficher l'ATK et la DEF" : "Masquer l'ATK et la DEF"} title={settings.hideStats ? "Afficher l'ATK et la DEF" : "Masquer l'ATK et la DEF"}><span>ATK</span></button>
         <SoundControl />
+        <!-- phones and tablets: sound, ATK/DEF and the original site's pages, in one sheet -->
+        <button class="bell menu-btn" aria-label="Menu" aria-expanded={menuOpen} onclick={() => (menuOpen = true)}><Icon name="menu" width={1.8} /></button>
         <div class="notif">
           <button class="bell" class:has={unread.length > 0} aria-label="Notifications"
             onclick={() => { notifOpen = !notifOpen; if (notifOpen) loadNotifs(); }}>
@@ -231,18 +247,41 @@
     </header>
     <section class="view">
       {#if view === "pulls"}
-        <Pulls {profile} {onchanged} />
+        <Pulls {profile} {onchanged} onprofile={() => loadProfile({ sync: true })} />
       {:else if view === "collection"}
-        {#key collKey}<Collection onwallet={loadProfile} />{/key}
+        {#key collKey}<Collection onwallet={() => loadProfile()} />{/key}
       {:else if view === "catalog"}
         <Catalog />
       {:else if view === "trades"}
-        <Trades {profile} onwallet={loadProfile} />
+        <Trades {profile} onwallet={() => loadProfile()} />
       {:else}
-        <Marketplace {profile} onwallet={loadProfile} openId={openAuction} />
+        <Marketplace {profile} onwallet={() => loadProfile()} openId={openAuction} />
       {/if}
     </section>
   </main>
+
+  {#if menuOpen}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="sheet-scrim" onclick={() => (menuOpen = false)}></div>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Menu">
+      <div class="sheet-grab"></div>
+      <section class="sheet-sec"><SoundSettings /></section>
+      <section class="sheet-sec sheet-row">
+        <div><b>ATK et DEF</b><span>Sur toutes les cartes</span></div>
+        <button class="snd-switch" role="switch" aria-checked={!settings.hideStats} aria-label="Afficher l'ATK et la DEF" onclick={toggleHideStats}><span></span></button>
+      </section>
+      <section class="sheet-sec">
+        <b class="sheet-title">Le reste du site</b>
+        <div class="sheet-grid">
+          {#each NATIVE as [path, label, icon]}
+            <a href={data.isReal ? path : "https://www.wiki-masters.com" + path}><Icon name={icon} width={1.7} /><span>{label}</span></a>
+          {/each}
+        </div>
+      </section>
+      <button class="btn sheet-reset" onclick={() => useOriginalSite()}>Revenir au site original</button>
+      {#if data.canReset}<button class="btn sheet-reset" onclick={() => { menuOpen = false; reset(); }}>Réinitialiser (test)</button>{/if}
+    </div>
+  {/if}
 
   {#if toasts.length}
     <div class="toasts" role="status" aria-live="polite">

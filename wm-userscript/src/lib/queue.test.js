@@ -60,3 +60,21 @@ describe("createQueue", () => {
     expect(order).toEqual(["blocker", "y", "x"]);
   });
 });
+
+describe("clear", () => {
+  it("drops what has not started, lets running work finish, and allows the keys again", async () => {
+    const q = createQueue({ concurrency: 1 });
+    const ran = [];
+    let release;
+    q.push("a", () => new Promise((r) => { ran.push("a"); release = r; }));
+    q.push("b", async () => ran.push("b"));
+    await Promise.resolve(); // "a" starts on the next microtask
+    q.clear();
+    release();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(ran).toEqual(["a"]);
+    q.push("b", async () => ran.push("b"));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(ran).toEqual(["a", "b"]);
+  });
+});

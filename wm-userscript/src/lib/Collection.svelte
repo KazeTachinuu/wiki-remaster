@@ -6,8 +6,8 @@
   import CardModal from "./CardModal.svelte";
   import Icon from "./Icon.svelte";
   import SearchBox from "./SearchBox.svelte";
-  import { data, RNAME, RARITIES_DESC, normSearch, loadCollection, forgetCollection, backgroundLane } from "../wm/index.js";
-  import { settings, toggleHideStats } from "./settings.svelte.js";
+  import { data, RNAME, RARITIES_DESC, normSearch, loadCollection, collectionRemove, forgetCollection, backgroundLane } from "../wm/index.js";
+  import { settings } from "./settings.svelte.js";
   import { lazyValues } from "./lazyValues.js";
 
   let { onwallet } = $props();
@@ -46,24 +46,27 @@
   // Sorting by value needs every value: sweep the whole collection in the background.
   $effect(() => { if (sort === "value" && items) for (const it of items) lazy.load(it.card); });
 
-  function onToggleStats() {
-    toggleHideStats();
-    if (settings.hideStats && (sort === "atk" || sort === "def")) sort = "rarity";
-  }
+  // ATK/DEF hidden (the switch in the top bar): a sort by them falls back to rarity
+  $effect(() => { if (settings.hideStats && (sort === "atk" || sort === "def")) sort = "rarity"; });
 
-  // Shows the saved copy at once, then swaps in the fresh one.
-  async function load() {
+  // Shows the saved copy at once; a fresh one replaces it when the saved one was not recent.
+  async function load(force = false) {
     error = "";
     const show = (d, loading) => { items = d.items; stats = { ...d.stats, loading }; };
     try {
-      show(await loadCollection({ onCached: (d) => show(d, true), onPartial: (d) => show(d, true) }), false);
+      show(await loadCollection({ force, onCached: (d) => show(d, true), onPartial: (d) => show(d, true) }), false);
     } catch {
       if (!items) error = "Impossible de charger la collection.";
       else stats = { ...stats, loading: false };
     }
   }
   load();
-  const reload = () => { forgetCollection(); items = null; load(); };
+  // after our own change: a discard is replayed on the saved copy (no reload); anything else
+  // (a sale) reloads it from the game
+  function changed(discarded = null) {
+    discarded ? collectionRemove(discarded) : forgetCollection();
+    load();
+  }
 
   // Bulk discard.
   let selecting = $state(false);
@@ -89,13 +92,15 @@
     try {
       const r = await data.bulkDiscard([...picked]);
       const failed = r.failed?.length || 0;
+      const kept = new Set(r.failed || []);
+      changed([...picked].filter((id) => !kept.has(id)));
       bulkMsg = `${r.discarded_count} carte${r.discarded_count > 1 ? "s" : ""} défaussée${r.discarded_count > 1 ? "s" : ""}` + (failed ? `, ${failed} en échec` : "");
     } catch (e) {
       bulkMsg = e.message || "La défausse a échoué.";
+      changed(); // some may have gone through: reload rather than guess
     }
     bulkBusy = false;
     toggleSelecting();
-    reload();
     onwallet?.();
   }
 
@@ -127,7 +132,7 @@
 </script>
 
 {#if error}
-  <div class="empty"><b>{error}</b><div>Vérifiez que vous êtes connecté, puis réessayez.</div><button class="btn" onclick={reload}>Réessayer</button></div>
+  <div class="empty"><b>{error}</b><div>Vérifiez que vous êtes connecté, puis réessayez.</div><button class="btn" onclick={() => load(true)}>Réessayer</button></div>
 {:else if !items}
   <div class="grid">{#each Array(10) as _}<div class="wc skeleton"></div>{/each}</div>
 {:else}
@@ -151,9 +156,6 @@
             <option value="name">Nom</option>
           </select>
         </div>
-        <button class="iconbtn" class:on={settings.hideStats} onclick={onToggleStats} title="Afficher ou masquer l'ATK et la DEF">
-          <Icon name={settings.hideStats ? "eyeOff" : "eye"} /><span>ATK/DEF</span>
-        </button>
         {#if selecting}
           <button class="iconbtn" onclick={() => { pickSound(allPicked); picked = allPicked ? new Set() : new Set(shown.map((it) => it.id)); }}>
             {allPicked ? "Tout désélectionner" : "Tout sélectionner"}
@@ -241,5 +243,5 @@
 {/if}
 
 {#if selected}
-  <CardModal item={selected} onclose={() => (selected = null)} onaction={() => { reload(); onwallet?.(); }} />
+  <CardModal item={selected} onclose={() => (selected = null)} onaction={(kind) => { changed(kind === "discard" ? [selected.id] : null); onwallet?.(); }} />
 {/if}

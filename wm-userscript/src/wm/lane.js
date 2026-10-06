@@ -35,7 +35,15 @@ export function createLane({ concurrency = 2, gapMs = 450 } = {}) {
 }
 
 /**
- * The one lane for background reads (market values, the rest of the collection): the game reads
- * bursts as automation, so they share a single pace, and a rate limit pauses all of them.
+ * The lane for market values (one request per card, a collection can hold a thousand): the game
+ * flagged their bursts as automation, so they go 2 at a time, a start every 450 ms, and a rate
+ * limit pauses them all.
  */
 export const backgroundLane = createLane({ concurrency: 2, gapMs: 450 });
+
+/**
+ * The lane for pages of a list someone is waiting on (the rest of the collection, a friend's next
+ * page): never one burst, but quick, since the slow lane makes a 23-page collection take a
+ * minute. The game has never flagged page reads.
+ */
+export const pageLane = createLane({ concurrency: 4, gapMs: 150 });

@@ -35,6 +35,8 @@ export function createQueue({ concurrency = 4 } = {}) {
       const i = pending.findIndex((p) => p.key === key);
       if (i > 0) pending.unshift(pending.splice(i, 1)[0]);
     },
+    /** Drop what has not started (its owner is gone); running tasks finish. */
+    clear() { for (const p of pending.splice(0)) seen.delete(p.key); },
     has: (key) => seen.has(key),
     get pendingCount() { return pending.length; },
     get activeCount() { return active; },

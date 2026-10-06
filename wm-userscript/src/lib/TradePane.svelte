@@ -12,7 +12,7 @@
   import Icon from "./Icon.svelte";
   import { withHumanCheck } from "./humanCheck.js";
   import { dealLayout, sideShape, DEAL } from "./dealLayout.js";
-  import { data, SIDE, sideValue, verdict, chainOf, timeline, dealLine, statusLabel } from "../wm/index.js";
+  import { data, SIDE, forgetCollection, sideValue, verdict, chainOf, timeline, dealLine, statusLabel } from "../wm/index.js";
   import { ago, nf } from "./format.js";
   // mode: "trade" | "chat", kept by the screen so it survives a change of trade
   // ondone: the trade was answered (success); onchanged: reload (the outcome may be unknown)
@@ -58,6 +58,7 @@
     try {
       const write = () => withHumanCheck(() => data.tradeAction(t.id, action));
       await (action === "accept" ? sounded(write) : write());
+      if (action === "accept") forgetCollection(); // cards changed hands
       ondone?.(t);
     } catch (e) {
       msg = e.message;

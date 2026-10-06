@@ -41,7 +41,9 @@ function showOverlay() {
   hideStyle = document.createElement("style");
   hideStyle.id = "wm-hide-real";
   hideStyle.textContent =
-    "html,body{margin:0;background:#0C0D0C}body>*:not(#wm-host):not(#wm-switch){display:none !important}";
+    "html,body{margin:0;background:#0C0D0C}body>*:not(#wm-host):not(#wm-switch){display:none !important}" +
+    // phones and tablets: the switch lives in the remaster's menu sheet, nothing floats over the tab bar
+    "@media(max-width:900px){html body #wm-switch{display:none}}";
   (document.head || document.documentElement).appendChild(hideStyle);
 
   instance = mount(App, { target: root });

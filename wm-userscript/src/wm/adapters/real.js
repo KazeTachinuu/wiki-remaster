@@ -3,21 +3,24 @@
  * Every call here is verified against the live site (docs/API_REFERENCE.md).
  */
 
-import { backgroundLane } from "../lane.js";
+import { pageLane } from "../lane.js";
 import { api, getProfile, patchProfile, bumpEpoch, getUserId, refreshProfile } from "../api.js";
-import { nCard, nAuction, nBid, nNotification, nTrade, nMessage, normSearch, countsFrom, validateCards } from "../schema.js";
+import { newInPack, nCard, nAuction, nBid, nNotification, nTrade, nMessage, normSearch, countsFrom, validateCards } from "../schema.js";
 import { whoAmI, chatMe, otherOf, needMe } from "../trades.js";
 
 const PAGE = 50; // server page size; the market rejects limit > 50
 const PACK_CAP = 10;
-const REGEN_MS = 600000; // ponytail: assumed 1 pack / 10 min, the API does not expose the interval
+// one pack per period, faster for Pro: the game's own constants (PACK_REGEN_PERIOD_MS and
+// PACK_REGEN_PERIOD_PRO_MS in its client), the API does not send them
+const REGEN_MS = { base: 10 * 60e3, pro: 3 * 60e3 };
+let lastBalance = null;
+const SAME_CARD_MS = 60e3;
+const sameCards = new Map(); // card id -> { at, list: Promise }
 
 // Trade writes carry the viewer's time zone, like the native client.
 const tz = () => ({ "x-wiki-calendar-tz": Intl.DateTimeFormat().resolvedOptions().timeZone });
 const ACTION_LABEL = { accept: "Acceptation de l'échange", decline: "Refus de l'échange", cancel: "Annulation de l'offre" };
 
-// Catalog ids already owned, to flag new cards on pack open.
-let ownedIds = null;
 
 const qs = (params) =>
   new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== "" && v !== false)).toString();
@@ -37,15 +40,33 @@ function mapCollection(rows) {
   });
 }
 
+/**
+ * An opened pack (normal, Pro daily or special): its cards, the new ones marked from
+ * `owned_copies` (every copy I own of them, counted after the opening, as the game reads it), and
+ * those copies as collection rows for the saved collection. Without that list (the Pro and
+ * special packs do not send it), nothing is marked new and `copies` is null.
+ */
+function packResult(d) {
+  const fresh = newInPack((d.cards || []).map((c) => c.id), d.owned_copies);
+  const cards = (d.cards || []).map((c) => ({ ...nCard(c), is_new: !!fresh?.has(c.id), is_shiny: !!c.is_shiny }));
+  const raw = new Map((d.cards || []).map((c) => [c.id, c]));
+  const copies = Array.isArray(d.owned_copies) ? mapCollection(d.owned_copies.filter((o) => raw.has(o.card_id)).map((o) => ({ ...o, card: raw.get(o.card_id) }))) : null;
+  return { cards, copies };
+}
+
 export const RealData = {
   isReal: true,
   canReset: false,
   get userId() { return getUserId(); },
 
-  async profile() {
-    if (getProfile()?.packs_remaining == null) await refreshProfile();
+  /**
+   * Packs, coins and Pro status. `sync` asks the game for its pack count first (a pack is due);
+   * `balance: false` reuses the last coin balance (a profile re-read that cannot have moved coins).
+   */
+  async profile({ sync = false, balance = true } = {}) {
+    if (sync || getProfile()?.packs_remaining == null) await refreshProfile();
     const p = getProfile() || {};
-    const balance = await api("/api/wikibidous", { quiet: true }).then((d) => d.balance, () => p.wikibidous_balance ?? null);
+    if (balance || lastBalance == null) lastBalance = await api("/api/wikibidous", { quiet: true }).then((d) => d.balance, () => lastBalance ?? p.wikibidous_balance ?? null);
     const packs = p.packs_remaining ?? null;
     const last = Date.parse(p.packs_last_regen_at || "");
     const regen = packs != null && packs < PACK_CAP && !isNaN(last);
@@ -53,14 +74,14 @@ export const RealData = {
       username: p.username || null,
       packs_remaining: packs,
       pack_cap: PACK_CAP,
-      currency: balance,
-      next_regen_seconds: regen ? Math.max(0, Math.round((last + REGEN_MS - Date.now()) / 1000)) : null,
+      currency: lastBalance,
+      next_regen_seconds: regen ? Math.max(0, Math.round((last + REGEN_MS[p.is_pro ? "pro" : "base"] - Date.now()) / 1000)) : null,
       is_pro: !!p.is_pro,
+      is_vip: !!p.is_vip,
     };
   },
 
   async openPack() {
-    ownedIds ??= await this.collection().then((c) => new Set(c.items.map((it) => it.card.id)), () => null);
     let d;
     try {
       d = await api("/api/packs/open", { method: "POST" });
@@ -70,12 +91,29 @@ export const RealData = {
     }
     bumpEpoch();
     patchProfile({ packs_remaining: d.packs_remaining });
-    const cards = (d.cards || []).map((c) => {
-      const is_new = !!ownedIds && !ownedIds.has(c.id);
-      ownedIds?.add(c.id);
-      return { ...nCard(c), is_new, is_shiny: !!c.is_shiny };
-    });
-    return { cards, packs_remaining: d.packs_remaining };
+    return { ...packResult(d), packs_remaining: d.packs_remaining };
+  },
+
+  /** Pro's daily pack, by this device's calendar day (like the game): { eligible, claimedToday }. */
+  async proDaily() {
+    const d = await api("/api/packs/pro-daily", { headers: tz(), quiet: true });
+    return { eligible: !!d.eligible, claimedToday: !!d.claimed_today };
+  },
+  openProDaily: () => api("/api/packs/pro-daily", { method: "POST", headers: tz(), label: "Ouverture du pack PRO" }).then(packResult),
+
+  /** Special packs (the game turns them on): { packs: [{ id, name, description }], available, vip, nextAt }. */
+  async specialPacks() {
+    const d = await api("/api/packs/special", { quiet: true });
+    return { packs: d.packs || [], available: !!d.available, vip: !!d.is_vip, nextAt: d.next_available_at || null };
+  },
+  openSpecial: (packId) => api("/api/packs/special", { method: "POST", body: { packId }, label: "Ouverture du pack spécial" }).then(packResult),
+
+  /** V.I.P. out of packs: ask the game for some back. */
+  async grace() {
+    const d = await api("/api/packs/grace", { method: "POST", label: "Demande de paquets" });
+    bumpEpoch();
+    patchProfile({ packs_remaining: d.packs_remaining, packs_last_regen_at: d.packs_last_regen_at });
+    return d;
   },
 
   /**
@@ -105,16 +143,15 @@ export const RealData = {
       onPartial?.({ items: items(), stats: stats(true) });
       await Promise.all(
         Array.from({ length: pages - 1 }, (_, i) =>
-          // the remaining pages have their own "Mise à jour" pill (no global loader), paced with
-          // every other background read rather than sent all at once
-          backgroundLane.run(() => api(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`, { quiet: true })).then((d) => {
+          // the remaining pages have their own "Mise à jour" pill (no global loader), paced by the
+          // page lane rather than sent all at once
+          pageLane.run(() => api(`/api/my-collection?sort=rarity&page=${i + 1}&stats=0`, { quiet: true })).then((d) => {
             add(d.collection);
             onPartial?.({ items: items(), stats: stats(true) });
           })
         )
       );
     }
-    ownedIds = new Set(items().map((it) => it.card.id));
     return { items: items(), stats: stats(false), pending };
   },
 
@@ -140,15 +177,23 @@ export const RealData = {
    * Every live listing of one card. The market only searches by text, so this searches the
    * title (no rarity filter: a card's rarity can change) and keeps the exact card id.
    */
-  async sameCard(card) {
-    if (!card.title) return [];
-    const out = [];
-    for (let page = 0; page < 4; page++) {
-      const d = await this.marketplace({ page, sort: "price_asc", q: card.title, quiet: true }); // the table has placeholder rows
-      out.push(...d.auctions.filter((a) => a.card.id === card.id));
-      if (!d.hasMore) break;
-    }
-    return out;
+  sameCard(card) {
+    if (!card.title) return Promise.resolve([]);
+    // remembered a minute: moving between listings of one card (or reopening it) asks once
+    const hit = sameCards.get(card.id);
+    if (hit && Date.now() - hit.at < SAME_CARD_MS) return hit.list;
+    const list = (async () => {
+      const out = [];
+      for (let page = 0; page < 4; page++) {
+        const d = await this.marketplace({ page, sort: "price_asc", q: card.title, quiet: true }); // the table has placeholder rows
+        out.push(...d.auctions.filter((a) => a.card.id === card.id));
+        if (!d.hasMore) break;
+      }
+      return out;
+    })();
+    sameCards.set(card.id, { at: Date.now(), list });
+    list.catch(() => sameCards.delete(card.id)); // a failure is asked again next time
+    return list;
   },
 
   /** My market: listings, active bids, wins, and finished history, in one call. */
@@ -239,21 +284,23 @@ export const RealData = {
    * Price data. The summary average is open to everyone and keyed by rarity (a card's rarity
    * can change; old sales keep theirs). The full sale history is Pro-only (403 pro_required).
    */
+  /** A card's sold average at its current rarity: one request (the value badges need no more). */
+  async marketValue(card) {
+    const d = await api(`/api/marketplace/cards/${card.id}/sales?scope=summary`, { quiet: true });
+    return d.summary?.[card.rarity]?.average ?? null;
+  },
+
+  /**
+   * The card detail's market, by rarity (see wm/market.js): every rarity's average (the summary,
+   * any account), and for Pro accounts every sale with the rarity it sold at (a second request).
+   */
   async marketStats(card) {
     const d = await api(`/api/marketplace/cards/${card.id}/sales?scope=summary`, { quiet: true });
-    const stats = { soldAvg: d.summary?.[card.rarity]?.average ?? null, soldSeries: [], soldCount: 0, soldMin: null, soldMax: null, isPro: !!d.isPro };
-    if (!d.isPro) return stats;
-    const sales = (await api(`/api/marketplace/cards/${card.id}/sales`, { quiet: true }).catch(() => ({}))).sales || [];
-    const series = sales
-      .filter((s) => s.final_price != null)
-      .map((s) => ({ price: s.final_price, t: Date.parse(s.settled_at || "") || 0 }))
-      .sort((a, b) => a.t - b.t);
-    const prices = series.map((s) => s.price);
-    if (prices.length) {
-      Object.assign(stats, { soldSeries: series, soldCount: prices.length, soldMin: Math.min(...prices), soldMax: Math.max(...prices) });
-      stats.soldAvg ??= Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
-    }
-    return stats;
+    const averages = Object.fromEntries(Object.entries(d.summary || {}).map(([r, v]) => [r, v?.average ?? null]));
+    if (!d.isPro) return { averages, sales: [], isPro: false };
+    const raw = (await api(`/api/marketplace/cards/${card.id}/sales`, { quiet: true }).catch(() => ({}))).sales || [];
+    const sales = raw.map((s) => ({ id: s.id, rarity: s.rarity ?? card.rarity, price: s.final_price ?? null, at: Date.parse(s.settled_at || "") || 0 }));
+    return { averages, sales, isPro: true };
   },
 
   notifications: () => api("/api/notifications", { quiet: true }).then((d) => (d.notifications || []).map(nNotification)),
@@ -267,6 +314,4 @@ export const RealData = {
   /** Returns { discarded_count, failed[] }. */
   bulkDiscard: (userCardIds) => api("/api/user-cards/bulk-discard", { method: "POST", label: "Défausse des cartes", body: { card_ids: userCardIds } }),
 
-  /** A native special/Pro pack is claimable (opened on the native site). */
-  specialAvailable: () => api("/api/packs/special", { quiet: true }).then((d) => !!d.available, () => false),
 };

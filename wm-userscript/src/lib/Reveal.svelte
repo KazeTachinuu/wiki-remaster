@@ -5,16 +5,12 @@
   import { RNAME } from "../wm/index.js";
   import { reveal } from "./sound.js";
   import { rarest } from "./sfx.js";
-  let { cards, ondone, packs = 1 } = $props();
+  let { cards, ondone } = $props();
   let i = $state(0);
-  // Several packs at once go straight to the grid, rarest first.
-  let showAll = $state(packs > 1);
-  const RANK = { L: 5, UR: 4, SR: 3, R: 2, PC: 1, C: 0 };
-  const gridCards = $derived(packs > 1 ? [...cards].sort((a, b) => RANK[b.rarity] - RANK[a.rarity]) : cards);
-  const tally = $derived(Object.keys(RANK).reverse().map((r) => [r, cards.filter((c) => c.rarity === r).length]).filter(([, n]) => n));
+  let showAll = $state(false);
   let selected = $state(null);
   // Every card that comes into view answers with its rarity; the grid answers once, with the
-  // rarest of the haul.
+  // rarest of the pack.
   $effect(() => reveal(showAll ? rarest(cards) : cards[i].rarity));
   let last = $derived(i === cards.length - 1);
   let newCount = $derived(cards.filter((c) => c.is_new).length);
@@ -57,16 +53,11 @@
 {#if showAll}
   <div class="reveal reveal-all">
     <div class="reveal-all-head">
-      <h2>{packs > 1 ? `Vos ${packs} paquets` : "Votre paquet"}</h2>
+      <h2>Votre paquet</h2>
       <div class="sub">{cards.length} cartes{newCount ? `, ${newCount} nouvelle${newCount > 1 ? "s" : ""}` : ""}</div>
-      {#if packs > 1}
-        <div class="haul">
-          {#each tally as [r, n]}<span class="haul-chip" style="--rc:var(--r-{r.toLowerCase()})"><b>{n}</b> {RNAME[r]}</span>{/each}
-        </div>
-      {/if}
     </div>
-    <div class="reveal-grid">
-      {#each gridCards as c, k (k)}
+    <div class="reveal-grid" style:--cols={Math.min(cards.length, 5)} style:--rows={Math.ceil(cards.length / Math.min(cards.length, 5))}>
+      {#each cards as c, k (k)}
         <div class="rg-card" style="animation-delay:{Math.min(k, 20) * 50}ms">
           <div class="rg-aura" data-r={c.rarity}></div>
           <button class="card-btn" onclick={() => openCard(c)} aria-label={c.title}>

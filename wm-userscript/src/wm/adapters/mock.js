@@ -22,6 +22,7 @@ export const MockData = {
       currency: p.wikibidous_balance,
       next_regen_seconds: p.next_regen_seconds,
       is_pro: !!p.is_pro,
+      is_vip: !!p.is_vip,
     };
   },
 

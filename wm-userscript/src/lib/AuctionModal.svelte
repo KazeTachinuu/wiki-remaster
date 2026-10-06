@@ -4,7 +4,7 @@
   import { anchorCentered } from "./anchor.js";
   import Icon from "./Icon.svelte";
   import { data, RNAME, marketValueFor } from "../wm/index.js";
-  import { compareListings } from "../wm/compare.js";
+  import ListingCompare from "./ListingCompare.svelte";
   import { nf, ago, countdown, secondsUntil } from "./format.js";
 
   let { auction, balance = null, onclose, onwallet, onswitch } = $props();
@@ -30,7 +30,7 @@
   refresh();
   $effect(() => {
     if (phase !== "live") return;
-    const t = setInterval(refresh, 4000);
+    const t = setInterval(() => document.visibilityState === "visible" && refresh(), 4000);
     return () => clearInterval(t);
   });
 
@@ -56,8 +56,6 @@
   const repriceAt = $derived((Date.parse(a.createdAt) + Date.parse(a.endAt)) / 2);
   const canReprice = $derived(mine && phase === "live" && a.bid == null && now >= repriceAt);
   const bidders = $derived(new Set(bids.map((b) => b.bidder)).size);
-  // this auction is always in the comparison, with its freshest price
-  const cmp = $derived(others && compareListings([a, ...others.filter((o) => o.id !== a.id)], now));
 
   let amount = $state(String(auction.bid != null ? auction.bid + 1 : auction.base ?? 1));
   let newBase = $state("");
@@ -214,34 +212,7 @@
       </div>
     </div>
 
-    <section class="auc-panel cmp" aria-label="Toutes les ventes de cette carte">
-      <div class="cmp-head">
-        <h3>Toutes les ventes de cette carte</h3>
-        {#if cmp && cmp.stats.count > 1}
-          <span class="cmp-sum">{cmp.stats.count} en vente · dès <b>{nf(cmp.stats.min)}</b> · moyenne <b>{nf(cmp.stats.avg)}</b>{#if soldAvg != null}{" "}· vendue en moyenne <b>{nf(soldAvg)}</b>{/if}</span>
-        {/if}
-      </div>
-      {#if !cmp}
-        <ol class="cmp-list" aria-label="Recherche des autres ventes">{#each Array(3) as _}<li><div class="cmp-row sk"></div></li>{/each}</ol>
-      {:else if cmp.rows.length <= 1}
-        <div class="auc-empty">C'est la seule vente de cette carte en ce moment.{#if soldAvg != null} Vendue en moyenne {nf(soldAvg)}.{/if}</div>
-      {:else}
-        <ol class="cmp-list">
-          {#each cmp.rows as r (r.id)}
-            {@const left = secondsUntil(r.endAt, now) ?? 0}
-            <li>
-              <button class="cmp-row" class:here={r.id === a.id} disabled={r.id === a.id} onclick={() => onswitch?.(r)}
-                aria-label="{nf(r.price)} WikiBidous, se termine dans {countdown(left)}">
-                <span class="cmp-price"><span class="auc-coin"></span>{nf(r.price)}{#if r.is_shiny}<span class="cmp-shiny" title="Brillante"><Icon name="sparkle" width={2} /></span>{/if}</span>
-                <span class="cmp-gap" class:best={r.cheapest && !r.is_shiny}>{r.cheapest ? (r.is_shiny ? "Brillante" : "Le moins cher") : `+${nf(r.gap)}`}</span>
-                <span class="cmp-time" class:soon={left < 3600}>{countdown(left)}{#if r.soonest}<span class="cmp-tag">Finit en premier</span>{/if}</span>
-                <span class="cmp-who">{r.id === a.id ? "Celle-ci" : r.mine ? "Votre vente" : r.seller || ""}</span>
-              </button>
-            </li>
-          {/each}
-        </ol>
-      {/if}
-    </section>
+    <ListingCompare listings={others} current={a} {soldAvg} {now} onpick={(r) => onswitch?.(r)} />
 
     <div class="auc-bottom">
       <section class="auc-panel">

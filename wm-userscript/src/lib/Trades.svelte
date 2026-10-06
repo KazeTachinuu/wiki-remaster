@@ -23,6 +23,7 @@
   let trades = $state(null);
   let error = $state(false);
   const cardValues = valueMap();
+  $effect(() => () => cardValues.destroy());
   const values = cardValues.values;
   // the selected trade of each tab (null: the first one), and whether a phone shows it full screen
   let picks = $state({ incoming: null, outgoing: null, history: null });

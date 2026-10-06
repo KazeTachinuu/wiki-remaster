@@ -9,7 +9,7 @@
   import { nf, compact } from "./format.js";
   import { PagedList, debouncedSearch } from "./paged.svelte.js";
   import { lazyValues } from "./lazyValues.js";
-  import { settings, toggleHideStats, toggleHideSensitive } from "./settings.svelte.js";
+  import { settings, toggleHideSensitive } from "./settings.svelte.js";
 
   const SORTS = [["rarity", "Rareté"], ["name", "Nom"], ["atk", "Attaque"], ["def", "Défense"]];
 
@@ -64,9 +64,6 @@
       </div>
       <button class="iconbtn" class:on={wishOnly} onclick={() => refilter(() => (wishOnly = !wishOnly))} title="N'afficher que ma liste de souhaits">
         <Icon name="heart" filled={wishOnly} width={1.7} /><span>Souhaits</span>
-      </button>
-      <button class="iconbtn" class:on={settings.hideStats} onclick={toggleHideStats} title="Afficher ou masquer l'ATK et la DEF">
-        <Icon name={settings.hideStats ? "eyeOff" : "eye"} /><span>ATK/DEF</span>
       </button>
       <button class="iconbtn" class:on={!settings.hideSensitive} onclick={toggleHideSensitive} title="Afficher ou flouter les images sensibles">
         <Icon name={settings.hideSensitive ? "eyeOff" : "eye"} /><span>Sensible</span>

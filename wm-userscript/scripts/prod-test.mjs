@@ -21,58 +21,20 @@
 //   bid       minimum bid on the cheapest auction under 50 (held from the balance)
 //   notif     mark the newest unread notification read
 
-const SITE = "https://www.wiki-masters.com";
-const DIST = await Bun.file(new URL("../dist/wikimasters-app.user.js", import.meta.url)).text();
+import { realSite, login, SITE } from "./real-site.mjs";
+
 const OUT = new URL("../.prod-test/", import.meta.url).pathname;
 const flag = (name) => new Set((process.argv.find((a) => a.startsWith(`--${name}=`)) || "").split("=")[1]?.split(",").filter(Boolean) || []);
 const ONLY = flag("only");
 const WRITES = flag("write");
 const on = (f) => !ONLY.size || ONLY.has(f);
 
-// --- browser ------------------------------------------------------------------------
-const PROFILE = new URL("../.prod-profile", import.meta.url).pathname;
-const BROWSER = process.env.WM_BROWSER || ["brave", "chromium", "google-chrome-stable"].map((b) => Bun.which(b)).find(Boolean);
-// Same cookie encryption in the visible login browser and the headless runs.
-const STORE = "--password-store=basic";
+if (process.argv.includes("--login")) { await login(); process.exit(0); }
 
-if (process.argv.includes("--login")) {
-  console.log("Log in to wiki-masters in the window that opened, then close it.");
-  await Bun.spawn([BROWSER, `--user-data-dir=${PROFILE}`, STORE, "--no-first-run", "--no-default-browser-check", `${SITE}/pulls`]).exited;
-  process.exit(0);
-}
-
-// --show: launch a visible browser on the profile ourselves and attach to it over CDP.
-let shown = null; // the visible browser process, closed at the end so the profile unlocks
-async function visibleBrowser() {
-  const portFile = `${PROFILE}/DevToolsActivePort`;
-  await Bun.file(portFile).delete().catch(() => {});
-  shown = Bun.spawn([BROWSER, `--user-data-dir=${PROFILE}`, STORE, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "--window-size=1400,950"]);
-  for (let i = 0; i < 100 && !(await Bun.file(portFile).exists()); i++) await Bun.sleep(100);
-  const [port, path] = (await Bun.file(portFile).text()).split("\n");
-  return { type: "chrome", url: `ws://127.0.0.1:${port}${path}` };
-}
+// --- browser (scripts/real-site.mjs): the logged-in profile, the local build injected -----
 const SHOW = process.argv.includes("--show");
-const backend = process.argv.includes("--attach") ? undefined
-  : SHOW ? await visibleBrowser()
-  : { type: "chrome", path: BROWSER, argv: [STORE] };
-
 const errors = [];
-const view = new Bun.WebView({
-  width: 1400, height: 900,
-  ...(backend && { backend }),
-  ...(backend && !SHOW && { dataStore: { directory: PROFILE } }),
-  console: (type, ...args) => {
-    const s = args.map((a) => a?.value ?? a?.description ?? "").join(" ");
-    if (s.includes("[wiki-remaster]") || type === "error") errors.push(`${type}: ${s}`.slice(0, 200));
-  },
-});
-await view.navigate("about:blank"); // opens the CDP session
-await view.cdp("Runtime.enable");
-view.addEventListener("Runtime.exceptionThrown", (e) => errors.push("exception: " + (e.data.exceptionDetails.exception?.description || e.data.exceptionDetails.text).split("\n")[0]));
-// Mark the harness copy, then inject the local build at document-start (like Tampermonkey).
-await view.cdp("Page.addScriptToEvaluateOnNewDocument", {
-  source: `try{localStorage.setItem("wm-debug","1")}catch{};window.__wmLocal=!window.__wmMounted;\n${DIST}`,
-});
+const { view, ev, waitFor, go, preflight, close } = await realSite({ show: SHOW, attach: process.argv.includes("--attach"), onError: (e) => errors.push(e) });
 
 // --- helpers -----------------------------------------------------------------------
 const results = [];
@@ -88,28 +50,14 @@ async function check(name, fn) {
     await Promise.race([run.catch(() => {}), Bun.sleep(30000)]);
   }
 }
-// Run a self-contained page-side function with one JSON argument.
-const ev = (fn, arg) => view.evaluate(`(${fn})(${JSON.stringify(arg ?? null)})`);
-async function waitFor(expr, ms = 15000) {
-  for (const end = Date.now() + ms; Date.now() < end; await Bun.sleep(250)) if (await view.evaluate(`!!(${expr})`).catch(() => false)) return;
-  throw new Error(`timeout waiting for ${expr}`);
-}
-async function go(path) { await view.navigate(SITE + path); await waitFor("window.__wm"); }
 const waitCapture = () => waitFor("window.__wm.data.userId").catch(() => {});
 const shot = async (name) => Bun.write(`${OUT}${name}.png`, await view.screenshot());
 const $ = (sel) => `document.querySelector("#wm-host")?.shadowRoot?.querySelector(${JSON.stringify(sel)})`;
 const $$ = (sel) => `[...(document.querySelector("#wm-host")?.shadowRoot?.querySelectorAll(${JSON.stringify(sel)}) || [])]`;
 
 // --- preflight: logged in, and it is OUR build running --------------------------------
-await go("/pulls");
-if (!(await view.evaluate(`fetch("/api/my-collection?page=0").then((r) => r.ok)`))) {
-  console.error("Not logged in. Run `bun run test:prod:login`, log in, close the window, rerun.");
-  process.exit(2);
-}
-if (!(await view.evaluate("window.__wmLocal"))) {
-  console.error("An installed wiki-remaster ran before the local build. Disable it in Tampermonkey for this run.");
-  process.exit(2);
-}
+const stop = await preflight();
+if (stop) { console.error(stop); await close(); process.exit(2); }
 const prevOff = await view.evaluate(`localStorage.getItem("wm-off")`);
 await view.evaluate(`localStorage.removeItem("wm-off")`);
 
@@ -299,7 +247,7 @@ if (on("notifs")) {
     assert(Array.isArray(n) && n.every((x) => x.id && x.title), "bad notification row");
     return `${n.length} (${n.filter((x) => !x.read).length} unread)`;
   });
-  await check("special pack probe does not throw", async () => String(await ev(() => window.__wm.data.specialAvailable())));
+  await check("special packs probe does not throw", async () => JSON.stringify(await ev(() => window.__wm.data.specialPacks())));
 }
 
 // --- trades, friends, chat (read-only: raw shapes the Échanges screen relies on) ------------
@@ -612,8 +560,7 @@ if (WRITES.has("notif")) await check("WRITE mark one notification read", async (
 await check("no runtime errors or drift warnings", async () => assert(!errors.length, errors.slice(0, 3).join(" / ")));
 if (prevOff) await view.evaluate(`localStorage.setItem("wm-off", ${JSON.stringify(prevOff)})`);
 await view.evaluate(`localStorage.removeItem("wm-debug")`);
-view.close();
-shown?.kill();
+await close();
 
 console.log("");
 for (const [s, n, note] of results) console.log(`${s === "PASS" ? "ok  " : "FAIL"}  ${n}${note ? `  (${note})` : ""}`);

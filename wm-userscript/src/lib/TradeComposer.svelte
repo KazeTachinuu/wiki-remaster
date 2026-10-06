@@ -18,7 +18,7 @@
   import { valueMap } from "./lazyValues.js";
   import { nf } from "./format.js";
   import { scrollFade } from "./scrollFade.js";
-  import { data, SIDE, backgroundLane, loadCollection, sideValue, verdict, balanceLabel, offerSummary } from "../wm/index.js";
+  import { data, SIDE, pageLane, loadCollection, sideValue, verdict, balanceLabel, offerSummary } from "../wm/index.js";
   // balance: my WikiBidous (null while unknown), the coins I add cannot exceed it
   // onsent(ok): the offer went through (true), or the server answered with an error (false: it may exist anyway)
   let { counter = null, balance = null, onclose, onsent } = $props();
@@ -50,9 +50,9 @@
   // their collection, a page at a time ("Charger plus"), searched, filtered and sorted by the
   // server (the picker's onquery); a failed page is asked again, not skipped
   let theirQuery = {};
-  // the first page answers the user; the next ones (scrolling, the value sort) share the paced lane
+  // the first page answers the user; the next ones (scrolling, the value sort) go through the page lane
   const theirPage = (page) => data.profileCollection(friend.username, { page, ...theirQuery });
-  const theirs = new PagedList((page) => (page ? backgroundLane.run(() => theirPage(page)) : theirPage(page)));
+  const theirs = new PagedList((page) => (page ? pageLane.run(() => theirPage(page)) : theirPage(page)));
   const queryTheirs = (query) => { theirQuery = query; theirs.go(0); };
   const theirsFirst = $derived(theirs.loading && theirs.page === 0); // a new query, or the first load
   let theirPages = $state(NO_PAGES);
@@ -83,6 +83,7 @@
   const without = (map, it) => { const m = new Map(map); m.delete(it.userCardId); return m; };
   const coins = (n) => Math.max(0, Math.floor(+n || 0));
   const cardValues = valueMap();
+  $effect(() => () => cardValues.destroy());
   const values = cardValues.values;
   const giveItems = $derived([...give.values()]);
   const getItems = $derived([...get.values()]);

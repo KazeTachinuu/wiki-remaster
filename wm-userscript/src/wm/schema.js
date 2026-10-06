@@ -92,16 +92,52 @@ export function nBid(b) {
   return { id: b.id, amount: b.amount, bidder: b.bidder?.username || null, bidderId: b.bidder_id || null, at: b.placed_at || null };
 }
 
-/** A notification row. */
+// The game's own titles carry emoji and exclamation marks ("🔄 Nouvelle offre d'échange !"):
+// each known type is told in a few plain words from its data instead (the data keys are the
+// live ones, recorded in docs/api-shapes.json). An unknown type keeps the game's text, cleaned.
+const wb = (n) => (n == null ? "" : ` pour ${Number(n).toLocaleString("fr")} WikiBidous`);
+const NOTIF = {
+  marketplace_outbid: (d) => ["Enchère dépassée", d.card_title && `${d.card_title}, nouvelle offre${wb(d.new_bid).replace(" pour", " de")}`],
+  marketplace_auction_won: (d) => ["Enchère gagnée", d.card_title && `${d.card_title}${wb(d.final_price)}`],
+  marketplace_auction_sold: (d) => ["Carte vendue", d.card_title && `${d.card_title}${wb(d.final_price)}`],
+  marketplace_auction_unsold: (d) => ["Vente terminée sans acheteur", d.card_title],
+  marketplace_wishlist_listed: (d) => ["Carte souhaitée en vente", d.card_title],
+  trade_offer: (d) => ["Offre d'échange", d.initiator_username && `de ${d.initiator_username}`],
+  trade_countered: (d) => ["Contre-offre", d.initiator_username && `de ${d.initiator_username}`],
+  trade_accepted: (d) => ["Échange accepté", d.recipient_username && `par ${d.recipient_username}`],
+  friend_request: (d) => ["Demande d'ami", d.requester_username && `de ${d.requester_username}`],
+  battle_invite: (d) => ["Défi", d.challenger_username && `de ${d.challenger_username}`],
+  guild_invite: (d) => ["Invitation de guilde", [d.guild_name, d.inviter_username && `de ${d.inviter_username}`].filter(Boolean).join(", ")],
+};
+/** The game's text without emoji or trailing exclamation marks. */
+export const plainText = (s) => String(s || "").replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, "").replace(/\s*!+\s*$/, "").replace(/\s+/g, " ").trim();
+
+/** A notification row: a short title and one line of detail, both plain. */
 export function nNotification(n) {
+  const d = n.data || {};
+  const [title, detail] = NOTIF[n.type]?.(d) ?? [];
   return {
     id: n.id,
-    title: n.data?.title || "Notification", // every live type carries its own title (checked by test:prod)
-    message: n.data?.message || "",
+    title: title || plainText(d.title) || "Notification",
+    message: detail || plainText(d.message),
     read: !!n.read,
     at: n.created_at || null,
     href: notifHref(n),
   };
+}
+
+/**
+ * Which cards of an opened pack are new to me. `owned_copies` (in the pack response) lists every
+ * copy I own of the pack's cards, counted after the opening, as the game's own client reads it:
+ * a card is new when I own no more copies of it than the pack just gave. Null when the response
+ * has no list (then nothing is marked new rather than guessed).
+ */
+export function newInPack(cardIds, ownedCopies) {
+  if (!Array.isArray(ownedCopies)) return null;
+  const owned = new Map(), drawn = new Map();
+  for (const c of ownedCopies) owned.set(c.card_id, (owned.get(c.card_id) ?? 0) + 1);
+  for (const id of cardIds) drawn.set(id, (drawn.get(id) ?? 0) + 1);
+  return new Set(cardIds.filter((id) => (owned.get(id) ?? 0) <= drawn.get(id)));
 }
 
 /** Owned items tallied by rarity. */
