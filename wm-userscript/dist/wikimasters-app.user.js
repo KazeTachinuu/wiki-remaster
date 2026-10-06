@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.12.4
+// @version      0.12.5
 // @author       Hugo Sibony
 // @description  Unofficial redesign of wiki-masters.com, on the game's own data and your own session.
 // @license      MIT
@@ -5475,7 +5475,7 @@
 		for (let i = 3; i < rgba.length; i += 4) if (rgba[i] < 128) clear++;
 		return rgba.length ? clear / (rgba.length / 4) : 0;
 	}
-	function seeThrough(img, threshold = .3) {
+	function seeThrough(img, threshold = .1) {
 		if (/\.jpe?g($|\?)/i.test(img.currentSrc || img.src)) return false;
 		try {
 			const c = document.createElement("canvas");
