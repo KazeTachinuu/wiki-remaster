@@ -1,0 +1,8 @@
+{
+  "version": { "license": "MIT", "approval_notes": "Unofficial redesign of wiki-masters.com. Not minified: the build is readable as shipped; build with `bun run build` (repository below). Runs as a MAIN-world content script on wiki-masters.com only (Firefox 128+): it reads the page's own fetch responses and the game's Turnstile widget. No permissions, no data collected, no remote code." },
+  "categories": ["games-entertainment"],
+  "summary": { "fr": "Une nouvelle interface pour wiki-masters.com : paquets, collection, marché et échanges, sur les données du jeu. Non officiel.", "en-US": "Unofficial redesign of wiki-masters.com: packs, collection, market and trades, on the game's own data." },
+  "description": { "fr": "Non officiel, sans lien avec WikiMasters. Refait les paquets, la collection, le catalogue, le marché et les échanges ; les autres pages restent celles du site. Utilise votre propre session : aucun serveur, aucun suivi. Code source : https://github.com/KazeTachinuu/wiki-remaster", "en-US": "Unofficial, not affiliated with WikiMasters. Rebuilds packs, collection, catalogue, market and trades; every other page stays the original site. Uses your own session; no server, no tracking. Source: https://github.com/KazeTachinuu/wiki-remaster" },
+  "homepage": { "en-US": "https://github.com/KazeTachinuu/wiki-remaster" },
+  "support_url": { "en-US": "https://github.com/KazeTachinuu/wiki-remaster/issues" }
+}

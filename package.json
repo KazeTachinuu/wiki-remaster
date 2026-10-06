@@ -6,6 +6,7 @@
     "build": "./build.sh",
     "clean": "./build.sh clean",
     "test": "bun run --cwd wm-userscript test",
-    "check": "bun run --cwd wm-userscript check"
+    "check": "bun run --cwd wm-userscript check",
+    "publish:firefox": "./build.sh && bunx web-ext@8 sign --source-dir dist/firefox --artifacts-dir dist/signed --channel listed --amo-metadata docs/store/amo-metadata.json --api-key \"$AMO_JWT_ISSUER\" --api-secret \"$AMO_JWT_SECRET\""
   }
 }

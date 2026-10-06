@@ -8,12 +8,11 @@ An unofficial redesign of [wiki-masters.com](https://www.wiki-masters.com), in y
 
 [![Install Wiki Remaster](https://img.shields.io/badge/Install-Wiki%20Remaster-3CCB8E?style=for-the-badge&logo=tampermonkey&logoColor=white)](https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js)
 
-| Device | How |
+| Browser | How |
 |---|---|
-| Computer | [Tampermonkey](https://www.tampermonkey.net/), then the button above |
-| Android | Firefox + Tampermonkey add-on, then the button |
-| iPhone | Safari + [Userscripts](https://apps.apple.com/app/userscripts/id1463298887) (Settings, Safari, Extensions) |
-| Extension (no Tampermonkey) | `bun run build`, then load `dist/chrome` or `dist/firefox` unpacked |
+| Chrome, Edge, Brave, Opera | Chrome Web Store (in review), or [Tampermonkey](https://www.tampermonkey.net/) then the button above |
+| Firefox (computer and Android) | Firefox Add-ons (in review), or Tampermonkey then the button |
+| Safari (iPhone, iPad, Mac) | [Userscripts](https://apps.apple.com/app/userscripts/id1463298887) (Settings, Safari, Extensions), then the button |
 
 Updates are automatic. **Site original** (or the phone menu) goes back to the original site.
 
@@ -68,6 +67,7 @@ bun run build                  # everything into dist/: userscript, Chrome and F
 bun run clean                  # remove what builds and tests generate
 bun run test                   # unit tests
 bun run check                  # style check
+bun run publish:firefox        # build and submit to Firefox Add-ons (see docs/STORE.md)
 cd wm-userscript
 bun run test:prod:login        # once: log in to the game
 bun run test:prod              # build on the real site, read-only
@@ -86,4 +86,4 @@ scripts/check-live.sh --install # daily live check: desktop alert + GitHub issue
 
 - Unofficial, not affiliated with WikiMasters. Game art belongs to its owners.
 - Card text from Wikipedia, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
-- Code: [MIT](LICENSE) · [Privacy](PRIVACY.md) · [Store kit](docs/STORE.md)
+- Code: [MIT](LICENSE) · [Privacy](PRIVACY.md) · [Publishing](docs/STORE.md)
