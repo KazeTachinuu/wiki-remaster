@@ -87,3 +87,5 @@
 .loading{color:var(--fg-faint);padding:var(--s7);text-align:center}
 .wc.skeleton{background:linear-gradient(100deg,#141613 30%,#1c201c 50%,#141613 70%);background-size:200% 100%;animation:sk 1.2s ease-in-out infinite;border:1px solid var(--line)}
 @keyframes sk{to{background-position:-200% 0}}
+/* the end of the rendered part of a long collection: reaching it renders the next rows */
+.grid-more{height:1px}

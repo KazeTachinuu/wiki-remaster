@@ -31,11 +31,12 @@
 .wc-sky .glow-out{stop-color:var(--rc);stop-opacity:0}
 .wc-sky .spark{fill:#fff;fill-opacity:.85}
 .wc.is-shiny .wc-sky .core{fill-opacity:1}
-/* shiny: the shooting stars fly along their trail, one after another */
-.wc-sky .meteor{transform-box:view-box}
-.wc-sky .meteor{animation:meteor 2.6s cubic-bezier(.35,.1,.45,1) infinite}
-@keyframes meteor{0%{transform:translate(calc(var(--dx) * -1),calc(var(--dy) * -1));opacity:0}15%{opacity:1}70%{opacity:1}100%{transform:translate(calc(var(--dx) * .6),calc(var(--dy) * .6));opacity:0}}
-@media (prefers-reduced-motion:reduce){.wc-sky .meteor{animation:none !important}}
+/* shiny: the shooting stars fly along their trail, one after another (transform and opacity only) */
+.wc-meteor{position:absolute;z-index:1;height:var(--w);border-radius:var(--w);transform-origin:0 50%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.5) 60%,#fff);box-shadow:0 0 3px rgba(255,255,255,.35);
+  transform:rotate(var(--a));will-change:transform;animation:meteor 2.6s cubic-bezier(.35,.1,.45,1) infinite}
+@keyframes meteor{0%{transform:rotate(var(--a)) translateX(-140%);opacity:0}15%,70%{opacity:1}100%{transform:rotate(var(--a)) translateX(90%);opacity:0}}
+@media (prefers-reduced-motion:reduce){.wc-meteor{animation:none}}
 /* shiny without a picture: the gold rim and badge say it; no sheen over the sky */
 .wc.is-noimg .wc-holo{display:none}
 .wc.is-noimg .wc-cap{background:linear-gradient(to top,rgba(5,6,5,.94),rgba(5,6,5,.7) 62%,transparent)}

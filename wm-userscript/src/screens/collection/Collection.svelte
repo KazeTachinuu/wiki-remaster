@@ -9,6 +9,7 @@
   import { data, RNAME, RARITIES_DESC, normSearch, loadCollection, collectionRemove, forgetCollection, backgroundLane } from "../../wm/index.js";
   import { settings } from "../../lib/settings.svelte.js";
   import { lazyValues } from "../../lib/lazyValues.js";
+  import { inView } from "../../lib/inView.js";
 
   let { onwallet } = $props();
 
@@ -125,6 +126,11 @@
         (!q || it._s.includes(q)))
       .sort(SORTS[sort]);
   });
+  // Built as you scroll: the first rows at once, more as the end comes near, so a 1000-card
+  // collection opens as fast as a small one. A new filter, sort or search starts from the top.
+  const STEP = 96;
+  let limit = $state(STEP);
+  $effect(() => { void [filter, favOnly, shinyOnly, sort, search]; limit = STEP; });
   let starredCount = $derived(items?.filter((it) => it.starred).length ?? 0);
   let shinyCount = $derived(items?.filter((it) => it.is_shiny).length ?? 0);
   let allPicked = $derived(shown.length > 0 && shown.every((it) => picked.has(it.id)));
@@ -216,7 +222,7 @@
     </div>
   {:else}
     <div class="grid">
-      {#each shown as it (it.id)}
+      {#each shown.slice(0, limit) as it (it.id)}
         <button class="card-btn" class:picking={selecting} class:picked={selecting && picked.has(it.id)}
           onclick={() => onCardClick(it)} aria-label={it.card.title} use:lazy.watch={it.card}>
           <Card card={it.card} count={it.count} shiny={it.is_shiny} starred={it.starred} value={values[it.card.id]} />
@@ -226,6 +232,7 @@
         </button>
       {/each}
     </div>
+    {#if shown.length > limit}<div class="grid-more" aria-hidden="true" use:inView={{ onEnter: () => (limit += STEP), key: limit }}></div>{/if}
   {/if}
 {/if}
 

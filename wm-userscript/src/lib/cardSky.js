@@ -17,7 +17,8 @@ const round = (x) => +x.toFixed(2);
 
 /**
  * In a 100x140 box: stars [[x, y, r, opacity]], and shooting stars [[x0, y0, x1, y1, width, opacity]]
- * all falling at one angle, like a meteor shower (x1, y1 is the bright head).
+ * all falling at one angle, like a meteor shower (x1, y1 is the bright head). `field` is the stars
+ * as two SVG paths (dim and bright dots), so a card's sky is a couple of shapes, not 46.
  */
 export function cardSky(title) {
   const r = random(title);
@@ -29,5 +30,8 @@ export function cardSky(title) {
   });
   // shiny: two or three small sparkles close to the star [x, y, size]
   const sparkles = Array.from({ length: 2 + Math.floor(r() * 2) }, () => { const a = r() * Math.PI * 2, d = 17 + r() * 8; return [round(50 + d * Math.cos(a)), round(52 + d * Math.sin(a)), round(1.6 + r() * 1.6)]; });
-  return { stars, shooting, sparkles };
+  // each star a dot (a zero-length round-capped segment), drawn as one path per brightness
+  const dots = (keep) => stars.filter(keep).map(([x, y]) => `M${x} ${y}h0`).join("");
+  const field = { dim: dots(([, , , o]) => o < 0.5), bright: dots(([, , , o]) => o >= 0.5) };
+  return { stars, field, shooting, sparkles };
 }

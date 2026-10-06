@@ -62,11 +62,18 @@ export default function mockApiPlugin() {
       // One of each Legendary look: plain, gold (no image), onyx (shiny, no image), onyx over a photo.
       const L = CATALOG.find((c) => c.rarity === "L" && c.image_url) || CATALOG[0];
       const legend = (id, over, shiny) => addOwned({ ...L, ...over, id, rarity: "L", rarity_order: 5 }, shiny);
+      // A big collection for load tests: WM_MOCK_CARDS=1000 (and WM_MOCK_SHINY=1 for all shiny,
+      // WM_MOCK_NOIMG=1 for none with a picture) seeds that many copies of the catalogue's cards.
+      const SEED = { cards: Number(process.env.WM_MOCK_CARDS) || 0, shiny: Number(process.env.WM_MOCK_SHINY ?? SHINY_CHANCE), noImg: process.env.WM_MOCK_NOIMG === "1" };
       function seedCollection() {
         legend("L_img", {}, false);
         legend("L_gold", { wikipedia_title: "Légendaire (sans image)", image_url: null }, false);
         legend("L_onyx", { wikipedia_title: "Légendaire brillante", image_url: null }, true);
         legend("L_onyx_img", { wikipedia_title: "Légendaire brillante (image)" }, true);
+        for (let i = 0; i < SEED.cards; i++) {
+          const base = CATALOG[i % CATALOG.length];
+          addOwned({ ...base, id: `${base.id}~${i}`, wikipedia_title: `${base.wikipedia_title} ${i + 1}`, ...(SEED.noImg ? { image_url: null } : {}) }, Math.random() < SEED.shiny);
+        }
       }
       seedCollection();
 

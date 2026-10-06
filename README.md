@@ -75,6 +75,7 @@ bun scripts/readme-shots.mjs   # README screenshots, read-only
 scripts/check-live.sh --install # daily live check: desktop alert + GitHub issue on failure
 ```
 
+- Big mock collection: `WM_MOCK_CARDS=1000 bun run dev` (`WM_MOCK_SHINY=1` all shiny, `WM_MOCK_NOIMG=1` no pictures)
 - Mock faults: `POST /api/__fault` (`{ "status": 525, "count": 2 }`, `{ "delay": 7000 }`, `{ "human": true }`); Pro / V.I.P.: `POST /api/__profile`
 - `test:prod` diffs API shapes against `docs/api-shapes.json` (`--update-shapes`, `--only=market,trades`, `--write=discard,sell,bid,notif`)
 - API reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
