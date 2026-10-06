@@ -23,43 +23,12 @@
 .wc-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scale(1.8);z-index:0}
 .wc-bg.onyx{transform:none}
 .wc[data-r="C"] .wc-bg,.wc[data-r="PC"] .wc-bg{filter:brightness(.6) saturate(1.2)}
-/* no picture: a star, a sun when shiny, a supernova for Legendaries (components/CardSky.svelte) */
+/* no picture: a star in the rarity's colour on a night sky with a meteor shower (CardSky.svelte) */
 .wc-sky{position:absolute;inset:0;width:100%;height:100%;z-index:1}
-.wc-sky .h1{fill:color-mix(in oklab,var(--rc) 8%,transparent)}
-.wc-sky .h2{fill:color-mix(in oklab,var(--rc) 14%,transparent)}
-.wc-sky .h3{fill:color-mix(in oklab,var(--rc) 22%,transparent)}
-.wc-sky .h4{fill:color-mix(in oklab,var(--rc) 40%,transparent)}
 .wc-sky .ray{fill:var(--rc)}
 .wc-sky .core{fill:#fff;fill-opacity:.92}
-.wc-sky .corona{stroke:#e9c15a;stroke-width:.8;stroke-linecap:round;stroke-opacity:.8}
-.wc-sky.nova .shell{fill:none;stroke:#f3d27a;stroke-width:.7;stroke-opacity:.5}
-.wc-sky.nova .shell.thin{stroke-width:.4;stroke-opacity:.35;stroke-dasharray:1 2.5}
-.wc-sky.nova .jet{fill:#f3d27a;fill-opacity:.28}
-.wc-sky.nova .glow{fill:#f3d27a;fill-opacity:.16}
-.wc-sky.nova .glow2{fill:#fff2c2;fill-opacity:.35}
-.wc-sky.nova .ray{fill:#fff2c2}
-.wc-sky.nova .core{fill:#fff}
-/* a quiet sky that comes alive when looked at: six stars twinkle, the star's light breathes and a
-   wishing star crosses once. Each part is its own small layer that only fades and moves. Still at
-   rest (a grid costs nothing), running on hover and in the detail view's big card, off for
-   reduced motion. */
-.wc-tw{position:absolute;z-index:1;width:3px;height:3px;margin:-1.5px;border-radius:50%;background:#fff;
-  box-shadow:0 0 4px 1px rgba(255,255,255,.55);opacity:.55;animation:twinkle ease-in-out infinite alternate paused}
-.wc-pulse{position:absolute;z-index:1;left:50%;top:37.1%;width:38%;aspect-ratio:1;translate:-50% -50%;border-radius:50%;
-  background:radial-gradient(circle,color-mix(in oklab,var(--rc) 45%,transparent),transparent 68%);
-  opacity:.6;animation:breathe 5.5s ease-in-out infinite alternate paused}
-.wc-pulse.nova{width:60%;background:radial-gradient(circle,rgba(255,242,194,.4),transparent 66%)}
-.wc-pulse.sun{width:48%}
-.wc-comet{position:absolute;z-index:1;left:-30%;width:28%;height:1.5px;border-radius:2px;opacity:0;rotate:18deg;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.15) 40%,#fff);box-shadow:0 0 6px rgba(255,255,255,.6)}
-.card-btn:hover .wc-tw,.card-btn:focus-visible .wc-tw,.wc-big .wc-tw,
-.card-btn:hover .wc-pulse,.card-btn:focus-visible .wc-pulse,.wc-big .wc-pulse{animation-play-state:running}
-.card-btn:hover .wc-comet,.card-btn:focus-visible .wc-comet{animation:comet 1.6s cubic-bezier(.3,.1,.3,1) .25s 1 both}
-.wc-big .wc-comet{animation:comet 1.6s cubic-bezier(.3,.1,.3,1) 1.5s infinite;animation-duration:9s}
-@keyframes twinkle{from{opacity:.05}to{opacity:.95}}
-@keyframes breathe{from{opacity:.35;transform:scale(.92)}to{opacity:.9;transform:scale(1.06)}}
-@keyframes comet{0%{transform:translateX(0);opacity:0}12%{opacity:1}55%{opacity:.9}70%,100%{transform:translateX(560%);opacity:0}}
-@media (prefers-reduced-motion:reduce){.wc-tw,.wc-pulse,.wc-comet{animation:none !important}}
+/* shiny without a picture: the gold rim and badge say it; no sheen over the sky */
+.wc.is-noimg .wc-holo{display:none}
 .wc.is-noimg .wc-cap{background:linear-gradient(to top,rgba(5,6,5,.94),rgba(5,6,5,.7) 62%,transparent)}
 .wc-photo.onyx-photo{object-fit:cover;z-index:1}
 /* a see-through image (a map, a line drawing) on paper, as Wikipedia shows it; room for the caption below */

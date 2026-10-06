@@ -1,5 +1,5 @@
-// The art of a card without a picture, seeded by its title (each card its own sky, the same card
-// always the same): a star for most cards, a sun when shiny, a supernova for Legendaries.
+// The art of a card without a picture: a four-pointed star on a night sky with a meteor shower,
+// seeded by the title (each card its own sky, the same card always the same). Still: no animation.
 
 function seed(text) {
   let h = 2166136261;
@@ -15,20 +15,17 @@ function random(text) {
 
 const round = (x) => +x.toFixed(2);
 
-/** Which drawing: "nova" (Legendary), "sun" (shiny), else "star". */
-export const skyKind = (rarity, shiny) => (rarity === "L" ? "nova" : shiny ? "sun" : "star");
-
 /**
- * { stars: [[x, y, r, opacity]] in a 100x140 box, tilt (degrees), jets: [[angle, length, width]]
- * for the supernova's light jets, twinkle: [[duration, delay]] for the first stars }; the same for
- * the same title.
+ * In a 100x140 box: stars [[x, y, r, opacity]], and shooting stars [[x0, y0, x1, y1, width, opacity]]
+ * all falling at one angle, like a meteor shower (x1, y1 is the bright head).
  */
-export function cardSky(title, count = 46) {
+export function cardSky(title) {
   const r = random(title);
-  const stars = Array.from({ length: count }, () => [round(r() * 100), round(r() * 140), round(0.15 + r() * 0.4), round(0.25 + r() * 0.5)]);
-  const tilt = Math.round(r() * 30 - 15);
-  // six stars twinkle, each on its own slow beat (seconds: [duration, delay])
-  const twinkle = Array.from({ length: 6 }, () => [round(3 + r() * 3), round(-r() * 6)]);
-  const jets = Array.from({ length: 14 }, (_, k) => [round((k / 14) * 360 + (r() - 0.5) * 16), round(20 + r() * 26), round(1.2 + r() * 2.2)]);
-  return { stars, tilt, jets, twinkle };
+  const stars = Array.from({ length: 46 }, () => [round(r() * 100), round(r() * 140), round(0.15 + r() * 0.4), round(0.25 + r() * 0.5)]);
+  const angle = ((20 + r() * 25) * Math.PI) / 180;
+  const shooting = Array.from({ length: 5 + Math.floor(r() * 4) }, () => {
+    const x = 5 + r() * 90, y = 5 + r() * 115, len = 8 + r() * 20;
+    return [round(x - len * Math.cos(angle)), round(y - len * Math.sin(angle)), round(x), round(y), round(0.25 + r() * 0.45), round(0.35 + r() * 0.55)];
+  });
+  return { stars, shooting };
 }

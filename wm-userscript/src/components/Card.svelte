@@ -5,7 +5,7 @@
   import { isOnyx } from "../lib/cardArt.js";
   import { rarityArt } from "../lib/art.js";
   import { seeThrough } from "../lib/seeThrough.js";
-  import { cardSky, skyKind } from "../lib/cardSky.js";
+  import { cardSky } from "../lib/cardSky.js";
   import CardSky from "./CardSky.svelte";
   let { card, count = 1, isNew = false, shiny = false, starred = false, value = undefined,
         owned = true, wishlisted = false, big = false, caption = true, stats = true } = $props();
@@ -16,13 +16,14 @@
   // substitution for the game's server-side blurredCardIds; matches the real "grid blurs").
   let blurred = $derived(settings.hideSensitive && card.nsfw_image);
 
-  const onyx = $derived(isOnyx(card, shiny));
+  // the game's onyx look is for a shiny Legendary with a photo; without one, the night sky
+  const onyx = $derived(isOnyx(card, shiny) && showPhoto);
   const art = $derived(rarityArt(card, shiny));
 
   // Fall back from a broken photo to the rarity art (never a blank card).
   let imgFailed = $state(false);
   let paper = $state(false); // a see-through image (a map, a diagram): shown on paper
-  // no picture: a star, a sun (shiny) or a supernova (Legendary) on a sky seeded by the title
+  // no picture: a star on a night sky with a meteor shower, seeded by the title
   const sky = $derived(showPhoto ? null : cardSky(card.title));
   let artFailed = $state(false);
   let showPhoto = $derived(!!card.image_url && !imgFailed);
@@ -49,7 +50,6 @@
       <span class="ox ox-shade" aria-hidden="true"></span>
       <span class="ox ox-tint" aria-hidden="true"></span>
       <span class="ox ox-wash" aria-hidden="true"></span>
-      {#if sky}<CardSky {sky} kind="nova" />{/if}
       {#if showPhoto}
         <img class="wc-photo onyx-photo" src={card.image_url} alt={card.title} loading="lazy" crossorigin="anonymous" onerror={() => (imgFailed = true)} />
       {/if}
@@ -60,7 +60,7 @@
       <img class="wc-blur" src={card.image_url} alt="" aria-hidden="true" loading="lazy" crossorigin="anonymous" />
       <img class="wc-photo" src={card.image_url} alt={card.title} loading="lazy" crossorigin="anonymous" onload={(e) => (paper = seeThrough(e.currentTarget))} onerror={() => (imgFailed = true)} use:fadeIn />
     {:else if sky}
-      <CardSky {sky} kind={skyKind(card.rarity, shiny)} />
+      <CardSky {sky} />
     {/if}
     {#if shiny}<span class="wc-holo" class:onyx={onyx} aria-hidden="true"></span>{/if}
     {#if blurred}<span class="wc-nsfw" aria-hidden="true">Contenu sensible</span>{/if}
