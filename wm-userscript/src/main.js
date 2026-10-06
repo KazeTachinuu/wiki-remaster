@@ -1,7 +1,7 @@
 import { isOurs } from "./wm/routes.js";
 import { mount, unmount } from "svelte";
 import App from "./App.svelte";
-import appCss from "./app.css?inline";
+import appCss from "./styles/index.css?inline";
 import * as wm from "./wm/index.js";
 
 // One copy per page: the prod test injects a local build next to an installed one.

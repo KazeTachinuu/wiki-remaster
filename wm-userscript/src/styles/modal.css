@@ -1,0 +1,47 @@
+/* modal actions: auction, discard */
+.actions{display:flex;gap:var(--s2);margin-top:var(--s2)}
+.actions .btn{flex:1;padding-inline:var(--s3)}
+.btn.danger{border-color:#5a2b2b;color:#f0a0a0}
+.btn.danger:hover{border-color:#f26d6d;color:#f8caca}
+.af-input-row{position:relative;display:flex;align-items:center}
+.af-input{flex:1;background:var(--surface);border:1px solid var(--line2);border-radius:9px;padding:9px 40px 9px 12px;color:var(--fg);font-family:var(--body);font-size:14px;width:100%}
+.af-unit{position:absolute;right:12px;color:var(--fg-faint);font-size:13px;pointer-events:none}
+.af-input:focus{border-color:var(--accent)}
+.af-actions{display:flex;gap:8px;margin-top:4px}
+.af-actions .btn{flex:1;padding-inline:var(--s3)}
+.modal-msg{font-size:12.5px;color:#f0a0a0}
+.modal-msg.ok{color:var(--accent)}
+.confirm{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.confirm-text{font-size:14px;color:var(--fg);line-height:1.4}
+.confirm-text b{color:var(--r-l);font-weight:700}
+
+/* In-app sell form */
+.sell2{margin-top:var(--s2);background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:14px}
+.sell2-head{font-family:var(--display);font-weight:700;font-size:15px;color:var(--fg)}
+.sell2-block{display:flex;flex-direction:column;gap:8px}
+.sell2-lab{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--fg-soft);text-transform:uppercase}
+.sell2-suggest{background:color-mix(in oklab,var(--r-l) 15%,transparent);border:1px solid color-mix(in oklab,var(--r-l) 30%,transparent);color:var(--r-l);border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:600;cursor:pointer;text-transform:none;letter-spacing:0;transition:.12s}
+.sell2-suggest:hover{background:color-mix(in oklab,var(--r-l) 24%,transparent)}
+.sell2 .af-input{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.sell2-durs{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.sell2-dur{white-space:nowrap;background:var(--elev2);border:1px solid var(--line);color:var(--fg-soft);border-radius:9px;padding:9px 2px;font-size:12px;font-weight:600;cursor:pointer;transition:.12s;font-variant-numeric:tabular-nums}
+.sell2-dur:hover{color:var(--fg);border-color:var(--line2)}
+.sell2-dur.on{background:color-mix(in oklab,var(--accent) 16%,transparent);border-color:var(--accent);color:var(--accent)}
+
+/* modal tabs + market */
+.modal-tabs{display:inline-flex;gap:4px;background:var(--elev);border:1px solid var(--line);border-radius:10px;padding:3px;align-self:flex-start;margin-top:2px}
+.modal-tabs button{background:none;border:none;color:var(--fg-soft);font-family:var(--display);font-weight:600;font-size:13px;padding:6px 14px;border-radius:8px;cursor:pointer;transition:.15s}
+.modal-tabs button.on{background:var(--accent);color:var(--accent-ink)}
+.mc-plot{display:flex;gap:8px;align-items:stretch}
+.mc-y{display:flex;flex-direction:column;justify-content:space-between;text-align:right;min-width:30px;padding:2px 0;font-size:10px;color:var(--fg-faint);font-variant-numeric:tabular-nums}
+.mc-plot svg{flex:1;height:56px;display:block;background:var(--elev);border:1px solid var(--line);border-radius:10px}
+.mc-x{display:flex;justify-content:space-between;font-size:10px;color:var(--fg-faint);margin-top:4px;margin-left:38px}
+/* compact stat strip (replaces the big stat boxes) */
+.facts{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.fact{flex:1 1 112px;background:var(--elev);border:1px solid var(--line);border-radius:11px;padding:10px 13px}
+.fk{font-size:11px;color:var(--fg-faint)}
+.fv{font-family:var(--display);font-weight:700;font-size:18px;font-variant-numeric:tabular-nums;line-height:1.15;margin-top:3px}
+.fv.atk{color:#f26d6d}.fv.def{color:#5aa2ff}.fv.val{color:var(--r-l)}
+.modal-obtained{font-size:12px;color:var(--fg-faint);margin-top:calc(-1 * var(--s2))}
+/* keep modal scroll from chaining to the page */
+.modal-backdrop,.modal{overscroll-behavior:contain}

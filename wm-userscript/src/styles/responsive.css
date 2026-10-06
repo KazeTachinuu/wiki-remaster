@@ -1,0 +1,74 @@
+/* responsive */
+@media(prefers-reduced-motion:reduce){.flip-in,.stage-aura,.reveal-rarity,.rg-card,.booster-main,.booster-shine{animation:none}.booster,.wc{transition:none}}
+@media(max-width:900px){
+  :host, :root{--sidebar:100%;--tabbar:calc(64px + env(safe-area-inset-bottom))}
+  /* Phones and tablets, like an app: the screens in a tab bar at the bottom (thumb reach), the
+     current one's name and the wallet in a slim bar at the top, everything else in the menu sheet */
+  .app{grid-template-columns:1fr}
+  .side{position:fixed;inset:auto 0 0 0;height:auto;z-index:20;flex-direction:row;gap:0;
+    padding:6px max(6px,env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-right));
+    border-right:0;border-top:1px solid var(--line);background:color-mix(in oklab,var(--surface) 97%,transparent);}
+  .side .brand,.nav-sep,.nav-grid,.side-foot{display:none}
+  .nav{flex:1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;overflow:visible}
+  .nav button{flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden}
+  .nav button svg{width:22px;height:22px}
+  .nav button.on{background:none}
+  .nav-long{display:none}
+  .nav-short{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  .main{padding-bottom:var(--tabbar)}
+  .topbar{padding:calc(var(--s2) + env(safe-area-inset-top)) var(--s4) var(--s2);gap:var(--s3)}
+  .crumb{font-size:18px;font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* sound and ATK/DEF move to the menu sheet */
+  .wallet .stats-toggle,.wallet .snd{display:none}
+  .wallet .menu-btn{display:grid}
+  /* notifications: anchor the panel to the whole wallet row so it never leaves the screen */
+  .wallet{position:relative}
+  .notif{position:static}
+  .notif-panel{width:min(340px,calc(100vw - 2 * var(--s4)))}
+  /* the top bar names the screen: the page's own big title would only repeat it */
+  .coll-head h1,.page-head h1{display:none}
+  .coll-head .meta{margin-top:0}
+  /* filters in one line each: the search on its own row, the tools and the rarity chips under
+     it, scrolling sideways edge to edge rather than wrapping down the screen */
+  .coll-tools{flex:1 1 100%;min-width:0}
+  .coll-tools .search-wrap{flex:1 1 100%;min-width:0}
+  .tool-actions{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;width:100%;min-width:0}
+  /* the pager's buttons share the width */
+  .pager{gap:var(--s2)}
+  .pager-btn{flex:1 1 0;min-width:0;justify-content:center;padding-inline:var(--s3)}
+  .pager-info{flex:none}
+  .tool-actions > *{flex:1 0 auto;justify-content:center;padding-inline:10px}
+  .rarity-legend:not(.picker-chips){flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-inline:calc(-1 * var(--s4));padding-inline:var(--s4)}
+  .rarity-legend:not(.picker-chips) > *{flex:none}
+  /* what floats at the bottom sits above the tab bar */
+  .toasts{bottom:calc(var(--tabbar) + 12px)}
+  .bulk-bar{bottom:calc(var(--tabbar) + 12px)}
+}
+@media(max-width:560px){
+  .chip{padding:8px 12px}
+  .badge.pro{display:none}
+  .wallet{gap:6px}
+  .wallet .bell{width:34px;height:34px}
+  .chip-cap{display:none}
+}
+@media(max-width:400px){
+  .wallet{gap:4px}
+  .chip{padding:7px 10px;gap:6px}
+}
+@media(max-width:370px){
+}
+@media(max-width:340px){
+  /* the bar spans the screen less its gutters: the question on its own line, the buttons shared out under it */
+  .bulk-bar{left:var(--s4);right:var(--s4);transform:none;max-width:none;flex-wrap:wrap;justify-content:flex-end;gap:var(--s2) var(--s3);border-radius:var(--radius-lg);padding:var(--s3)}
+  .bulk-text{flex:1 1 auto;min-width:0;white-space:normal;padding-left:6px;line-height:1.35}
+  .bulk-bar:has(.btn + .btn) .bulk-text{flex-basis:100%}
+  .bulk-bar .btn{flex:1 1 0;padding-inline:var(--s3)}
+}
+@media(max-width:560px){
+  .modal{grid-template-columns:1fr;justify-items:center;gap:var(--s4);padding:var(--s5)}
+  .modal-card{width:190px;position:static}
+  .fact{flex-basis:40%}
+  /* two cards a row on every phone: readable at 360 px, roomy on a large phone (a third column
+     would squeeze each card's stats line) */
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
+}

@@ -1,0 +1,85 @@
+/* card detail modal */
+.modal-backdrop{position:fixed;inset:0;background:rgba(6,8,6,.84);z-index:2147483600;display:flex;align-items:flex-start;justify-content:center;padding:var(--s4) var(--s5);animation:fade .18s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+/* card : info = 1 : φ. The modal grows with the screen, so the card does too (240px at 740). */
+.modal{position:relative;background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);max-width:clamp(740px,46vw,960px);width:100%;max-height:calc(100dvh - 2 * var(--s4));overflow:auto;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.618fr);gap:var(--s6);padding:var(--s6);align-items:start}
+.modal-card{width:100%}
+.modal-close{position:absolute;top:12px;right:16px;background:none;border:none;color:var(--fg-soft);font-size:28px;line-height:1;cursor:pointer;z-index:2}
+.modal-close:hover{color:var(--fg)}
+.modal-info{display:flex;flex-direction:column;gap:var(--s4);justify-content:flex-start;min-width:0}
+.modal-rar{color:var(--rc);font-family:var(--display);font-weight:700;font-size:12px;letter-spacing:.04em}
+.modal-name{font-family:var(--display);font-weight:700;font-size:26px;line-height:1.15;letter-spacing:-.01em}
+.modal-cat{color:var(--fg-soft);font-size:14px;line-height:1.45}
+.modal-sum{color:var(--fg-soft);font-size:13.5px;line-height:1.55;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.modal-sum.muted{color:var(--fg-faint)}
+.modal .btn{text-decoration:none;text-align:center}
+.modal-panel{display:flex;flex-direction:column;align-items:stretch;gap:var(--s4)}
+/* the card stays in view while a long tab scrolls beside it */
+.modal-card{position:sticky;top:0;align-self:start}
+/* the market tab: one price summary, then plain lists under one heading style */
+.mk-h,.modal .cmp-head h3{font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);margin:0 0 var(--s2)}
+.mk-price{background:var(--elev);border:1px solid var(--line);border-radius:var(--radius);padding:var(--s4)}
+/* the decision row: market price, last sale, best buy; each a label, a number, what it means */
+.mk-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:var(--s2)}
+.mk-kpi{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;padding:var(--s3) var(--s3) 10px;border-radius:12px;background:var(--elev);border:1px solid var(--line);text-align:left;color:var(--fg);font:inherit}
+.mk-kpi .mk-h{margin:0}
+.mk-kpi b{font:700 24px/1.15 var(--display);font-variant-numeric:tabular-nums}
+.mk-kpi b.gold{color:var(--r-l)}
+.mk-kpi small{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--fg-faint);line-height:1.3}
+.mk-kpi small svg{width:12px;height:12px;flex:none}
+/* the best buy is a way in: it opens that listing; under the market price it reads as a deal */
+.mk-kpi.buy{cursor:pointer;transition:border-color .15s,background .15s}
+.mk-kpi.buy:hover{border-color:var(--line2);background:var(--elev2)}
+.mk-kpi.buy.good{border-color:color-mix(in oklab,var(--accent) 40%,var(--line));background:color-mix(in oklab,var(--accent) 7%,var(--elev))}
+.mk-kpi.buy.good small{color:var(--accent);font-weight:600}
+/* owners: the quick-sale price and the way to it */
+.mk-sell{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);flex-wrap:wrap;padding:10px 10px 10px var(--s4);border-radius:12px;border:1px dashed var(--line2);font-size:13px;color:var(--fg-soft)}
+.mk-sell b{color:var(--fg)}
+.mk-sell span{flex:1 1 200px}
+.mk-sell .btn{padding-block:8px;margin-left:auto}
+.mk-plot{position:relative;height:104px;margin-top:var(--s4)}
+.mk-plot svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+/* the average as a dashed rule across the plot */
+.mk-avgline{position:absolute;left:0;right:0;border-top:1px dashed color-mix(in oklab,var(--r-l) 55%,transparent);pointer-events:none}
+.mk-avgline span{position:absolute;left:0;bottom:3px;padding:0 4px;border-radius:4px;background:var(--elev);font-size:10px;font-weight:600;color:color-mix(in oklab,var(--r-l) 80%,transparent)}
+/* each sale: a full-height slice to hover or focus, its dot drawn at the price */
+.mk-slice{position:absolute;top:0;bottom:0;translate:-50% 0;padding:0;border:none;background:none;cursor:crosshair}
+.mk-slice::before{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:1px solid var(--line2);opacity:0;transition:opacity .12s}
+.mk-slice::after{content:"";position:absolute;left:50%;top:var(--y);width:7px;height:7px;translate:-50% -50%;border-radius:50%;background:var(--surface);border:2px solid var(--accent);transition:scale .12s}
+.mk-slice.on::before{opacity:1}
+.mk-slice.on::after{scale:1.4;background:var(--accent)}
+#wm-app-root .mk-slice:focus-visible{outline:none}
+#wm-app-root .mk-slice:focus-visible::after{box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 40%,transparent)}
+.mk-tip{position:absolute;translate:-50% calc(-100% - 12px);display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 10px;border-radius:9px;
+  background:var(--elev2);border:1px solid var(--line2);box-shadow:0 10px 24px -12px #000;font-size:11px;color:var(--fg-soft);white-space:nowrap;pointer-events:none;z-index:1}
+.mk-tip b{display:inline-flex;align-items:center;gap:5px;font:700 14px/1.2 var(--display);color:var(--r-l);font-variant-numeric:tabular-nums}
+.mk-tip.flip{translate:calc(-100% + 16px) calc(-100% - 12px)}
+.mk-tip.flop{translate:-16px calc(-100% - 12px)}
+/* the full sale list, folded under its count */
+.mk-history{border-top:1px solid var(--line);padding-top:var(--s3)}
+.mk-history summary{list-style:none;display:flex;align-items:center;gap:var(--s2);cursor:pointer;font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint)}
+.mk-history summary::-webkit-details-marker{display:none}
+.mk-history summary span{letter-spacing:0;text-transform:none;font-weight:500;color:var(--fg-faint)}
+.mk-history summary::after{content:"";width:6px;height:6px;margin-left:auto;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;rotate:45deg;translate:0 -2px;transition:rotate .15s}
+.mk-history[open] summary::after{rotate:225deg;translate:0 2px}
+.mk-history summary:hover{color:var(--fg-soft)}
+.mk-list{list-style:none;margin:var(--s3) 0 0;padding:0}
+.mk-list li{display:flex;justify-content:space-between;align-items:center;padding:7px 2px;font-size:13px;color:var(--fg-soft);font-variant-numeric:tabular-nums}
+.mk-list li + li{border-top:1px solid var(--line)}
+.mk-list b{display:inline-flex;align-items:center;gap:6px;color:var(--r-l)}
+.mk-x{display:flex;justify-content:space-between;font-size:11px;color:var(--fg-faint);margin-top:var(--s1)}
+/* live listings sit flat in the modal, like the sales above them, not a box in a box */
+.modal .cmp{background:none;border:none;padding:0}
+.modal .cmp-head{margin-bottom:var(--s2);flex-direction:column;align-items:flex-start;gap:2px}
+.modal .cmp-head h3{margin:0}
+/* in the card detail the listings are the main act: one line each, no scroll box inside the scrolling modal */
+.modal .cmp-list{max-height:none;overflow:visible}
+.modal .cmp-row{grid-template-columns:minmax(72px,auto) minmax(0,1fr) auto minmax(0,auto);row-gap:0}
+.modal .cmp-gap{text-align:left}
+.modal .cmp-time{flex-wrap:nowrap}
+.modal .cmp-tag{display:none}
+.modal .cmp .auc-empty{padding-top:0}
+.modal-wiki{color:var(--accent);font-weight:600;font-size:13.5px;text-decoration:none;align-self:flex-start}
+.modal-wiki:hover{text-decoration:underline}
+.actions{border-top:1px solid var(--line);padding-top:var(--s4)}
+.modal-credit{font-size:11px;color:var(--fg-faint)}

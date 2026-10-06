@@ -1,20 +1,20 @@
 <script>
   import { data, health } from "./wm/index.js";
   import { isOurs } from "./wm/routes.js";
-  import Icon from "./lib/Icon.svelte";
-  import Pulls from "./lib/Pulls.svelte";
-  import Collection from "./lib/Collection.svelte";
-  import Catalog from "./lib/Catalog.svelte";
-  import Marketplace from "./lib/Marketplace.svelte";
-  import Trades from "./lib/Trades.svelte";
-  import LoadBar from "./lib/LoadBar.svelte";
-  import SoundControl from "./lib/SoundControl.svelte";
-  import SoundSettings from "./lib/SoundSettings.svelte";
+  import Icon from "./components/Icon.svelte";
+  import Pulls from "./screens/pulls/Pulls.svelte";
+  import Collection from "./screens/collection/Collection.svelte";
+  import Catalog from "./screens/catalog/Catalog.svelte";
+  import Marketplace from "./screens/market/Marketplace.svelte";
+  import Trades from "./screens/trades/Trades.svelte";
+  import LoadBar from "./components/LoadBar.svelte";
+  import SoundControl from "./components/SoundControl.svelte";
+  import SoundSettings from "./components/SoundSettings.svelte";
   import { settings, toggleHideStats, useOriginalSite } from "./lib/settings.svelte.js";
-  import HumanCheck from "./lib/HumanCheck.svelte";
+  import HumanCheck from "./components/HumanCheck.svelte";
   import { ago, clock } from "./lib/format.js";
   import { packTimer } from "./lib/packTimer.svelte.js";
-  import { tabTicks } from "./lib/sfx.js";
+  import { tabTicks } from "./sound/sfx.js";
   import { scrollFade } from "./lib/scrollFade.js";
 
   // Rebuilt screens. Order matters for matching: "/global-collection" contains "collection".

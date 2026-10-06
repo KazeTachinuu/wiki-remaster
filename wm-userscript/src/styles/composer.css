@@ -1,0 +1,207 @@
+/* Trade composer: a near full-screen workspace. Left, one side's cards under one slim toolbar, the
+   grid scrolling on its own; right, the offer being built, always in view. A phone gets one
+   column and the offer as a bottom bar that opens into the full panel. */
+.modal.composer{text-align:left;max-width:min(2000px,96vw);height:94dvh;max-height:none;overflow:hidden;padding:0;gap:0;justify-items:stretch;align-items:stretch;
+  grid-template-columns:minmax(0,1fr) clamp(340px,26vw,440px);grid-template-rows:auto minmax(0,1fr);grid-template-areas:"pick head" "pick offer"}
+.modal.composer.pick-friend{max-width:560px;height:auto;max-height:calc(100dvh - 2 * var(--s4));overflow:auto;padding:var(--s6);gap:var(--s4);display:flex;flex-direction:column;align-items:stretch}
+.composer:not(.pick-friend) > .tm-head{grid-area:head;padding:var(--s4) var(--s7) var(--s3) var(--s4);border-left:1px solid var(--line);background:var(--elev)}
+.composer:not(.pick-friend) > .tm-head h2{font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.composer-sub{color:var(--fg-soft);font-size:14px;margin-top:calc(-1 * var(--s2))}
+.composer-pick{grid-area:pick;min-width:0;min-height:0;display:flex;flex-direction:column;padding:var(--s4) var(--s4) 0 var(--s5)}
+.composer-tab{flex:1;min-height:0;display:flex;flex-direction:column}
+.composer-tab[hidden]{display:none}
+.composer-tabs{flex:none;margin:0;align-self:center}
+.composer-tabs button{display:inline-flex;align-items:center;white-space:nowrap;padding:8px 14px}
+.composer-tabs button.on .tab-n{background:color-mix(in oklab,var(--accent-ink) 22%,transparent);color:var(--accent-ink)}
+
+/* the picker: one toolbar row, then the grid takes the rest */
+.picker{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--s3);container-type:inline-size}
+.picker > *{flex:none}
+.picker-bar{display:flex;align-items:center;gap:var(--s2);min-width:0}
+.picker-bar .search-wrap{flex:1 1 160px;min-width:140px;max-width:420px}
+.picker-bar .isel{flex:none;margin-left:auto}
+/* a box that hides part of its content (scrollFade): the hiding edges fade out */
+[data-fade-axis]{--fade-to:to right;--fade:40px}
+[data-fade-axis="y"]{--fade-to:to bottom;--fade:48px}
+[data-fade="end"]{mask-image:linear-gradient(var(--fade-to),#000 calc(100% - var(--fade)),transparent)}
+[data-fade="start"]{mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade))}
+[data-fade="both"]{mask-image:linear-gradient(var(--fade-to),transparent,#000 var(--fade),#000 calc(100% - var(--fade)),transparent)}
+/* rarity chips (scrollRow): inline with full names while they fit; else a row of their own under
+   the tabs, search and sort (.wrap); only if that row is still too short, codes instead of names
+   (.compact), shared out evenly so the row ends flush. An edge that still hides chips fades out,
+   so the row reads as scrollable, never as cut */
+.picker-chips{flex:0 1 auto;min-width:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;gap:6px;scroll-padding-inline:var(--s5)}
+.picker-chips::-webkit-scrollbar{display:none}
+.picker-chips .rl{flex:none;padding:8px 11px;white-space:nowrap}
+.rl-code,.picker-chips.compact .rl-full{display:none}
+.picker-chips.compact .rl-code{display:inline}
+.picker-bar:has(> .picker-chips.wrap){flex-wrap:wrap;row-gap:var(--s2)}
+.picker-chips.wrap{order:3;flex:1 1 100%}
+.picker-chips.wrap.compact{gap:4px}
+.picker-chips.wrap.compact .rl{flex:1 0 auto;justify-content:center;gap:5px;padding:8px 6px}
+/* a narrow picker: the sort leaves the first row (it would sit alone on a line of its own) and
+   ends the chips' row instead */
+@container (max-width:720px){
+  .picker-chips.wrap{flex:1 1 55%}
+  .picker-bar .isel{order:4}
+}
+.picker-scroll{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--line2) transparent;padding:6px 8px var(--s5) 4px;margin-left:-4px;display:flex;flex-direction:column;gap:var(--s4)}
+.picker-grid{grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:var(--s4)}
+.picker-grid .empty{grid-column:1/-1;min-height:260px}
+.picker-more{display:flex;flex-direction:column;align-items:center;gap:var(--s2)}
+/* picked: the check overlay, a light tint and the card's own rarity glow (the others stay lit: their values matter) */
+.picker .card-btn.picking .wc{opacity:1}
+.picker .pick-overlay.on{border-color:transparent;box-shadow:none;background:color-mix(in oklab,var(--accent) 10%,transparent)}
+.picker .card-btn.picked .wc{border-color:var(--rc);box-shadow:0 0 0 2px var(--rc),0 0 34px -4px color-mix(in oklab,var(--rc) 80%,transparent)}
+.card-btn:disabled{opacity:.35;cursor:not-allowed}
+.pick-lock{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);z-index:11;max-width:90%;padding:5px 10px;border-radius:999px;white-space:nowrap;
+  background:rgba(6,8,6,.85);color:var(--fg);font-size:11.5px;font-weight:600;text-align:center;line-height:1.25}
+
+/* the offer column: each side grows with its cards (scrolling, its hidden edge faded, only when both are long), the
+   balance right under them, the actions pinned at the bottom */
+.offer{grid-area:offer;min-height:0;min-width:0;display:flex;flex-direction:column;background:var(--elev);border-left:1px solid var(--line)}
+.offer-bar{display:none}
+.offer-panel{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--s3);padding:0 var(--s4) var(--s4)}
+.offer-title{display:none}
+.offer-sides{flex:0 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line2) transparent;
+  display:flex;flex-direction:column;gap:var(--s3);margin-right:calc(-1 * var(--s2));padding-right:var(--s2);scroll-padding-block:var(--fade,48px)}
+.oside{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3);border-radius:var(--radius);background:var(--surface);border:1px solid var(--line)}
+.oside-head{display:flex;justify-content:space-between;align-items:center;gap:var(--s2);min-width:0;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-soft);white-space:nowrap}
+.oside-head > span:first-child{display:inline-flex;align-items:center}
+.oside-total{text-transform:none;letter-spacing:0;color:var(--fg);font:700 15px/1 var(--display);font-variant-numeric:tabular-nums}
+.oside-list{list-style:none;margin:0 calc(-1 * var(--s1));padding:0;display:flex;flex-direction:column;gap:2px}
+.oside-row{display:grid;grid-template-columns:44px minmax(0,1fr) 28px;align-items:center;gap:10px;padding:5px var(--s1);border-radius:10px;transition:background .15s}
+.oside-row:hover{background:var(--elev2)}
+.oside-txt{min-width:0;display:flex;flex-direction:column;gap:3px;line-height:1.25}
+.oside-txt b{font-size:13.5px;font-weight:600;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.oside-sub{display:flex;align-items:center;gap:var(--s2);min-width:0}
+.oside-cat{min-width:0;font-size:11.5px;color:var(--fg-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oside-val{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:700;color:var(--r-l);font-variant-numeric:tabular-nums;white-space:nowrap}
+.oside-val::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--coin)}
+.oside-val.none{color:var(--fg-faint);font-weight:500}
+.oside-val.none::before{display:none}
+.oside-x{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border:0;border-radius:8px;background:none;color:var(--fg-faint);cursor:pointer;opacity:.7;transition:.15s}
+.oside-row:hover .oside-x,.oside-x:focus-visible{opacity:1}
+.oside-x:hover{background:var(--line);color:var(--fg)}
+.oside-x svg{width:13px;height:13px}
+.oside-hint{display:flex;align-items:center;min-height:40px;padding:0 var(--s3);border:1px dashed var(--line2);border-radius:10px;background:none;color:var(--fg-faint);font:inherit;font-size:13px;text-align:left;cursor:pointer;transition:.15s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oside-hint:hover{color:var(--accent);border-color:color-mix(in oklab,var(--accent) 50%,var(--line2))}
+.oside .coins-add{height:36px;font-size:13px;align-self:flex-start}
+.oside .coins-field{flex:none;align-self:stretch}
+/* a card in a list: a cropped square framed in its rarity colour, the code in a corner */
+.cthumb{position:relative;display:block;width:44px;height:44px;flex:none;border-radius:10px;overflow:hidden;background:var(--card-bg);
+  border:2px solid var(--rc);box-shadow:0 0 12px -4px color-mix(in oklab,var(--rc) 70%,transparent)}
+.cthumb img{width:100%;height:100%;object-fit:cover;object-position:50% 22%;display:block}
+.cthumb.art img{transform:scale(1.8)}
+.cthumb.art[data-r="C"] img,.cthumb.art[data-r="PC"] img{filter:brightness(.6) saturate(1.2)}
+.cthumb.shiny{box-shadow:inset 0 0 0 1px #e9c15a8c,0 0 10px #e9c15a66}
+.cthumb.shiny::after{content:"";position:absolute;inset:0;mix-blend-mode:screen;background:linear-gradient(135deg,transparent 30%,#fff8e055 50%,transparent 70%)}
+.cthumb-r{position:absolute;left:0;bottom:0;z-index:1;padding:2px 4px 1px 3px;border-top-right-radius:6px;background:var(--rc);color:var(--accent-ink);font:800 9px/1 var(--display);letter-spacing:.02em}
+/* the balance: a summary card under the lists, tinted by the verdict */
+.offer-sum{flex:none;display:flex;flex-direction:column;gap:var(--s2)}
+.offer .tm-verdict{align-self:stretch;flex-direction:row;flex-wrap:wrap;justify-content:center;gap:4px 10px;min-width:0;padding:14px var(--s3);border-radius:var(--radius);background:var(--surface);border:1px solid var(--line)}
+.offer .tm-verdict svg{width:18px;height:18px}
+.offer .tm-verdict b{font-size:15px}
+.offer .tm-verdict span{font:700 15px/1.2 var(--display);font-variant-numeric:tabular-nums}
+.offer .tm-verdict[data-k="advantage"]{background:color-mix(in oklab,var(--accent) 9%,var(--surface));border-color:color-mix(in oklab,var(--accent) 35%,var(--line))}
+.offer .tm-verdict[data-k="disadvantage"]{background:color-mix(in oklab,var(--bad) 8%,var(--surface));border-color:color-mix(in oklab,var(--bad) 32%,var(--line))}
+.offer-sum-empty{margin:0;padding:var(--s3);border-radius:var(--radius);border:1px dashed var(--line2);color:var(--fg-faint);font-size:12.5px;line-height:1.45;text-align:center}
+.offer-sum .modal-msg{text-align:center}
+.offer-actions{flex:none;display:flex;gap:var(--s2);margin-top:auto;padding-top:var(--s3);border-top:1px solid var(--line)}
+.offer-actions .btn{padding:12px 14px;font-size:14px}
+.offer-actions .btn.primary{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.coins-add{flex:none}
+.coins-add svg,.coins-ico{width:16px;height:16px;color:var(--r-l);flex:none}
+.coins-field{flex:0 0 200px}
+.coins-field .coins-ico{position:absolute;left:12px;pointer-events:none}
+.coins-field .af-input{height:42px;padding:0 64px 0 36px;font-variant-numeric:tabular-nums;font-weight:600;border-color:color-mix(in oklab,var(--r-l) 40%,var(--line2))}
+.coins-field .af-unit{right:40px}
+.af-input::-webkit-inner-spin-button,.af-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.af-input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.coins-x{position:absolute;right:8px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:0;border-radius:7px;background:transparent;color:var(--fg-faint);cursor:pointer}
+.coins-x:hover{background:var(--elev2);color:var(--fg)}
+.coins-x svg{width:13px;height:13px}
+/* a short window (a 720px laptop): the offer's rows, sides and balance tighten so both sides fit
+   without scrolling for a typical offer */
+@media (max-height:800px) and (min-width:901px){
+  .composer:not(.pick-friend) > .tm-head{padding-top:var(--s3);padding-bottom:var(--s2)}
+  .offer-panel{gap:var(--s2);padding-bottom:var(--s3)}
+  .offer-sides{gap:var(--s2)}
+  .oside{gap:6px;padding:10px var(--s3)}
+  .oside-list{gap:0}
+  .oside-row{grid-template-columns:36px minmax(0,1fr) 28px;padding:3px var(--s1)}
+  .oside .cthumb{width:36px;height:36px;border-radius:8px}
+  .oside-txt{gap:1px}
+  .oside-txt b{-webkit-line-clamp:1}
+  .oside .coins-add{height:32px}
+  .oside .coins-field .af-input{height:36px}
+  .oside-hint{min-height:34px}
+  .offer .tm-verdict{padding:9px var(--s3)}
+  .offer-actions{padding-top:var(--s2)}
+  .offer-actions .btn{padding:10px 14px}
+}
+.friend-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:var(--s3)}
+.friend-list .empty,.friend-list .loading-more{grid-column:1/-1;min-height:120px}
+.friend{display:flex;flex-direction:column;align-items:center;gap:var(--s2);padding:var(--s4) var(--s2);border-radius:var(--radius);border:1px solid var(--line);background:var(--elev);color:var(--fg);font:inherit;cursor:pointer;transition:border-color .15s,background .15s}
+.friend b{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:13.5px}
+.friend:hover{border-color:var(--accent);background:var(--elev2)}
+
+/* narrow: one column, the toolbar on two rows, the offer a bar that opens into a sheet */
+@media (max-width:900px){
+  /* the whole screen, whatever the backdrop's centring padding */
+  .modal.composer:not(.pick-friend){position:fixed;inset:0;max-width:none;width:auto;height:auto;border-radius:0;border:0;
+    grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;grid-template-areas:"head" "pick" "offer"}
+  .composer:not(.pick-friend) > .tm-head{border-left:0;background:none;padding:var(--s3) var(--s7) var(--s2) var(--s4)}
+  .composer:not(.pick-friend) > .modal-close{top:10px;right:10px}
+  .composer-pick{padding:0 var(--s3)}
+  .picker-bar{flex-wrap:wrap;row-gap:var(--s2)}
+  .composer-tabs{flex:1 1 100%;display:flex}
+  .composer-tabs button{flex:1;justify-content:center;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .picker-bar .search-wrap{flex:1 1 0;min-width:0}
+  .picker-chips{flex:1 1 100%;order:3}
+  .picker-bar .isel{order:0}
+  .picker-chips .rl-full{display:inline}.picker-chips .rl-code{display:none}
+  .picker-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--s3)}
+  .picker-scroll{padding-bottom:var(--s4)}
+  .offer{position:relative;border-left:0;border-top:1px solid var(--line2);background:var(--surface)}
+  .offer-bar{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3) calc(var(--s2) + env(safe-area-inset-bottom))}
+  .offer-bar .btn{padding:11px 18px;font-size:14px}
+  .offer-peek{flex:1;min-width:0;display:flex;align-items:center;gap:var(--s2);padding:6px 4px;background:none;border:0;color:var(--fg);font:inherit;text-align:left}
+  .offer-peek-txt{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+  .offer-peek-txt b{font:700 15px/1.25 var(--display);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .offer-peek-txt span{font-size:12.5px;color:var(--fg-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .offer-peek-txt span[data-k="advantage"]{color:var(--accent)}
+  .offer-peek-txt span[data-k="disadvantage"]{color:var(--bad)}
+  .offer-chev{width:18px;height:18px;flex:none;color:var(--fg-soft);transform:rotate(-90deg);transition:transform .2s}
+  .offer.open .offer-chev{transform:rotate(90deg)}
+  /* the sheet: rises from the bar over the grid */
+  .offer-panel{display:none;position:absolute;left:0;right:0;bottom:100%;max-height:calc(100dvh - 120px);padding:var(--s4);
+    background:var(--surface);border-top:1px solid var(--line2);border-radius:var(--radius-lg) var(--radius-lg) 0 0;box-shadow:0 -24px 48px -16px #000;animation:toast-in .18s ease}
+  .offer.open .offer-panel{display:flex}
+  .offer-title{display:block;font:700 16px/1.2 var(--display)}
+  .offer-sides{flex:0 1 auto}
+  /* the bar below already sends, and the cross closes */
+  .offer-panel .offer-actions{display:none}
+}
+@media (prefers-reduced-motion:reduce){.offer-panel{animation:none}.offer-chev{transition:none}}
+
+@keyframes fade-in{from{opacity:0}to{opacity:1}}
+
+/* phone sheets and headers: last in the file, so they win over the screens' own rules */
+/* Phones: a window is a full-screen sheet (not a floating box with margins), clear of the notch
+   and the home indicator; content takes the full width */
+@media(max-width:560px){
+  .modal-backdrop{padding:0 !important;align-items:stretch}
+  .modal:not(.composer),.auc{max-width:none;width:100%;height:100dvh;max-height:none;border-radius:0;border:0;
+    padding-top:calc(var(--s5) + env(safe-area-inset-top));padding-bottom:calc(var(--s6) + env(safe-area-inset-bottom))}
+  /* the close button stays in its corner while the sheet scrolls, readable over a card photo */
+  .modal:not(.composer) > .modal-close,.auc > .modal-close{position:fixed;top:calc(var(--s3) + env(safe-area-inset-top));right:var(--s3);
+    width:40px;height:40px;display:grid;place-items:center;border-radius:50%;background:color-mix(in oklab,var(--surface) 94%,transparent);border:1px solid var(--line2)}
+  .modal-info,.modal-panel{justify-self:stretch;width:100%}
+  .fact{flex:1 1 28%}
+  /* the page says what it is in the top bar: an intro line (and its empty title block) only costs height */
+  .meta.lead,.coll-head > div:has(> .meta.lead){display:none}
+  .lbl-long{display:none}
+}
+.lbl-short{display:none}
+@media(max-width:560px){.lbl-short{display:inline}}

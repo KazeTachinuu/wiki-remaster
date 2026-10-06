@@ -1,0 +1,176 @@
+/* trades: a list and a preview. Wide screens: the page stops scrolling, the list (tabs + rows) and
+   the selected trade each scroll on their own under the header. Narrow: the list alone, a row
+   opening the trade full screen. */
+.tab-n{display:inline-flex;min-width:18px;height:18px;padding:0 6px;margin-left:6px;border-radius:999px;align-items:center;justify-content:center;
+  font:700 11px/1 var(--display);background:color-mix(in oklab,var(--accent) 18%,transparent);color:var(--accent)}
+.nowrap{white-space:nowrap}
+.trade-status{display:inline-flex;align-items:center;font-size:11.5px;font-weight:700;line-height:1;padding:4px 9px;border-radius:999px;background:var(--elev2);color:var(--fg-soft);white-space:nowrap}
+.trade-status[data-s="pending"]{background:color-mix(in oklab,var(--r-l) 14%,transparent);color:var(--r-l)}
+.trade-status[data-s="accepted"]{background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--accent)}
+.trade-status[data-s="declined"]{background:color-mix(in oklab,var(--bad) 15%,transparent);color:var(--bad)}
+.trade-status[data-s="cancelled"]{color:var(--fg-faint)}
+.tr-head{margin-bottom:var(--s4);align-items:center}
+.tr-split{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
+.tr-col,.tr-pane{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);min-width:0}
+.tr-col{display:flex;flex-direction:column;overflow:hidden}
+.tr-tabs{flex:none;gap:0;margin:0;padding:0 var(--s2)}
+.tr-tabs button{flex:1;display:inline-flex;align-items:center;justify-content:center;padding:var(--s4) var(--s2) 14px}
+.tr-rows{display:flex;flex-direction:column;gap:2px;padding:var(--s2);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.tr-row{position:relative;display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:center;gap:var(--s3);width:100%;min-height:68px;padding:10px var(--s3);
+  border:1px solid transparent;border-radius:12px;background:none;color:var(--fg);font:inherit;text-align:left;cursor:pointer;transition:background .15s,border-color .15s}
+.tr-row:hover{background:var(--elev)}
+.tr-row.on{background:var(--elev2);border-color:var(--line2)}
+.tr-row.on::before{content:"";position:absolute;left:-1px;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.tr-row.sk{height:68px;cursor:default;background:linear-gradient(100deg,var(--surface) 30%,var(--elev) 50%,var(--surface) 70%);background-size:200% 100%;animation:sk 1.2s ease-in-out infinite}
+.tr-row-main{display:flex;flex-direction:column;gap:5px;min-width:0}
+.tr-row-top{display:flex;align-items:baseline;gap:var(--s2);min-width:0}
+/* the name wins the line: the time gives way first */
+.tr-row-top b{flex:0 1 auto;min-width:0;font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr-row-when{flex:0 1000 auto;min-width:0;margin-left:auto;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--fg-faint)}
+.tr-row-line{min-width:0;font-size:13px;line-height:1.35;color:var(--fg-soft);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.tr-col-none{display:none;padding:var(--s5) var(--s4);text-align:center;color:var(--fg-faint);font-size:13.5px}
+/* the balance from my side: the signed gap, tinted */
+.tr-badge{min-width:46px;padding:6px 9px;border-radius:9px;text-align:center;font:700 13px/1 var(--display);font-variant-numeric:tabular-nums;white-space:nowrap;
+  background:var(--elev2);color:var(--fg-soft)}
+.tr-row.on .tr-badge[data-k="balanced"],.tr-row.on .tr-badge[data-k="unknown"]{background:var(--line)}
+.tr-badge[data-k="advantage"]{background:color-mix(in oklab,var(--accent) 15%,transparent);color:var(--accent)}
+.tr-badge[data-k="disadvantage"]{background:color-mix(in oklab,var(--bad) 15%,transparent);color:var(--bad)}
+.tr-badge[data-k="unknown"]{color:var(--fg-faint)}
+.tr-row > .trade-status{padding:6px 9px}
+/* empty tab: what will show here, and the way to start */
+.tr-empty{flex:1;min-height:340px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);padding:var(--s6) var(--s5);text-align:center;color:var(--fg-soft);font-size:14px}
+.tr-empty b{font:700 19px/1.3 var(--display);color:var(--fg)}
+.tr-empty .btn{margin-top:var(--s3)}
+.tr-empty-ico{width:64px;height:64px;margin-bottom:var(--s2);display:flex;align-items:center;justify-content:center;border-radius:50%;color:var(--accent);
+  background:color-mix(in oklab,var(--accent) 10%,var(--elev));border:1px solid color-mix(in oklab,var(--accent) 28%,var(--line))}
+.tr-empty-ico svg{width:28px;height:28px}
+/* the pane lays itself out from its own width (container queries below), split or full screen */
+.tr-pane{display:flex;flex-direction:column;overflow:hidden;container:tpane/inline-size}
+.tr-pane-sk{padding:var(--s5);display:flex;flex-direction:column;gap:var(--s5)}
+.tr-pane-sk .sk-line{height:44px;width:min(320px,70%);border-radius:12px;background:var(--elev);animation:sk 1.2s ease-in-out infinite}
+.tr-pane-sk .sk-cards{display:grid;grid-template-columns:repeat(2,minmax(0,220px));justify-content:center;gap:var(--s7)}
+.tr-pane-sk .wc{aspect-ratio:5/7}
+
+/* the trade pane: header, the body scrolling between, the actions pinned at the bottom */
+.tp{flex:1;min-height:0;display:flex;flex-direction:column}
+.tp-head{flex:none;display:flex;align-items:center;gap:var(--s3);padding:var(--s4) var(--s5);border-bottom:1px solid var(--line)}
+.tp-back{width:42px;padding:0;justify-content:center;flex:none}
+.tp-title{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.tp-title h2{font:700 20px/1.2 var(--display);letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-sub{display:flex;align-items:center;flex-wrap:wrap;gap:4px var(--s2);font-size:12.5px;color:var(--fg-faint)}
+.tp-mode{flex:none;align-self:center;margin:0}
+.tp-mode button{display:inline-flex;align-items:center;gap:7px}
+.tp-mode svg{width:15px;height:15px}
+.tp-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line2) transparent;
+  padding:clamp(var(--s3),2.5cqi,var(--s5));display:flex;flex-direction:column;gap:var(--deal-bodyGap)}
+/* the deal (and its history) centred in the free height; auto margins fall to 0 once it overflows */
+.tp-body > :first-child{margin-top:auto}
+.tp-body > :last-child{margin-bottom:auto}
+/* the sizes come from the pane (dealLayout): every card of the trade at --card-w, each side as
+   wide as its columns, the verdict between facing sides or as a strip between stacked ones */
+.tp-sides{display:flex;justify-content:center;align-items:stretch;gap:var(--deal-gap)}
+.tp-sides.measuring{visibility:hidden}
+.tp-sides.stacked{flex-direction:column}
+.tside{flex:none;display:flex;flex-direction:column;gap:var(--s3);min-width:0;padding:calc(var(--deal-pad) - 1px);border-radius:var(--radius);background:var(--elev);border:1px solid var(--line)}
+.tside-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px var(--s2);white-space:nowrap;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-soft)}
+.tside-total{text-transform:none;letter-spacing:0;color:var(--fg);font:700 16px/1 var(--display);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tside-total.is-none{font:500 13px var(--body);color:var(--fg-faint)}
+.tside-none{color:var(--fg-faint);font-size:13px;padding:var(--s3) 0;width:var(--card-w)}
+.tside-cards{display:flex;flex-wrap:wrap;align-content:flex-start;gap:var(--deal-gap);margin-inline:auto;
+  width:calc(var(--cols,1) * var(--card-w) + (var(--cols,1) - 1) * var(--deal-gap))}
+.tside-cards > *{flex:none;width:var(--card-w)}
+/* in a side taller than its content, the cards (and chip) sit in the middle, the header on top */
+.tside > :nth-child(2){margin-top:auto}
+.tside > :last-child{margin-bottom:auto}
+.stacked .tside-none{width:auto}
+/* facing sides as wide as their cards: a longer header wraps (dealLayout counts it) instead of
+   widening the side past the pane */
+.tp-sides:not(.stacked) .tside{width:min-content}
+/* a deal taller than the pane reads from the top: each side as tall as its cards, the verdict
+   held in view beside them while the pane scrolls */
+.tp-sides.scrolls:not(.stacked){align-items:flex-start}
+.tp-sides.scrolls .tside > *{margin-block:0}
+.tp-sides.scrolls:not(.stacked) .tm-verdict{align-self:flex-start;position:sticky;top:var(--s4);margin-top:calc(var(--card-w) * .5)}
+.tside-coins{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;aspect-ratio:5/7;border-radius:var(--radius-lg);
+  border:1px dashed color-mix(in oklab,var(--r-l) 45%,var(--line2));background:color-mix(in oklab,var(--r-l) 8%,var(--surface));color:var(--r-l)}
+.tside-coins svg{width:26px;height:26px;flex:none}
+/* coins next to cards: one line under them, as tall as dealLayout's chip */
+.tside-chip{flex:none;height:calc(var(--deal-chip) - var(--s3));display:flex;align-items:center;justify-content:center;gap:var(--s2);padding:0 var(--s3);
+  border-radius:999px;border:1px dashed color-mix(in oklab,var(--r-l) 45%,var(--line2));background:color-mix(in oklab,var(--r-l) 8%,var(--surface));
+  color:var(--fg-soft);font-size:13px;white-space:nowrap}
+.tside-chip svg{width:16px;height:16px;flex:none;color:var(--r-l)}
+.tside-chip b{font:700 15px/1 var(--display);color:var(--r-l);font-variant-numeric:tabular-nums}
+.tside-coins b{font:800 26px/1 var(--display);font-variant-numeric:tabular-nums}
+.tside-coins span{font-size:12px;color:var(--fg-soft)}
+.tm-verdict{align-self:center;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;color:var(--fg-soft);min-width:120px}
+.tm-verdict svg{width:22px;height:22px}
+.tm-verdict b{font:700 14px/1.2 var(--display);color:var(--fg)}
+.tm-verdict span{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tm-verdict[data-k="advantage"] b,.tm-verdict[data-k="advantage"] span{color:var(--accent)}
+.tm-verdict[data-k="disadvantage"] b,.tm-verdict[data-k="disadvantage"] span{color:var(--bad)}
+/* in the pane: a medallion between facing sides, a strip between stacked ones */
+.tp .tm-verdict{flex:none;width:var(--deal-verdictW);min-width:0}
+.tp .tm-verdict svg{box-sizing:content-box;padding:12px;border-radius:50%;background:var(--elev2);border:1px solid var(--line2)}
+.tp .tm-verdict[data-k="advantage"] svg{background:color-mix(in oklab,var(--accent) 14%,var(--elev));border-color:color-mix(in oklab,var(--accent) 40%,var(--line))}
+.tp .tm-verdict[data-k="disadvantage"] svg{background:color-mix(in oklab,var(--bad) 13%,var(--elev));border-color:color-mix(in oklab,var(--bad) 38%,var(--line))}
+.tp .tm-verdict b{font-size:13px}
+.tp .tm-verdict span{font:700 15px/1.2 var(--display)}
+.tp .stacked .tm-verdict{width:auto;min-height:var(--deal-verdictH);flex-direction:row;justify-content:center;flex-wrap:wrap;gap:var(--s2) var(--s3)}
+.tp .stacked .tm-verdict svg{padding:8px;transform:rotate(90deg)}
+.tp-chain{width:100%;max-width:720px;margin-inline:auto}
+.tp-chain h3{font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-soft);margin-bottom:var(--s2)}
+/* a negotiation as a timeline: a dot per step on one rail, the last step (where it stands) in colour */
+.tp-chain ol{--dot:9px;list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.tp-chain li{position:relative;display:flex;align-items:center;gap:var(--s3);min-height:34px;padding-left:calc(var(--dot) + var(--s3));font-size:13.5px;color:var(--fg-soft)}
+.tp-chain li::before{content:"";position:absolute;left:0;top:50%;width:var(--dot);height:var(--dot);margin-top:calc(var(--dot) / -2);border-radius:50%;background:var(--line2);z-index:1}
+/* the rail: each step draws its own stretch, so steps of any height join up, from the first dot to the last */
+.tp-chain li::after{content:"";position:absolute;left:calc(var(--dot) / 2 - 1px);top:0;bottom:0;width:2px;background:var(--line)}
+.tp-chain li:first-child::after{top:50%}
+.tp-chain li:last-child::after{bottom:50%}
+.tp-chain li:only-child::after{display:none}
+.tp-chain li.now{color:var(--fg)}
+.tp-chain li.now::before{background:var(--fg-soft)}
+.tp-chain li[data-k="accepted"]::before{background:var(--accent)}
+.tp-chain li[data-k="accepted"] b{color:var(--accent)}
+.tp-chain li[data-k="declined"]::before{background:var(--bad)}
+.tp-chain li[data-k="declined"] b{color:var(--bad)}
+.tp-chain li[data-k="pending"]::before{background:var(--r-l)}
+/* an offer step is a button: its deal under the line, its cards above once picked */
+.tp-step{display:flex;align-items:center;gap:var(--s3);flex:1;min-width:0;padding:6px var(--s2);margin-inline-start:calc(-1 * var(--s2));border:0;border-radius:calc(var(--radius) / 1.618);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.tp-step:hover{background:var(--elev)}
+.tp-step.on{background:var(--elev);color:var(--fg)}
+.tp-step-deal{display:block;font-size:12.5px;color:var(--fg-faint)}
+.tp-earlier{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s2) var(--s3);width:100%;max-width:720px;margin-inline:auto;padding:6px 6px 6px var(--s4);border-radius:var(--radius);background:color-mix(in oklab,var(--r-l) 10%,var(--surface));border:1px solid color-mix(in oklab,var(--r-l) 30%,var(--line));font-size:13.5px;color:var(--fg-soft)}
+.tp-earlier b{color:var(--fg)}
+.tp-earlier .btn{padding:5px 12px;font-size:12.5px}
+.tr-row-rounds{color:var(--fg-faint);white-space:nowrap;margin-left:.35em}
+.tp-chain-what{flex:1;min-width:0}
+.tp-chain li > .tp-chain-when{padding-right:var(--s2)}
+.tp-chain-when{font-size:12.5px;color:var(--fg-faint);font-variant-numeric:tabular-nums}
+.tp-foot{flex:none;display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:var(--s3);padding:var(--s3) var(--s5);border-top:1px solid var(--line);background:var(--elev)}
+.tp-actions{display:flex;gap:var(--s2);margin-left:auto}
+.tp-actions .btn{padding:11px 22px}
+.tp-msg{flex:1 1 220px}
+.tp-confirm{flex:1;display:flex;align-items:center;flex-wrap:wrap;gap:var(--s3)}
+.tp-confirm .confirm-text{flex:1 1 300px;margin:0}
+
+/* the conversation, in the pane */
+.chat{flex:1;min-height:0;display:flex;flex-direction:column}
+.chat-feed{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:var(--s4) var(--s5);display:flex;flex-direction:column;gap:var(--s2);scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.chat-feed .empty{min-height:0;flex:1}
+.chat-feed .empty span{font-size:13.5px}
+.chat-feed .loading-more{margin:auto}
+.bubble{max-width:min(80%,520px);align-self:flex-start;display:flex;flex-direction:column;gap:2px;padding:9px 12px;border-radius:14px 14px 14px 4px;background:var(--elev2);font-size:13.5px;line-height:1.4;overflow-wrap:anywhere}
+.bubble.mine{align-self:flex-end;border-radius:14px 14px 4px 14px;background:color-mix(in oklab,var(--accent) 18%,var(--elev2))}
+.bubble time{font-size:10.5px;color:var(--fg-faint);align-self:flex-end}
+.chat-trade{align-self:center;display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;border:1px solid var(--line2);background:var(--elev);color:var(--fg-soft);font:inherit;font-size:12.5px;cursor:pointer}
+.chat-trade:hover{color:var(--fg);border-color:var(--fg-soft)}
+.chat-trade svg{width:14px;height:14px}
+.chat-form{flex:none;display:flex;gap:var(--s2);padding:var(--s3) var(--s5);border-top:1px solid var(--line);background:var(--elev)}
+.chat-input{padding-left:14px}
+.chat-form .btn{padding:10px 20px}
+.chat-msg{padding:0 var(--s5) var(--s3);background:var(--elev)}
+
+/* the composer's header (its own layout below) */
+.tm-head{display:flex;align-items:center;gap:var(--s3);padding-right:var(--s6)}
+.tm-head h2{font:700 20px/1.2 var(--display)}

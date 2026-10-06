@@ -1,0 +1,56 @@
+/* ---------------- auction modal ---------------- */
+.auc{position:relative;width:min(900px,94vw);max-height:calc(100dvh - 2 * var(--s4));overflow:auto;background:var(--surface);border:1px solid var(--line2);
+  border-radius:var(--radius-lg);box-shadow:0 40px 90px -30px #000;padding:var(--s6);display:flex;flex-direction:column;gap:var(--s5)}
+.auc-top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.618fr);gap:var(--s6);align-items:start}
+.auc-card .wc{border-radius:14px}
+.auc-body{display:flex;flex-direction:column;gap:var(--s4);min-width:0}
+.auc-name{font-family:var(--display);font-weight:700;font-size:clamp(22px,2.6vw,30px);letter-spacing:-.02em;line-height:1.1;margin-top:6px}
+.auc-cat{color:var(--fg-soft);font-size:14px;margin-top:4px}
+.auc-by{color:var(--fg-faint);font-size:12.5px;margin-top:6px}
+.auc-state{background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:6px}
+.auc-state[data-phase="sold"]{border-color:color-mix(in oklab,var(--accent) 40%,var(--line));background:color-mix(in oklab,var(--accent) 6%,var(--elev))}
+.auc-row{display:flex;justify-content:space-between;gap:var(--s4);flex-wrap:wrap}
+.auc-k{font-size:12px;color:var(--fg-soft);letter-spacing:.02em}
+.auc-price{display:inline-flex;align-items:center;gap:9px;font-family:var(--display);font-weight:800;font-size:34px;line-height:1.1;color:var(--r-l);font-variant-numeric:tabular-nums}
+.auc-price.muted{color:var(--fg-soft)}
+.auc-price .auc-coin{width:17px;height:17px}
+.auc-clock{text-align:right}
+.auc-time{font-family:var(--display);font-weight:800;font-size:26px;line-height:1.2;font-variant-numeric:tabular-nums}
+.auc-clock[data-u="warn"] .auc-time{color:var(--r-ur)}
+.auc-clock[data-u="crit"] .auc-time{color:var(--bad);animation:auc-pulse 1s ease-in-out infinite}
+.auc-clock[data-u="end"] .auc-time{color:var(--fg-faint)}
+.auc-sub{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:var(--fg-faint);font-size:12.5px}
+.auc-live{display:inline-flex;align-items:center;gap:6px;color:var(--accent)}
+.auc-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:auc-live 1.8s ease-out infinite}
+.auc-flag{border-radius:10px;padding:8px 12px;font-weight:600;font-size:13px}
+.auc-flag.lead{background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--accent)}
+.auc-flag.out{background:color-mix(in oklab,var(--bad) 14%,transparent);color:var(--bad)}
+.auc-act{display:flex;flex-direction:column;gap:10px}
+.auc-inline{display:flex;gap:8px}
+.auc-inline .af-input-row{flex:1}
+.auc-inline .btn{padding:10px 22px}
+.auc-cta{width:100%;padding:12px}
+.auc-quick{display:flex;gap:6px;flex-wrap:wrap}
+.auc-quick button{background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;cursor:pointer;transition:.12s}
+.auc-quick button:hover{color:var(--fg);border-color:var(--line2)}
+.auc-bal{font-size:12px;color:var(--fg-faint)}
+.auc-bal.low{color:var(--bad)}
+.auc-note{color:var(--fg-soft);font-size:13px}
+.auc-bottom{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
+.auc-panel{background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:14px 16px;min-width:0}
+.auc-panel h3{font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);margin-bottom:var(--s2)}
+.auc-chart{position:relative;height:130px;margin-left:36px}
+.auc-chart svg{width:100%;height:100%;display:block;overflow:visible}
+.auc-chart .mc-y{position:absolute;left:-36px;top:0;bottom:0}
+.auc-pt{position:absolute;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--elev)}
+.auc-axis{display:flex;justify-content:space-between;margin:8px 0 0 36px;font-size:11px;color:var(--fg-faint)}
+.auc-empty{color:var(--fg-faint);font-size:13px;padding:2px 0 4px}
+.auc-feed{list-style:none;margin:0;padding:0;max-height:176px;overflow:auto}
+.auc-feed li{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:13px}
+.auc-feed li:first-child{border-top:0}
+.auc-feed .who{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.auc-feed .me .who{color:var(--accent)}
+.auc-feed .tag{font-size:10.5px;font-weight:700;letter-spacing:.03em;color:var(--accent-ink);background:var(--accent);border-radius:999px;padding:2px 7px}
+.auc-feed .amt{color:var(--r-l);font-weight:700;font-variant-numeric:tabular-nums}
+.auc-feed li:not(.top) .amt{color:color-mix(in oklab,var(--r-l) 70%,var(--fg-soft))}
+.auc-feed .when{color:var(--fg-faint);font-size:11.5px;min-width:74px;text-align:right}

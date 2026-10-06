@@ -1,0 +1,89 @@
+/* collection */
+.coll-head{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:var(--s4);margin-bottom:var(--s5)}
+.coll-head h1{font-family:var(--display);font-size:clamp(24px,2.6vw,32px);font-weight:700;letter-spacing:-.02em}
+.coll-head .meta{color:var(--fg-soft);font-size:14px;margin-top:6px}
+
+/* player avatar: their image, else their initial on a colour derived from the name */
+.avatar{width:var(--s);height:var(--s);flex:none;border-radius:50%;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;
+  background:hsl(var(--h) 35% 26%);color:hsl(var(--h) 70% 85%);font:700 calc(var(--s) * .42)/1 var(--display)}
+.avatar img{width:100%;height:100%;object-fit:cover}
+/* collection toolbar: search (primary) on the left, view controls grouped on the right */
+.coll-tools{display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap;flex:1 1 460px;justify-content:flex-end}
+.search-wrap{position:relative;flex:1 1 300px;min-width:220px;display:flex;align-items:center}
+.search-ico{position:absolute;left:14px;width:17px;height:17px;color:var(--fg-faint);pointer-events:none}
+.search{width:100%;background:var(--elev);border:1px solid var(--line);border-radius:11px;padding:11px 38px 11px 40px;color:var(--fg);font-family:var(--body);font-size:14px}
+.search::placeholder,.af-input::placeholder{color:var(--fg-faint)}
+.search:focus{border-color:var(--fg-soft);background:var(--elev2)}
+.search::-webkit-search-cancel-button{display:none}
+.search-clear{position:absolute;right:8px;width:24px;height:24px;border:none;border-radius:7px;background:transparent;color:var(--fg-faint);font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center}
+.search-clear:hover{background:var(--elev2);color:var(--fg)}
+.tool-actions{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap}
+/* sort: a select fronted by an icon, styled as one control */
+.isel{position:relative;display:inline-flex;align-items:center;gap:8px;background:var(--elev);border:1px solid var(--line);border-radius:11px;padding:0 12px 0 12px;height:42px;transition:.15s}
+.isel:hover,.isel:focus-within{border-color:var(--line2)}
+.isel svg{width:16px;height:16px;color:var(--fg-soft);flex:none}
+.isel select{appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--fg);font-family:var(--body);font-size:14px;font-weight:500;padding:0 18px 0 0;height:100%;cursor:pointer;outline:none}
+#wm-app-root option{background:var(--elev);color:var(--fg)}
+/* customizable select (Chromium 135+): the open list in the app's style, the native one elsewhere */
+@supports (appearance:base-select){
+  #wm-app-root select,#wm-app-root ::picker(select){appearance:base-select}
+  #wm-app-root select{display:inline-flex;align-items:center}
+  #wm-app-root select::picker-icon{display:none} /* .isel draws its own chevron */
+  #wm-app-root ::picker(select){background:var(--elev);border:1px solid var(--line2);border-radius:12px;padding:4px;margin-block:6px;
+    box-shadow:0 18px 40px -16px #000;min-width:anchor-size(width);
+    opacity:0;translate:0 -4px;transition:opacity .15s ease,translate .15s ease,overlay .15s allow-discrete,display .15s allow-discrete}
+  #wm-app-root select:open::picker(select){opacity:1;translate:0 0}
+  @starting-style{#wm-app-root select:open::picker(select){opacity:0;translate:0 -4px}}
+  #wm-app-root option{background:none;color:var(--fg-soft);font:500 14px/1.2 var(--body);padding:9px 12px;border-radius:8px;cursor:pointer;transition:background .12s,color .12s}
+  #wm-app-root option::checkmark{display:none}
+  #wm-app-root option:hover,#wm-app-root option:focus-visible{background:var(--elev2);color:var(--fg);outline:none}
+  #wm-app-root option:checked{color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,transparent)}
+}
+.isel::after{content:"";position:absolute;right:12px;width:8px;height:8px;border-right:2px solid var(--fg-soft);border-bottom:2px solid var(--fg-soft);transform:rotate(45deg) translateY(-2px);pointer-events:none}
+.iconbtn{display:inline-flex;align-items:center;gap:8px;background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);height:42px;padding:0 14px;border-radius:11px;font-family:var(--body);font-size:14px;font-weight:500;white-space:nowrap;transition:.15s}
+.iconbtn svg{width:17px;height:17px;flex:none}
+.iconbtn:hover{color:var(--fg);border-color:var(--line2)}
+.iconbtn.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}
+.sort-hint{margin:-8px 0 var(--s4);font-size:12.5px;color:var(--fg-soft)}
+
+/* rarity composition: distinct proportional bars (a distribution, not a progress bar) + filter chips */
+.rarity-panel{display:flex;flex-direction:column;gap:var(--s3);margin-bottom:var(--s6)}
+.rarity-meter{display:flex;gap:5px;height:9px}
+.rm-seg{height:100%;min-width:14px;border:none;padding:0;background:var(--rc);border-radius:999px;cursor:pointer;
+  transition:flex-grow .45s cubic-bezier(.2,.7,.3,1),opacity .2s,filter .2s,transform .15s}
+.rm-seg:hover{filter:brightness(1.18)}
+.rm-seg.sel{filter:brightness(1.2);transform:scaleY(1.5)}
+.rm-seg.dim{opacity:.28}
+.rarity-legend{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center}
+.rl{display:inline-flex;align-items:center;gap:8px;background:var(--elev);border:1px solid var(--line);
+  color:var(--fg-soft);padding:7px 13px;border-radius:999px;font-size:13px;font-weight:500;transition:.15s}
+.rl:hover{color:var(--fg);border-color:var(--line2)}
+.rl.on{color:var(--fg);border-color:var(--fg-soft);background:var(--elev2)}
+.rl-dot{width:9px;height:9px;border-radius:3px;flex:none}
+.rl-n{color:var(--fg);font-weight:700;font-variant-numeric:tabular-nums}
+.rl-sep{width:1px;height:22px;background:var(--line2);margin:0 4px}
+.rl-ico{width:14px;height:14px;flex:none}
+.rl.fav.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}
+.rl.fav.on .rl-ico{fill:var(--r-l);stroke:var(--r-l)}
+.rl.shiny.on{color:var(--r-l);border-color:color-mix(in oklab,var(--r-l) 55%,var(--line2));background:color-mix(in oklab,var(--r-l) 10%,var(--elev))}
+.card-btn{position:relative;display:block;width:100%;padding:0;margin:0;border:none;background:none;text-align:left;cursor:pointer;content-visibility:auto;contain-intrinsic-size:auto 300px;
+  /* content-visibility clips paint to the box: leave room for the hover lift and its shadow */
+  overflow-clip-margin:40px}
+.card-btn.picking .wc{opacity:.55;transition:opacity .15s}
+.card-btn.picked .wc{opacity:1}
+.pick-overlay{position:absolute;inset:0;z-index:10;border-radius:var(--radius-lg);border:3px solid transparent;display:flex;align-items:flex-start;justify-content:flex-end;padding:9px;pointer-events:none;transition:.15s}
+.pick-overlay .pick-check{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.9);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;}
+.pick-overlay.on{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 22%,transparent);box-shadow:0 0 0 2px var(--accent) inset}
+.pick-check svg{width:16px;height:16px}
+.pick-overlay.on .pick-check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.loading-more{color:var(--fg-faint);font-size:13px;padding:var(--s3) 0;text-align:center}
+.bulk-bar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:40;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 2 * var(--s4));background:var(--elev2);border:1px solid var(--line2);border-radius:999px;padding:8px 10px 8px 18px;box-shadow:0 18px 44px -18px #000}
+.bulk-text{font-size:13.5px;color:var(--fg);white-space:nowrap}
+.bulk-text b{color:var(--r-l)}
+.bulk-bar .btn{padding:9px 18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:var(--s5)}
+.empty{min-height:44vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s3);color:var(--fg-soft);text-align:center}
+.empty b{font-family:var(--display);color:var(--fg);font-size:19px}
+.loading{color:var(--fg-faint);padding:var(--s7);text-align:center}
+.wc.skeleton{background:linear-gradient(100deg,#141613 30%,#1c201c 50%,#141613 70%);background-size:200% 100%;animation:sk 1.2s ease-in-out infinite;border:1px solid var(--line)}
+@keyframes sk{to{background-position:-200% 0}}

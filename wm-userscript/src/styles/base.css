@@ -1,0 +1,31 @@
+/* WikiMasters app. Flat, elegant, modern. Airy spacing on an 8px rhythm. */
+/* Mounted in a shadow root, so tokens live on :host (and :root for the dev fallback). */
+:host, :root {
+  --bg:#0C0D0C; --surface:#141613; --elev:#191C18; --elev2:#20241F;
+  --line:#262A26; --line2:#333833;
+  --fg:#ECEEE9; --fg-soft:#98A29A; --fg-faint:#7d857c;
+  --accent:#3CCB8E; --accent-ink:#07130E;
+  --bad:#f6867a; /* negative: a losing deal, time running out, a low balance */
+  --r-c:#7fd8b4; --r-pc:#7fb0e6; --r-r:#b18fe0; --r-sr:#e46f9f; --r-ur:#f0912f; --r-l:#e8c93a;
+  --card-bg:#0f110e; /* behind card art while it loads */
+  --coin:radial-gradient(circle at 35% 30%,#ffe680,var(--r-l)); /* the gold dot before a value */
+  --display:"Outfit",system-ui,sans-serif; --body:"Inter",system-ui,sans-serif;
+  /* spacing scale (8px rhythm) */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px;
+  --radius:14px; --radius-lg:18px;
+  --sidebar:268px;
+}
+:where(#wm-app-root, #wm-app-root *){box-sizing:border-box;margin:0;padding:0}
+/* Any element tagged with a rarity gets its colour as --rc. */
+[data-r="C"]{--rc:var(--r-c)}[data-r="PC"]{--rc:var(--r-pc)}[data-r="R"]{--rc:var(--r-r)}
+[data-r="SR"]{--rc:var(--r-sr)}[data-r="UR"]{--rc:var(--r-ur)}[data-r="L"]{--rc:var(--r-l)}
+#wm-app-root{color-scheme:dark;scrollbar-color:var(--line2) transparent;caret-color:var(--accent);font-family:var(--body);color:var(--fg);-webkit-font-smoothing:antialiased;line-height:1.5}
+#wm-app-root button{font-family:inherit;cursor:pointer}
+#wm-app-root ::selection{background:color-mix(in oklab,var(--accent) 32%,transparent);color:var(--fg)}
+#wm-app-root img{display:block}
+#wm-app-root a{color:inherit;text-decoration:none}
+#wm-app-root :is(a,button,input,select,textarea,[tabindex]:not([tabindex="-1"])):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#wm-app-root .modal:focus,#wm-app-root .modal:focus-visible{outline:none}
+.card-btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--radius)}
+
+.app{display:grid;grid-template-columns:var(--sidebar) 1fr;min-height:100vh;background:var(--bg)}

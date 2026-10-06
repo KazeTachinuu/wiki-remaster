@@ -1,0 +1,86 @@
+/* card: full-bleed portrait with overlaid caption */
+.wc{position:relative;aspect-ratio:5/7;container-type:inline-size;border-radius:var(--radius-lg);overflow:hidden;background:var(--card-bg);border:3.5px solid color-mix(in oklab,var(--rc) 65%,var(--line));cursor:pointer;transition:transform .2s cubic-bezier(.2,.7,.3,1),border-color .2s,box-shadow .2s}
+.wc[data-r="C"]{box-shadow:0 6px 18px -12px color-mix(in oklab,var(--r-c) 45%,transparent)}
+.wc[data-r="PC"]{box-shadow:0 6px 20px -12px color-mix(in oklab,var(--r-pc) 55%,transparent)}
+.wc[data-r="R"]{box-shadow:0 8px 24px -12px color-mix(in oklab,var(--r-r) 62%,transparent)}
+.wc[data-r="SR"]{box-shadow:0 8px 26px -11px color-mix(in oklab,var(--r-sr) 70%,transparent)}
+.wc[data-r="UR"]{box-shadow:0 10px 30px -11px color-mix(in oklab,var(--r-ur) 78%,transparent)}
+.wc[data-r="L"]{box-shadow:0 12px 36px -10px color-mix(in oklab,var(--r-l) 85%,transparent)}
+.wc[data-r="SR"],.wc[data-r="UR"],.wc[data-r="L"]{border-color:color-mix(in oklab,var(--rc) 88%,var(--line))}
+.wc:hover{transform:translateY(-5px);border-color:var(--rc);box-shadow:0 18px 42px -20px color-mix(in oklab,var(--rc) 42%,#000)}
+.wc-face{position:absolute;inset:0;background:linear-gradient(180deg,#181c16,#0d0f0c)}
+/* premium glassy frame: crisp light edge on top, gentle depth at the bottom */
+.wc::before{content:"";position:absolute;inset:0;z-index:5;pointer-events:none;border-radius:inherit;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.16), inset 0 0 0 1px rgba(255,255,255,.03), inset 0 -44px 52px -44px rgba(0,0,0,.55)}
+/* rarity colour bleeding from the top of the artwork ties the image to its tier */
+.wc:not(.is-noimg) .wc-face::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(180deg, color-mix(in oklab,var(--rc) 26%, transparent), transparent 28%)}
+.wc-blur{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:blur(22px) saturate(1.1) brightness(.5);transform:scale(1.2);z-index:0}
+.wc.is-noimg .wc-blur{display:none}
+.wc-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1}
+/* no-image cards: the real site's per-rarity background art (scaled to crop its frame),
+   with the dark onyx art shown full-bleed for shiny Legendaries. */
+.wc-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scale(1.8);z-index:0}
+.wc-bg.onyx{transform:none}
+.wc[data-r="C"] .wc-bg,.wc[data-r="PC"] .wc-bg{filter:brightness(.6) saturate(1.2)}
+.wc-photo.onyx-photo{object-fit:cover;z-index:1}
+.wc.is-noimg .wc-face{background:
+  radial-gradient(130% 90% at 50% 14%, color-mix(in oklab,var(--rc) 45%, transparent), transparent 64%),
+  linear-gradient(180deg, color-mix(in oklab,var(--rc) 22%, #171b15), #0c0e0b)}
+/* Brillante: the real site's resting sheen, a gold rim + a soft highlight that drifts
+   slowly across the card (no constant diagonal sweep). Rarity colour is left intact. */
+.wc.is-shiny{box-shadow:inset 0 0 0 1px #e9c15a8c, 0 0 16px #e9c15a4d, 0 0 30px #00000080}
+.wc.is-shiny:hover{box-shadow:inset 0 0 0 1px #e9c15acc, 0 0 22px #e9c15a80, 0 18px 42px -20px #000}
+.wc-holo{position:absolute;inset:0;z-index:2;pointer-events:none;mix-blend-mode:screen;opacity:.7;
+  background:radial-gradient(circle at 50% 45%, #fff8e0 0%, rgba(255,248,224,.2) 20%, transparent 46%);
+  background-repeat:no-repeat;background-size:175% 175%;animation:shiny-drift 6.5s ease-in-out infinite alternate}
+.wc-holo.onyx{mix-blend-mode:soft-light;opacity:.9}
+@keyframes shiny-drift{0%{background-position:16% 12%}100%{background-position:84% 82%}}
+@media (prefers-reduced-motion:reduce){.wc-holo{animation:none;background-position:50% 42%;opacity:.5}}
+/* Onyx (black shiny Legendary) layer stack, matching the real client exactly. */
+.ox{position:absolute;inset:0;z-index:1;pointer-events:none}
+.ox-shade{mix-blend-mode:multiply;background:#2e2b36}
+.ox-tint{mix-blend-mode:color;background:#3b3b42}
+/* deeper, blacker wash for stronger onyx contrast + a little edge vignette for depth */
+.ox-wash{background:
+  radial-gradient(120% 80% at 50% 30%, transparent 40%, #05040866 78%, #050408cc 100%),
+  linear-gradient(#0b0a12ec 0%,#0d0c15dd 55%,#0b0a1255 78%,#0b0a12bb 100%)}
+.ox-lines{opacity:.62;mix-blend-mode:screen;background:linear-gradient(160deg,#fff0b3 0%,#e9c15a 35%,#fff6d0 55%,#d7a93c 80%,#ffe9a6 100%);
+  -webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat}
+/* a bright gold highlight, masked to the vein shape, drifting so the veins shimmer */
+.ox-shine{mix-blend-mode:screen;opacity:.95;
+  background:radial-gradient(circle at 50% 45%, #fffbe8 0%, rgba(246,217,138,.65) 16%, rgba(233,193,90,.15) 34%, transparent 52%);
+  background-repeat:no-repeat;background-size:210% 210%;
+  -webkit-mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;mask:url(https://www.wiki-masters.com/shiny/onyx-lines.png) 50%/cover no-repeat;
+  animation:onyx-shimmer 5.5s ease-in-out infinite alternate}
+@keyframes onyx-shimmer{0%{background-position:12% 8%}100%{background-position:88% 86%}}
+@media (prefers-reduced-motion:reduce){.ox-shine{animation:none;background-position:42% 30%;opacity:.7}}
+.wc-scrim{position:absolute;inset:0;pointer-events:none;background:linear-gradient(to top,#050605 0%,rgba(5,6,5,.985) 32%,rgba(5,6,5,.7) 50%,rgba(5,6,5,.2) 68%,transparent 80%)}
+.wc.bare .wc-cap{display:none}
+.wc.bare .wc-scrim{display:none}
+.wc-top{position:absolute;top:11px;left:11px;right:11px;z-index:3;display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
+.wc-rtag{font-family:var(--display);font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;color:var(--accent-ink);background:var(--rc);box-shadow:0 1px 5px rgba(0,0,0,.4)}
+.wc-flags{display:flex;gap:5px;align-items:center}
+.wc-count{background:rgba(0,0,0,.72);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:6px;}
+.wc-new{background:var(--accent);color:var(--accent-ink);font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px}
+.wc-shiny{background:#111014;color:#f3d27a;font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;box-shadow:inset 0 0 0 1px #d7a93c,0 0 10px #e9c15a73;}
+.wc-star{background:rgba(0,0,0,.72);border:1px solid color-mix(in oklab,var(--r-l) 55%,rgba(255,255,255,.3));color:var(--r-l);font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;}
+.wc-cap{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:14px 14px 16px;display:flex;flex-direction:column;gap:var(--s1);background:linear-gradient(to top,rgba(5,6,5,.92),rgba(5,6,5,.55) 72%,transparent)}
+.wc.bare .wc-cap{background:none}
+.wc-name{font-family:var(--display);font-weight:700;font-size:15px;line-height:1.18;color:#fff;text-shadow:0 1px 10px rgba(0,0,0,.65);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wc-cat{font-size:10.5px;color:rgba(255,255,255,.82);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 6px rgba(0,0,0,.7)}
+.wc-meta{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 8px;margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.22)}
+/* a stat never breaks inside itself; on a narrow card the value drops to its own line instead */
+.wc-stats{display:flex;gap:.9em;white-space:nowrap;font-size:11px;color:rgba(255,255,255,.85);letter-spacing:.02em;text-shadow:0 1px 6px rgba(0,0,0,.7)}
+.wc-stats b{color:#fff;font-weight:700;font-variant-numeric:tabular-nums}
+.wc-val{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:var(--r-l);font-variant-numeric:tabular-nums;text-shadow:0 1px 6px rgba(0,0,0,.7);white-space:nowrap}
+.wc-val::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--coin);box-shadow:0 0 6px color-mix(in oklab,var(--r-l) 55%,transparent)}
+/* Card text follows the card's own width (cqw), so a card reads the same in a dense grid,
+   a big reveal or the modal. The floors are the sizes the 200px grid card was designed at. */
+.wc-name{font-size:clamp(15px,7cqw,30px)}
+.wc-cat{font-size:clamp(10.5px,4.6cqw,16px)}
+.wc-stats,.wc-val{font-size:clamp(11px,4.8cqw,17px)}
+.wc-cap{padding:clamp(14px,6.5cqw,24px) clamp(14px,6.5cqw,24px) clamp(16px,7.5cqw,28px)}
+.wc-top{top:clamp(11px,5cqw,18px);left:clamp(11px,5cqw,18px);right:clamp(11px,5cqw,18px)}
+.wc-rtag,.wc-new{font-size:clamp(10px,4.2cqw,14px);padding:.3em .8em}
+.wc-big .wc-cat{white-space:normal}

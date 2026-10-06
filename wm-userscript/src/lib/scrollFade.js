@@ -1,7 +1,7 @@
 /**
  * A box that may hold more than it shows (the picker's rarity chips, the offer's two sides):
  * the edges that still hide content fade out (`data-fade` = "start", "end" or "both", styled by
- * `[data-fade]` in app.css), so a cut row never looks like a bug. `axis` is "x" or "y"; the fade
+ * `[data-fade]` in styles/composer.css), so a cut row never looks like a bug. `axis` is "x" or "y"; the fade
  * follows scrolling, the box's size and its children's (a card added to a side).
  * Returns { update, destroy } so other actions can re-run it after changing the content.
  */

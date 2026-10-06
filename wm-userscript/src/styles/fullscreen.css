@@ -1,0 +1,61 @@
+/* wide: the packs screen is exactly the window under the top bar, never a scrollbar: the pack
+   takes whatever height the title, count and button leave, at its own shape */
+@media (min-width:1000px){
+  .main:has(> .view > .pulls > .pull-ready){height:100dvh}
+  .view:has(> .pulls > .pull-ready){flex:1;min-height:0;display:flex;flex-direction:column;padding-block:var(--s4) var(--s5)}
+  .pulls:has(> .pull-ready){flex:1;min-height:0;display:flex;flex-direction:column}
+  .pull-ready{flex:1;min-height:0;gap:var(--s4)}
+  .pull-ready .booster-stage{flex:1;min-height:0}
+  .pull-ready .booster{width:auto;height:100%;max-height:620px;min-height:180px}
+}
+
+/* wide: list and preview side by side, the page itself no longer scrolls */
+@media (min-width:1000px){
+  .main:has(.tr-split){height:100dvh}
+  /* a working screen: it takes the width of large displays rather than the reading column;
+     the bottom keeps the floating site switch clear of the actions */
+  .view:has(> .tr-split){flex:1;min-height:0;display:flex;flex-direction:column;padding-top:var(--s4);padding-bottom:72px;max-width:2200px}
+  /* one compact line (title, subtitle, the composer's button): the height goes to the cards */
+  .tr-head{flex-wrap:nowrap;margin-bottom:var(--s3)}
+  .tr-head > div{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px var(--s3);min-width:0}
+  .tr-head h1{font-size:clamp(22px,2vw,28px)}
+  .tr-head .meta{margin:0}
+  .tr-head .btn{padding:10px 20px}
+  /* the list narrows on smaller windows, its rows breaking only between the two sides of a deal */
+  .tr-split{flex:1;min-height:0;grid-template-columns:var(--tr-list) minmax(0,1fr);--tr-list:300px}
+  .tr-col{min-height:0}
+  .tr-rows{flex:1;min-height:0}
+  .tr-col-empty .tr-empty{display:none}
+  .tr-col-none{display:block}
+  .tp-back{display:none}
+}
+@media (min-width:1280px){.tr-split{--tr-list:clamp(340px,24vw,380px)}}
+/* narrow: the list alone; a chosen trade covers the screen, back to the list with its button */
+@media (max-width:999.98px){
+  .tr-pane{display:none}
+  .tr-split.reading .tr-pane{display:flex;position:fixed;inset:0;z-index:2147483600;border:0;border-radius:0;animation:fade .15s ease}
+  .tr-col-empty{display:flex}
+  /* nothing is open on a phone until a row is tapped */
+  .tr-split:not(.reading) .tr-row.on{background:none;border-color:transparent}
+  .tr-split:not(.reading) .tr-row.on::before{display:none}
+  .tp-foot{padding-bottom:calc(var(--s3) + env(safe-area-inset-bottom))}
+  .chat-form{padding-bottom:calc(var(--s3) + env(safe-area-inset-bottom))}
+}
+@media (max-width:560px){.tr-head .btn{width:100%;justify-content:center}}
+/* a slim pane (split on a small window, or a phone): the switch under the title, tighter edges */
+@container tpane (max-width:560px){
+  .tp-head{flex-wrap:wrap;padding:var(--s3) var(--s4)}
+  .tp-mode{order:4;flex:1 1 100%;display:flex}
+  .tp-mode button{flex:1;justify-content:center}
+  .tp-foot{padding-inline:var(--s4)}
+  .chat-feed{padding:var(--s4)}
+  .chat-form{padding-inline:var(--s4)}
+}
+/* the actions share the width */
+@container tpane (max-width:520px){
+  .tp-title h2{font-size:17px}
+  .tp-actions{flex:1}
+  .tp-actions .btn{flex:1;padding-inline:var(--s2)}
+  .tp-confirm .af-actions,.tp-confirm .tp-actions{flex:1 1 100%}
+}
+@media (prefers-reduced-motion:reduce){.tr-split.reading .tr-pane{animation:none}}
