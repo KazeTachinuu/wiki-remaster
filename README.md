@@ -20,7 +20,7 @@ Updates are automatic. **Site original** (or the phone menu) goes back to the or
 ## Features
 
 - **Packs**: tear-open reveal, rarity sounds, next-pack countdown on every screen, Pro daily pack
-- **Collection**: search, sort, filters, bulk discard, instant load
+- **Collection**: search, sort, filters, bulk discard, cached between visits
 - **Catalogue**: all 2.8 M cards, server search, wishlist
 - **Card detail**: market price, last sale, best deal, quick-sale price, price chart
 - **Market**: live bids, your sales and wins, every listing of a card side by side
