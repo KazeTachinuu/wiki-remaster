@@ -23,18 +23,22 @@
 .wc-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scale(1.8);z-index:0}
 .wc-bg.onyx{transform:none}
 .wc[data-r="C"] .wc-bg,.wc[data-r="PC"] .wc-bg{filter:brightness(.6) saturate(1.2)}
-/* no picture: a flat sun in layered halos on a starry sky, in the rarity's colour (lib/soleil.js) */
-.wc-sun{position:absolute;inset:0;width:100%;height:100%;z-index:1}
-.wc-sun .h1{fill:color-mix(in oklab,var(--rc) 8%,transparent)}
-.wc-sun .h2{fill:color-mix(in oklab,var(--rc) 14%,transparent)}
-.wc-sun .h3{fill:color-mix(in oklab,var(--rc) 22%,transparent)}
-.wc-sun .h4{fill:color-mix(in oklab,var(--rc) 40%,transparent)}
-.wc-sun .ray{fill:var(--rc)}
-.wc-sun .core{fill:#fff;fill-opacity:.9}
-/* Brillante: gold rings around the sun and a gold star (the card's gold rim and sheen do the rest) */
-.wc-sun .gold{fill:none;stroke:#e9c15a;stroke-width:.9;stroke-opacity:.75}
-.wc-sun .gold.thin{stroke-width:.45;stroke-opacity:.5;stroke-dasharray:1.2 2.2}
-.wc.is-shiny .wc-sun .ray{fill:#f3d27a}
+/* no picture: a star, a sun when shiny, a supernova for Legendaries (components/CardSky.svelte) */
+.wc-sky{position:absolute;inset:0;width:100%;height:100%;z-index:1}
+.wc-sky .h1{fill:color-mix(in oklab,var(--rc) 8%,transparent)}
+.wc-sky .h2{fill:color-mix(in oklab,var(--rc) 14%,transparent)}
+.wc-sky .h3{fill:color-mix(in oklab,var(--rc) 22%,transparent)}
+.wc-sky .h4{fill:color-mix(in oklab,var(--rc) 40%,transparent)}
+.wc-sky .ray{fill:var(--rc)}
+.wc-sky .core{fill:#fff;fill-opacity:.92}
+.wc-sky .corona{stroke:#e9c15a;stroke-width:.8;stroke-linecap:round;stroke-opacity:.8}
+.wc-sky.nova .shell{fill:none;stroke:#f3d27a;stroke-width:.7;stroke-opacity:.5}
+.wc-sky.nova .shell.thin{stroke-width:.4;stroke-opacity:.35;stroke-dasharray:1 2.5}
+.wc-sky.nova .jet{fill:#f3d27a;fill-opacity:.28}
+.wc-sky.nova .glow{fill:#f3d27a;fill-opacity:.16}
+.wc-sky.nova .glow2{fill:#fff2c2;fill-opacity:.35}
+.wc-sky.nova .ray{fill:#fff2c2}
+.wc-sky.nova .core{fill:#fff}
 .wc.is-noimg .wc-cap{background:linear-gradient(to top,rgba(5,6,5,.94),rgba(5,6,5,.7) 62%,transparent)}
 .wc-photo.onyx-photo{object-fit:cover;z-index:1}
 /* a see-through image (a map, a line drawing) on paper, as Wikipedia shows it; room for the caption below */

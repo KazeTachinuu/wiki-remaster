@@ -5,7 +5,8 @@
   import { isOnyx } from "../lib/cardArt.js";
   import { rarityArt } from "../lib/art.js";
   import { seeThrough } from "../lib/seeThrough.js";
-  import { soleil } from "../lib/soleil.js";
+  import { cardSky, skyKind } from "../lib/cardSky.js";
+  import CardSky from "./CardSky.svelte";
   let { card, count = 1, isNew = false, shiny = false, starred = false, value = undefined,
         owned = true, wishlisted = false, big = false, caption = true, stats = true } = $props();
   // stats: false hides ATK/DEF where the value is what matters (trade picking)
@@ -21,8 +22,8 @@
   // Fall back from a broken photo to the rarity art (never a blank card).
   let imgFailed = $state(false);
   let paper = $state(false); // a see-through image (a map, a diagram): shown on paper
-  // no picture: a flat sun on a starry sky, seeded by the title
-  const sky = $derived(showPhoto ? null : soleil(card.title));
+  // no picture: a star, a sun (shiny) or a supernova (Legendary) on a sky seeded by the title
+  const sky = $derived(showPhoto ? null : cardSky(card.title));
   let artFailed = $state(false);
   let showPhoto = $derived(!!card.image_url && !imgFailed);
 
@@ -48,6 +49,7 @@
       <span class="ox ox-shade" aria-hidden="true"></span>
       <span class="ox ox-tint" aria-hidden="true"></span>
       <span class="ox ox-wash" aria-hidden="true"></span>
+      {#if sky}<CardSky {sky} kind="nova" />{/if}
       {#if showPhoto}
         <img class="wc-photo onyx-photo" src={card.image_url} alt={card.title} loading="lazy" crossorigin="anonymous" onerror={() => (imgFailed = true)} />
       {/if}
@@ -58,15 +60,7 @@
       <img class="wc-blur" src={card.image_url} alt="" aria-hidden="true" loading="lazy" crossorigin="anonymous" />
       <img class="wc-photo" src={card.image_url} alt={card.title} loading="lazy" crossorigin="anonymous" onload={(e) => (paper = seeThrough(e.currentTarget))} onerror={() => (imgFailed = true)} use:fadeIn />
     {:else if sky}
-      <svg class="wc-sun" viewBox="0 0 100 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-        {#each sky.stars as [x, y, r, o]}<circle cx={x} cy={y} {r} fill="#fff" fill-opacity={o} />{/each}
-        <g transform="translate(50 52) rotate({sky.tilt})">
-          {#if shiny}<circle r="38" class="gold" /><circle r="29.5" class="gold thin" />{/if}
-          <circle r="34" class="h1" /><circle r="26" class="h2" /><circle r="19" class="h3" /><circle r="12.5" class="h4" />
-          <path class="ray" d="M0-12C1-3 3-1 12 0 3 1 1 3 0 12-1 3-3 1-12 0-3-1-1-3 0-12Z" />
-          <path class="core" d="M0-6C.5-1.5 1.5-.5 6 0 1.5.5.5 1.5 0 6-.5 1.5-1.5.5-6 0-1.5-.5-.5-1.5 0-6Z" />
-        </g>
-      </svg>
+      <CardSky {sky} kind={skyKind(card.rarity, shiny)} />
     {/if}
     {#if shiny}<span class="wc-holo" class:onyx={onyx} aria-hidden="true"></span>{/if}
     {#if blurred}<span class="wc-nsfw" aria-hidden="true">Contenu sensible</span>{/if}
