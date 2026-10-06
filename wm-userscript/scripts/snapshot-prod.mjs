@@ -8,9 +8,11 @@ import { renameSync, existsSync, readFileSync } from "node:fs";
 
 const OUT = new URL("../mock/snapshot.json", import.meta.url).pathname;
 const PER_RARITY = 40;
+const PRICED = 10; // the mock needs a typical price per rarity: a sample of cards is enough
 const RARITIES = ["C", "PC", "R", "SR", "UR", "L"];
 const NAME = { C: "Commun", PC: "Peu Commun", R: "Rare", SR: "Super Rare", UR: "Ultra Rare", L: "Légendaire" };
-const PAUSE_MS = 450; // the game reads bursts as automation: one request at a time, spaced
+// the game reads bursts as automation: like the app's own value lane, 2 requests at a time, spaced
+const LANES = 2, PAUSE_MS = 450;
 const UNSAFE = /porno|sex|érot|erot|tueu|meurtr|crimin|terror|nazi|attentat|drogue|guerre|massacre/i;
 
 // [*] step  [+] done  [=] already up to date  [-] warning, kept going  [x] fatal
@@ -23,10 +25,12 @@ const same = (s) => console.log(dim(`[=] ${s}`));
 const warn = (s) => console.error(`${c("1;33", "[-]")} ${s}`);
 const die = (s) => { tickEnd(); console.error(`${c("31", "[x]")} ${s}`); process.exit(2); };
 // one live line, rewritten in place, cleared when the step ends (skipped when piped)
-const tick = (s) => tty && process.stdout.write(`\r    ${s}\x1b[K`);
+// cut to the terminal's width: a line that wraps cannot be rewritten in place
+const plain = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+const fit = (s) => { const room = (process.stdout.columns || 100) - 5; let out = "", n = 0; for (const part of s.split(/(\x1b\[[0-9;]*m)/)) { if (part.startsWith("\x1b")) { out += part; continue; } const take = part.slice(0, Math.max(0, room - n)); out += take; n += take.length; } return n < plain(s).length ? out.slice(0, -1) + "…\x1b[0m" : out; };
+const tick = (s) => tty && process.stdout.write(`\r    ${fit(s)}\x1b[K`);
 const tickEnd = () => tty && process.stdout.write("\r\x1b[K");
 const secs = (ms) => (ms < 60e3 ? `${Math.round(ms / 1000)} s` : `${Math.floor(ms / 60e3)} min ${String(Math.round((ms % 60e3) / 1000)).padStart(2, "0")}`);
-const clip = (s, n = 34) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 const started = Date.now();
 let failed = 0;
@@ -38,18 +42,28 @@ const stop = await site.preflight();
 if (stop) { await site.close(); die(stop); }
 const me = await site.ev(() => window.__wm?.getProfile?.()?.username ?? null).catch(() => null);
 tickEnd();
-ok(`logged in${me ? ` as ${me}` : ""}, ${PER_RARITY} cards per rarity, one request every ${PAUSE_MS} ms`);
+ok(`logged in${me ? ` as ${me}` : ""}: ${PER_RARITY} cards per rarity, ${PRICED} of them priced, ${LANES} requests at a time`);
 
+let slowest = 0;
 const get = async (path) => {
+  const t = Date.now();
   const d = await site.ev(async (p) => { const r = await fetch(p); return r.ok ? r.json() : null; }, path).catch(() => null);
+  slowest = Math.max(slowest, Date.now() - t);
   if (d == null) failed++;
+  requestsDone++;
   await Bun.sleep(PAUSE_MS);
   return d;
 };
+// run `jobs` LANES at a time, calling onDone(count) after each
+async function lanes(jobs, onDone) {
+  const results = new Array(jobs.length); let next = 0, done = 0;
+  await Promise.all(Array.from({ length: LANES }, async () => { while (next < jobs.length) { const k = next++; results[k] = await jobs[k](); onDone(++done); } }));
+  return results;
+}
 
-// time left: requests still to make (a price per card, a page or so to pick each rarity) x pace
+// time left from the pace measured so far: requests still to make x average time per request
 let requestsDone = 0;
-const left = (rarityIndex, pricesLeft) => secs((pricesLeft + (RARITIES.length - rarityIndex - 1) * (PER_RARITY + 2)) * (PAUSE_MS + 120));
+const left = (rarityIndex, pricesLeft) => { const each = requestsDone ? (Date.now() - started) / requestsDone : PAUSE_MS + 300; return secs(((pricesLeft + (RARITIES.length - rarityIndex - 1) * (PRICED + 2)) * each) / LANES); };
 
 const cards = [], recap = [];
 for (const [i, rarity] of RARITIES.entries()) {
@@ -59,7 +73,6 @@ for (const [i, rarity] of RARITIES.entries()) {
   for (let page = 0; page < 8 && picked.length < PER_RARITY; page++) {
     tick(`${label} ${dim("picking")} page ${page + 1}, ${picked.length}/${PER_RARITY} kept`);
     const d = await get(`/api/cards?page=${page}&rarity=${rarity}`);
-    requestsDone++;
     for (const card of d?.cards || []) {
       if (picked.length >= PER_RARITY) break;
       if (card.nsfw_image || UNSAFE.test(`${card.category || ""} ${card.wikipedia_title || ""}`) || (card.wikipedia_title || "").length < 3) continue;
@@ -67,26 +80,25 @@ for (const [i, rarity] of RARITIES.entries()) {
       picked.push(card);
     }
   }
-  // 2. price: each card's real sold average at its rarity
-  let priced = 0;
-  for (const [k, card] of picked.entries()) {
-    tick(`${label} ${dim("prices")} ${String(k + 1).padStart(2)}/${picked.length}  ${clip(card.wikipedia_title)}  ${dim(`about ${left(i, picked.length - k)} left`)}`);
+  // 2. price a sample (spread over the picked cards): their real sold average at this rarity
+  const sample = picked.filter((_, k) => k % Math.ceil(picked.length / PRICED) === 0).slice(0, PRICED);
+  const avgs = new Map();
+  await lanes(sample.map((card) => async () => {
     const s = await get(`/api/marketplace/cards/${card.id}/sales?scope=summary`);
-    requestsDone++;
-    const avg = s?.summary?.[card.rarity]?.average ?? null;
-    if (avg != null) priced++;
-    cards.push({
-      id: card.id, wikipedia_title: card.wikipedia_title, wikipedia_url: card.wikipedia_url, category: card.category, summary: card.summary ?? null,
-      rarity: card.rarity, atk: card.atk, def: card.def, q_score: card.q_score, pageviews: card.pageviews,
-      image_url: card.image_url, hide_image: !!card.hide_image, avg,
-    });
-  }
+    avgs.set(card.id, s?.summary?.[card.rarity]?.average ?? null);
+  }), (n) => tick(`${label} ${dim("prices")} ${String(n).padStart(2)}/${sample.length}  ${dim(`about ${left(i, sample.length - n)} left, server ${secs(slowest)} at worst`)}`));
+  const priced = [...avgs.values()].filter((v) => v != null).length;
+  for (const card of picked) cards.push({
+    id: card.id, wikipedia_title: card.wikipedia_title, wikipedia_url: card.wikipedia_url, category: card.category, summary: card.summary ?? null,
+    rarity: card.rarity, atk: card.atk, def: card.def, q_score: card.q_score, pageviews: card.pageviews,
+    image_url: card.image_url, hide_image: !!card.hide_image, avg: avgs.get(card.id) ?? null,
+  });
   tickEnd();
   const mine = cards.filter((x) => x.rarity === rarity);
   const median = medianOf(mine.map((x) => x.avg));
   recap.push([NAME[rarity], picked.length, mine.filter((x) => x.image_url).length, priced, median]);
   if (picked.length < PER_RARITY) warn(`${NAME[rarity]}: only ${picked.length} usable cards found`);
-  ok(`${label} ${String(picked.length).padStart(2)} cards, ${String(priced).padStart(2)} with a sold average, typical ${median ?? "-"} pts`);
+  ok(`${label} ${String(picked.length).padStart(2)} cards, ${priced}/${sample.length} sampled with a sold average, typical ${median ?? "-"} pts`);
 }
 await site.close();
 
