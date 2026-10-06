@@ -1,5 +1,5 @@
-// The art of a card without a picture: a four-pointed star on a night sky with a meteor shower,
-// seeded by the title (each card its own sky, the same card always the same). Still: no animation.
+// The art of a card without a picture: a four-pointed star on a night sky (and, for a shiny card, a
+// meteor shower), seeded by the title: each card its own sky, the same card always the same.
 
 function seed(text) {
   let h = 2166136261;
@@ -27,5 +27,7 @@ export function cardSky(title) {
     const x = 5 + r() * 90, y = 5 + r() * 115, len = 8 + r() * 20;
     return [round(x - len * Math.cos(angle)), round(y - len * Math.sin(angle)), round(x), round(y), round(0.25 + r() * 0.45), round(0.35 + r() * 0.55)];
   });
-  return { stars, shooting };
+  // shiny: two or three small sparkles close to the star [x, y, size]
+  const sparkles = Array.from({ length: 2 + Math.floor(r() * 2) }, () => { const a = r() * Math.PI * 2, d = 17 + r() * 8; return [round(50 + d * Math.cos(a)), round(52 + d * Math.sin(a)), round(1.6 + r() * 1.6)]; });
+  return { stars, shooting, sparkles };
 }

@@ -60,7 +60,7 @@
       <img class="wc-blur" src={card.image_url} alt="" aria-hidden="true" loading="lazy" crossorigin="anonymous" />
       <img class="wc-photo" src={card.image_url} alt={card.title} loading="lazy" crossorigin="anonymous" onload={(e) => (paper = seeThrough(e.currentTarget))} onerror={() => (imgFailed = true)} use:fadeIn />
     {:else if sky}
-      <CardSky {sky} />
+      <CardSky {sky} {shiny} />
     {/if}
     {#if shiny}<span class="wc-holo" class:onyx={onyx} aria-hidden="true"></span>{/if}
     {#if blurred}<span class="wc-nsfw" aria-hidden="true">Contenu sensible</span>{/if}
