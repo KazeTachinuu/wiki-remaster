@@ -118,6 +118,18 @@ const CATALOG = [
   card("Salsepareille", "plante grimpante du genre Smilax", "C", 1390, 2620, null),
 ];
 
+// A snapshot of the live game (scripts/snapshot-prod.mjs: real cards and their real sold averages)
+// replaces the list above when present.
+import { existsSync, readFileSync } from "node:fs";
+const SNAPSHOT_FILE = new URL("./snapshot.json", import.meta.url);
+const snapshot = existsSync(SNAPSHOT_FILE) ? JSON.parse(readFileSync(SNAPSHOT_FILE, "utf8")) : null;
+if (snapshot?.cards?.length) {
+  CATALOG.length = 0;
+  for (const c of snapshot.cards) CATALOG.push({ ...c, rarity_order: RARITY_ORDER[c.rarity], image_url: c.hide_image ? null : c.image_url });
+}
+/** The typical sold price per rarity from the snapshot (null without one). */
+const SNAPSHOT_PRICES = snapshot?.prices ?? null;
+
 CATALOG.forEach((c, i) => (c.id = "card_" + (i + 1)));
 
-export { CATALOG, RARITY_WEIGHTS, RARITY_ORDER };
+export { CATALOG, RARITY_WEIGHTS, RARITY_ORDER, SNAPSHOT_PRICES };

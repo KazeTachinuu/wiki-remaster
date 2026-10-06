@@ -107,7 +107,7 @@ describe("newInPack", () => {
 describe("nNotification", () => {
   const n = (type, data) => nNotification({ id: 1, type, data, read: false, created_at: "t" });
   it("tells each known type in plain words from its data", () => {
-    expect(n("trade_offer", { title: "🔄 Nouvelle offre d'échange !", initiator_username: "doobii" })).toMatchObject({ title: "Offre d'échange", message: "de doobii" });
+    expect(n("trade_offer", { title: "🔄 Nouvelle offre d'échange !", initiator_username: "alix" })).toMatchObject({ title: "Offre d'échange", message: "de alix" });
     expect(n("marketplace_auction_sold", { title: "💰 Carte vendue !", card_title: "Marie Curie", final_price: 1210 })).toMatchObject({ title: "Carte vendue", message: "Marie Curie pour 1\u202f210 WikiBidous" });
     expect(n("marketplace_outbid", { card_title: "Einstein", new_bid: 640 }).message).toBe("Einstein, nouvelle offre de 640 WikiBidous");
   });

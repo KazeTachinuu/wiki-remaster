@@ -5,7 +5,7 @@ import { whoAmI, chatMe, tradeTabs, sideValue, verdict, balanceLabel, verdictTit
 const card = (id, rarity = "C") => ({ id, rarity, atk: 1, def: 2, wikipedia_title: "T" + id });
 const raw = (o) => ({
   id: "t1", status: "pending", initiator_id: "u2", recipient_id: "me",
-  initiator: { id: "u2", username: "K4rma", avatar_url: null }, recipient: { id: "me", username: "Moi" },
+  initiator: { id: "u2", username: "Basile", avatar_url: null }, recipient: { id: "me", username: "Moi" },
   items: [
     { id: "i1", card: card("c1", "R"), card_id: "c1", user_card_id: "uc1", offered_by: "u2", snapshot_rarity: "R" },
     { id: "i2", card: card("c2", "PC"), card_id: "c2", user_card_id: "uc2", offered_by: "me" },
@@ -18,7 +18,7 @@ describe("nTrade", () => {
   it("splits sides by offered_by and maps coins to the right side", () => {
     const t = nTrade(raw(), "me");
     expect(t.incoming).toBe(true);
-    expect(t.other.username).toBe("K4rma");
+    expect(t.other.username).toBe("Basile");
     expect(t.give.map((i) => i.card.id)).toEqual(["c2"]);
     expect(t.get.map((i) => i.card.id)).toEqual(["c1"]);
     expect(t.giveCoins).toBe(100); // I am the recipient: recipient_wikibidous is mine to give
@@ -30,9 +30,9 @@ describe("nTrade", () => {
     expect(t.get[0].card.atk).toBe(9);
   });
   it("is outgoing when I initiated", () => {
-    const t = nTrade(raw({ initiator_id: "me", recipient_id: "u2", initiator: { id: "me" }, recipient: { id: "u2", username: "K4rma" } }), "me");
+    const t = nTrade(raw({ initiator_id: "me", recipient_id: "u2", initiator: { id: "me" }, recipient: { id: "u2", username: "Basile" } }), "me");
     expect(t.incoming).toBe(false);
-    expect(t.other.username).toBe("K4rma");
+    expect(t.other.username).toBe("Basile");
   });
   it("refuses to guess a split when me is unknown", () => {
     expect(() => nTrade(raw(), null)).toThrow(NO_ME);
@@ -48,7 +48,7 @@ describe("whoAmI", () => {
     expect(whoAmI([raw()], null, "Moi")).toBe("me");
   });
   it("finds me by my username when every trade is with the same friend", () => {
-    const a = raw(), b = raw({ id: "t2", initiator_id: "me", recipient_id: "u2", initiator: { id: "me", username: "Moi" }, recipient: { id: "u2", username: "K4rma" } });
+    const a = raw(), b = raw({ id: "t2", initiator_id: "me", recipient_id: "u2", initiator: { id: "me", username: "Moi" }, recipient: { id: "u2", username: "Basile" } });
     const me = whoAmI([a, b], null, "Moi");
     expect(me).toBe("me");
     const tabs = tradeTabs([a, b].map((t) => nTrade(t, me)));
@@ -82,17 +82,17 @@ describe("tradeTabs", () => {
 });
 
 describe("timeline", () => {
-  const other = { username: "doobii" };
+  const other = { username: "alix" };
   const offer = { id: "r", incoming: true, other, createdAt: "t1", updatedAt: "t2", status: "countered" };
   const counter = { id: "c", incoming: false, other, createdAt: "t2", updatedAt: "t3" };
   const line = (steps) => steps.map((s) => `${s.text} ${s.by} @${s.at}`);
   it("tells each offer, then who answered the last one", () => {
-    expect(line(timeline([offer, { ...counter, status: "accepted" }]))).toEqual(["Offre de doobii @t1", "Contre-offre de vous @t2", "Acceptée par doobii @t3"]);
-    expect(line(timeline([{ ...offer, status: "declined" }]))).toEqual(["Offre de doobii @t1", "Refusée par vous @t2"]);
+    expect(line(timeline([offer, { ...counter, status: "accepted" }]))).toEqual(["Offre de alix @t1", "Contre-offre de vous @t2", "Acceptée par alix @t3"]);
+    expect(line(timeline([{ ...offer, status: "declined" }]))).toEqual(["Offre de alix @t1", "Refusée par vous @t2"]);
   });
   it("names the sender when an offer is withdrawn, and waits without a date", () => {
     expect(line(timeline([offer, { ...counter, status: "cancelled" }])).at(-1)).toBe("Annulée par vous @t3");
-    expect(line(timeline([offer, { ...counter, status: "pending" }])).at(-1)).toBe("En attente de doobii @null");
+    expect(line(timeline([offer, { ...counter, status: "pending" }])).at(-1)).toBe("En attente de alix @null");
   });
 });
 
@@ -128,8 +128,8 @@ describe("chainOf", () => {
 
 describe("otherOf", () => {
   it("otherOf picks the side that is not me", () => {
-    const f = { requester: { id: "me", username: "Moi" }, addressee: { id: "u3", username: "Marchandise", avatar_url: null } };
-    expect(otherOf(f, "me")).toEqual({ id: "u3", username: "Marchandise", avatar: null });
+    const f = { requester: { id: "me", username: "Moi" }, addressee: { id: "u3", username: "Capucine", avatar_url: null } };
+    expect(otherOf(f, "me")).toEqual({ id: "u3", username: "Capucine", avatar: null });
     expect(() => otherOf(f, null)).toThrow(NO_ME);
   });
 });

@@ -6,6 +6,6 @@ describe("isOurs", () => {
     for (const p of ["/", "/pulls", "/collection", "/global-collection", "/trades", "/trades/", "/marketplace", "/marketplace/42", "/trades?x=1", "/marketplace/42#bid"]) expect(isOurs(p)).toBe(true);
   });
   it("leaves every other page to the original site", () => {
-    for (const p of ["/friends", "/guild", "/battle", "/profile/doobii", "/marketplace/42/bids", null, undefined]) expect(isOurs(p)).toBe(false);
+    for (const p of ["/friends", "/guild", "/battle", "/profile/alix", "/marketplace/42/bids", null, undefined]) expect(isOurs(p)).toBe(false);
   });
 });

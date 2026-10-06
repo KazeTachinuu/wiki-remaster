@@ -4,7 +4,7 @@
  * adapter against it. State is in memory and resets on restart.
  */
 
-import { CATALOG, RARITY_WEIGHTS } from "../mock/catalog.js";
+import { CATALOG, RARITY_WEIGHTS, SNAPSHOT_PRICES } from "../mock/catalog.js";
 
 const PAGE = 50;
 const PACK_SIZE = 5;
@@ -14,7 +14,8 @@ const SHINY_CHANCE = 0.03;
 // active auctions at once: the game's MAX_CONCURRENT_AUCTIONS_REGULAR / _PRO
 const MAX_AUCTIONS = { base: 5, pro: 10 };
 const START_BALANCE = 113;
-const PRICE = { C: 8, PC: 20, R: 45, SR: 110, UR: 260, L: 600 };
+// typical prices per rarity: the live game's (snapshot), else a rough guess
+const PRICE = { C: 8, PC: 20, R: 45, SR: 110, UR: 260, L: 600, ...Object.fromEntries(Object.entries(SNAPSHOT_PRICES || {}).filter(([, v]) => v != null)) };
 const RANK = { L: 5, UR: 4, SR: 3, R: 2, PC: 1, C: 0 };
 
 const norm = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -83,12 +84,12 @@ export default function mockApiPlugin() {
       // Three friends with deterministic collections, and trades shaped like the live data:
       // two incoming offers (one with coins), a counter-offer chain (with coins), and an offer I sent.
       const FRIENDS = [
-        { id: "u_k4rma", username: "K4rma", avatar_url: null },
-        { id: "u_doobii", username: "doobii", avatar_url: CATALOG.find((c) => c.image_url)?.image_url || null },
-        { id: "u_march", username: "Marchandise", avatar_url: null },
+        { id: "u_basile", username: "Basile", avatar_url: null },
+        { id: "u_alix", username: "alix", avatar_url: CATALOG.find((c) => c.image_url)?.image_url || null },
+        { id: "u_capucine", username: "Capucine", avatar_url: null },
       ];
       const ME = { id: "me", username: state.profile.username, avatar_url: null };
-      // doobii owns the whole catalog plus a shiny second copy of every fourth card: more than one
+      // alix owns the whole catalog plus a shiny second copy of every fourth card: more than one
       // page (PAGE rows), like real collections, so paging, search and filters run on the server
       const ownedBy = (n) => (n === 1 ? [...CATALOG.map((card) => [card, false]), ...CATALOG.filter((_, i) => i % 4 === 0).map((card) => [card, true])]
         : CATALOG.filter((_, i) => i % 3 === n).map((card, i) => [card, i === 2]));
@@ -105,19 +106,19 @@ export default function mockApiPlugin() {
       function seedTrades() {
         const mine = [...state.collection.values()];
         state.trades = [
-          trade({ id: "tr_doobii", initiator_id: "u_doobii", recipient_id: "me", created_at: ago(7 * 86400000), updated_at: ago(7 * 86400000) }),
-          trade({ id: "tr_k_root", initiator_id: "me", recipient_id: "u_k4rma", status: "countered", created_at: ago(5 * 3600000), updated_at: ago(5 * 3600000) }),
-          trade({ id: "tr_k_counter", initiator_id: "u_k4rma", recipient_id: "me", status: "declined", parent_trade_id: "tr_k_root", recipient_wikibidous: 100, created_at: ago(4 * 3600000), updated_at: ago(3600000) }),
-          trade({ id: "tr_march", initiator_id: "me", recipient_id: "u_march", initiator_wikibidous: 20, created_at: ago(2 * 3600000), updated_at: ago(2 * 3600000) }),
-          trade({ id: "tr_k_new", initiator_id: "u_k4rma", recipient_id: "me", initiator_wikibidous: 30, created_at: ago(40 * 60000), updated_at: ago(40 * 60000) }),
+          trade({ id: "tr_alix", initiator_id: "u_alix", recipient_id: "me", created_at: ago(7 * 86400000), updated_at: ago(7 * 86400000) }),
+          trade({ id: "tr_k_root", initiator_id: "me", recipient_id: "u_basile", status: "countered", created_at: ago(5 * 3600000), updated_at: ago(5 * 3600000) }),
+          trade({ id: "tr_k_counter", initiator_id: "u_basile", recipient_id: "me", status: "declined", parent_trade_id: "tr_k_root", recipient_wikibidous: 100, created_at: ago(4 * 3600000), updated_at: ago(3600000) }),
+          trade({ id: "tr_march", initiator_id: "me", recipient_id: "u_capucine", initiator_wikibidous: 20, created_at: ago(2 * 3600000), updated_at: ago(2 * 3600000) }),
+          trade({ id: "tr_k_new", initiator_id: "u_basile", recipient_id: "me", initiator_wikibidous: 30, created_at: ago(40 * 60000), updated_at: ago(40 * 60000) }),
         ];
         const seed = (t, give, get) => { t.items = [...give.map((uc) => item(t.id, "me", uc)), ...get.map(([owner, uc]) => item(t.id, owner, uc))]; };
-        const [k0, k1, , k3, k4] = friendCards.get("u_k4rma"), [d0] = friendCards.get("u_doobii"), [m0, m1] = friendCards.get("u_march");
-        seed(state.trades[0], [mine[1]], [["u_doobii", d0]]);
-        seed(state.trades[1], [mine[0]], [["u_k4rma", k0]]);
-        seed(state.trades[2], [mine[0]], [["u_k4rma", k1]]);
-        seed(state.trades[3], [mine[2]], [["u_march", m0], ["u_march", m1]]);
-        seed(state.trades[4], [mine[3]], [["u_k4rma", k3], ["u_k4rma", k4]]);
+        const [k0, k1, , k3, k4] = friendCards.get("u_basile"), [d0] = friendCards.get("u_alix"), [m0, m1] = friendCards.get("u_capucine");
+        seed(state.trades[0], [mine[1]], [["u_alix", d0]]);
+        seed(state.trades[1], [mine[0]], [["u_basile", k0]]);
+        seed(state.trades[2], [mine[0]], [["u_basile", k1]]);
+        seed(state.trades[3], [mine[2]], [["u_capucine", m0], ["u_capucine", m1]]);
+        seed(state.trades[4], [mine[3]], [["u_basile", k3], ["u_basile", k4]]);
         state.chats = new Map(FRIENDS.map((f) => [f.id, [
           { id: "m_" + f.id + "_1", sender_id: f.id, recipient_id: "me", content: "Salut, ça te dit un échange ?", created_at: ago(26 * 3600000), read: true },
           { id: "m_" + f.id + "_2", sender_id: "me", recipient_id: f.id, content: "Carrément, je regarde ta collection.", created_at: ago(25 * 3600000), read: true },
@@ -186,7 +187,7 @@ export default function mockApiPlugin() {
           base_amount: base, current_bid: bid, effective_bid: bid ?? base, current_bidder_id: top,
           final_price: null, created_at: iso(ends.get(id) - 86400000), end_at: iso(ends.get(id)),
           settled_at: null, base_repriced_at: null, winner_id: null,
-          seller: { username: ["louizor", "Nebubulae", "Kaze", "Nova", "Orion"][Math.floor(next() * 5)] },
+          seller: { username: ["Dorian", "Elsa", "Félix", "Gaspard", "Hortense"][Math.floor(next() * 5)] },
           seller_id: "other", owned: ownsCard(card.id), // owned = I own a copy, like the real API
         };
       }
@@ -553,10 +554,10 @@ const SAMPLE_SPECIAL_PACKS = [
 // Shaped like the live rows (types, titles and data keys recorded by test:prod, see
 // docs/api-shapes.json): every row carries its own data.title and data.message.
 const NOTIFS = [
-  { id: "n0", type: "trade_offer", data: { title: "🔄 Nouvelle offre d'échange !", message: "doobii vous propose un échange.", trade_id: "tr_doobii", initiator_id: "u_doobii", initiator_username: "doobii" }, read: false, created_at: ago(2 * 60000) },
+  { id: "n0", type: "trade_offer", data: { title: "🔄 Nouvelle offre d'échange !", message: "alix vous propose un échange.", trade_id: "tr_alix", initiator_id: "u_alix", initiator_username: "alix" }, read: false, created_at: ago(2 * 60000) },
   { id: "n1", type: "marketplace_outbid", data: { title: "📉 Vous avez été surenchéri", message: "Quelqu'un a surenchéri sur Albert Einstein.", auction_id: "auc_card_1", card_id: "card_1", card_title: "Albert Einstein", new_bid: 640, previous_bid: 600 }, read: false, created_at: ago(5 * 60000) },
-  { id: "n2", type: "battle_invite", data: { title: "Nouveau défi !", message: "K4rma vous défie en duel.", battle_id: "b1", challenger_id: "u_k4rma", challenger_username: "K4rma" }, read: false, created_at: ago(40 * 60000) },
-  { id: "n3", type: "trade_accepted", data: { title: "✅ Offre acceptée !", message: "Marchandise a accepté votre offre.", trade_id: "tr_march", recipient_id: "u_march", recipient_username: "Marchandise" }, read: true, created_at: ago(3 * 3600000) },
+  { id: "n2", type: "battle_invite", data: { title: "Nouveau défi !", message: "Basile vous défie en duel.", battle_id: "b1", challenger_id: "u_basile", challenger_username: "Basile" }, read: false, created_at: ago(40 * 60000) },
+  { id: "n3", type: "trade_accepted", data: { title: "✅ Offre acceptée !", message: "Capucine a accepté votre offre.", trade_id: "tr_march", recipient_id: "u_capucine", recipient_username: "Capucine" }, read: true, created_at: ago(3 * 3600000) },
   { id: "n4", type: "marketplace_auction_sold", data: { title: "💰 Carte vendue !", message: "Marie Curie s'est vendue 210 WikiBidous.", auction_id: "auc_card_2", card_id: "card_2", card_title: "Marie Curie", final_price: 210 }, read: true, created_at: ago(26 * 3600000) },
   { id: "n5", type: "marketplace_auction_unsold", data: { title: "Enchère terminée sans acheteur", message: "Votre vente de Léonard de Vinci s'est terminée sans enchère.", auction_id: "auc_card_3", card_id: "card_3", card_title: "Léonard de Vinci" }, read: true, created_at: ago(30 * 3600000) },
 ];
