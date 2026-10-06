@@ -64,7 +64,8 @@ App layout with a bottom tab bar.
 
 ```
 bun run dev                    # localhost:5173, the mock game (run from the repo root)
-bun run build                  # everything: userscript, Chrome and Firefox packages
+bun run build                  # everything into dist/: userscript, Chrome and Firefox packages
+bun run clean                  # remove what builds and tests generate
 bun run test                   # unit tests
 bun run check                  # style check
 cd wm-userscript

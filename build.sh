@@ -2,9 +2,10 @@
 # Builds every target into dist/ (at the repo root): the Tampermonkey userscript, the Chrome and
 # Firefox extensions.
 #   bun run build   (or ./build.sh)
+#   bun run clean   (or ./build.sh clean): removes what builds and tests generate
 set -eu
 
-# [*] info  [+] did something  [-] warn, kept going  [x] fatal
+# [*] info  [+] did something  [=] already converged  [-] warn, kept going  [x] fatal
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
     B='\033[1;34m' G='\033[1;32m' Y='\033[1;33m' R='\033[31m' D='\033[2m' N='\033[0m'
 else
@@ -12,6 +13,7 @@ else
 fi
 hdr()  { printf "${B}[*]${N} %s\n" "$1"; }
 ok()   { printf "${G}[+]${N} %s\n" "$1"; }
+skip() { printf "${D}[=] %s${N}\n" "$1"; }
 die()  { printf "${R}[x]${N} %s\n" "$1" >&2; exit 1; }
 
 TOTAL=4 I=0
@@ -23,8 +25,22 @@ LOG=$(mktemp); trap 'rm -f "$LOG"' EXIT
 quiet() { "$@" >"$LOG" 2>&1 || { cat "$LOG" >&2; die "failed: $*"; }; }
 size()  { du -h "$1" | cut -f1; }
 
-command -v bun >/dev/null || die "bun is required: https://bun.sh"
 cd "$(dirname "$0")"
+
+if [ "${1:-}" = clean ]; then
+    # generated only: never the committed userscript copies, the test login profile or node_modules
+    hdr "Clean"
+    n=0
+    for p in dist/chrome dist/firefox dist/wiki-remaster-chrome.zip dist/wiki-remaster-firefox.zip \
+             wm-userscript/.prod-test wm-userscript/mock/snapshot.json.tmp wm-userscript/node_modules/.vite; do
+        [ -e "$p" ] || continue
+        rm -rf "$p" && ok "removed $p" && n=$((n + 1))
+    done
+    [ "$n" -gt 0 ] || skip "nothing to remove"
+    exit 0
+fi
+
+command -v bun >/dev/null || die "bun is required: https://bun.sh"
 VERSION=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' wm-userscript/package.json)
 hdr "Wiki Remaster $VERSION"
 
