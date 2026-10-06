@@ -4,7 +4,8 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
-const root = new URL("../", import.meta.url).pathname;
+const root = new URL("../", import.meta.url).pathname; // wm-userscript/
+const dist = new URL("../../dist/", import.meta.url).pathname; // the builds, at the repo root
 const pkg = JSON.parse(readFileSync(root + "package.json", "utf8"));
 
 const sites = ["https://www.wiki-masters.com/*", "https://wiki-masters.com/*"];
@@ -23,11 +24,11 @@ const gecko = { gecko: { id: "wiki-remaster@hugo.wikimasters", strict_min_versio
 
 // Chrome: MAIN-world content scripts since 111
 for (const [browser, extra] of [["chrome", { minimum_chrome_version: "111" }], ["firefox", { browser_specific_settings: gecko }]]) {
-  const out = `${root}dist/${browser}/`, zip = `${root}dist/wiki-remaster-${browser}.zip`;
+  const out = `${dist}${browser}/`, zip = `${dist}wiki-remaster-${browser}.zip`;
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   writeFileSync(out + "manifest.json", JSON.stringify({ ...manifest, ...extra }, null, 2) + "\n");
-  copyFileSync(root + "dist/wikimasters-app.user.js", out + "content.js");
+  copyFileSync(dist + "wikimasters-app.user.js", out + "content.js");
   for (const f of Object.values(icons)) copyFileSync(root + "extension/" + f, out + f);
   rmSync(zip, { force: true });
   execFileSync("zip", ["-qrX", zip, "."], { cwd: out });

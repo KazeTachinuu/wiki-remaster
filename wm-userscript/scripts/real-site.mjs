@@ -22,7 +22,7 @@ export async function login() {
  * Returns the view and its helpers; `close()` also closes a visible browser.
  */
 export async function realSite({ show = false, attach = false, width = 1400, height = 900, onError = () => {} } = {}) {
-  const dist = await Bun.file(new URL("../dist/wikimasters-app.user.js", import.meta.url)).text();
+  const dist = await Bun.file(new URL("../../dist/wikimasters-app.user.js", import.meta.url)).text();
   let shown = null;
   let backend;
   if (attach) backend = undefined;

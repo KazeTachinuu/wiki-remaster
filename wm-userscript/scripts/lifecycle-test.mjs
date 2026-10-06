@@ -9,7 +9,7 @@
 
 const SITE = "https://www.wiki-masters.com";
 const PROFILE = new URL("../.prod-profile", import.meta.url).pathname;
-const DIST = await Bun.file(new URL("../dist/wikimasters-app.user.js", import.meta.url)).text();
+const DIST = await Bun.file(new URL("../../dist/wikimasters-app.user.js", import.meta.url)).text();
 const BROWSER = process.env.WM_BROWSER || ["brave", "chromium", "google-chrome-stable"].map((b) => Bun.which(b)).find(Boolean);
 
 // Run one page-side function against the local build, in a fresh browser session.

@@ -22,6 +22,9 @@ tool-results/
 client-bundles/
 
 # Only ship the built userscript from dist, not regenerated assets
+dist/*
+!dist/wikimasters-app.user.js
+# the old address of the userscript, kept for one release so older installs find the update
 wm-userscript/dist/*
 !wm-userscript/dist/wikimasters-app.user.js
 

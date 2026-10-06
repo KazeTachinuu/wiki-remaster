@@ -1,6 +1,6 @@
 # Store listing
 
-Packages: `./build.sh`, then `wm-userscript/dist/wiki-remaster-{chrome,firefox}.zip`.
+Packages: `bun run build`, then `dist/wiki-remaster-{chrome,firefox}.zip`.
 
 ## Listing
 

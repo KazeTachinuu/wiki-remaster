@@ -6,14 +6,14 @@ An unofficial redesign of [wiki-masters.com](https://www.wiki-masters.com), in y
 
 ## Install
 
-[![Install Wiki Remaster](https://img.shields.io/badge/Install-Wiki%20Remaster-3CCB8E?style=for-the-badge&logo=tampermonkey&logoColor=white)](https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js)
+[![Install Wiki Remaster](https://img.shields.io/badge/Install-Wiki%20Remaster-3CCB8E?style=for-the-badge&logo=tampermonkey&logoColor=white)](https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js)
 
 | Device | How |
 |---|---|
 | Computer | [Tampermonkey](https://www.tampermonkey.net/), then the button above |
 | Android | Firefox + Tampermonkey add-on, then the button |
 | iPhone | Safari + [Userscripts](https://apps.apple.com/app/userscripts/id1463298887) (Settings, Safari, Extensions) |
-| Extension (no Tampermonkey) | `./build.sh`, then load `wm-userscript/dist/chrome` or `dist/firefox` unpacked |
+| Extension (no Tampermonkey) | `bun run build`, then load `dist/chrome` or `dist/firefox` unpacked |
 
 Updates are automatic. **Site original** (or the phone menu) goes back to the original site.
 

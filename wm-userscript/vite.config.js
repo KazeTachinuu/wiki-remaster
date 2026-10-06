@@ -36,8 +36,8 @@ export default defineConfig(({ command }) => ({
               supportURL: "https://github.com/KazeTachinuu/wiki-remaster/issues",
               // Tampermonkey checks these to auto-update. They resolve once the built file
               // is reachable at a public raw URL (repo public, or a public release).
-              updateURL: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js",
-              downloadURL: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/wm-userscript/dist/wikimasters-app.user.js",
+              updateURL: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js",
+              downloadURL: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.user.js",
             },
             build: { fileName: "wikimasters-app.user.js" },
             server: { open: false },
@@ -45,6 +45,8 @@ export default defineConfig(({ command }) => ({
         ]
       : []),
   ],
+  // every build lands in dist/ at the repo root
+  build: { outDir: fileURLToPath(new URL("../dist", import.meta.url)), emptyOutDir: false },
   server: {
     port: 5173,
   },

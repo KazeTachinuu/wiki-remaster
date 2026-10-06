@@ -1,6 +1,7 @@
 #!/bin/sh
-# Builds every target: the Tampermonkey userscript, the Chrome and Firefox extensions.
-#   ./build.sh
+# Builds every target into dist/ (at the repo root): the Tampermonkey userscript, the Chrome and
+# Firefox extensions.
+#   bun run build   (or ./build.sh)
 set -eu
 
 # [*] info  [+] did something  [-] warn, kept going  [x] fatal
@@ -23,16 +24,19 @@ quiet() { "$@" >"$LOG" 2>&1 || { cat "$LOG" >&2; die "failed: $*"; }; }
 size()  { du -h "$1" | cut -f1; }
 
 command -v bun >/dev/null || die "bun is required: https://bun.sh"
-cd "$(dirname "$0")/wm-userscript"
-VERSION=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' package.json)
+cd "$(dirname "$0")"
+VERSION=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' wm-userscript/package.json)
 hdr "Wiki Remaster $VERSION"
 
-quiet bun install
+quiet bun install --cwd wm-userscript
 step "dependencies"
 
-quiet bunx vite build
+(cd wm-userscript && quiet bunx vite build) || exit 1
+# the old address too, for one release: installs from before still check it for updates, and the
+# copy they fetch points them to dist/ from then on
+mkdir -p wm-userscript/dist && cp dist/wikimasters-app.user.js wm-userscript/dist/wikimasters-app.user.js
 step "tampermonkey" "dist/wikimasters-app.user.js ($(size dist/wikimasters-app.user.js))"
 
-quiet bun scripts/extension.mjs
+quiet bun wm-userscript/scripts/extension.mjs
 step "chrome" "dist/wiki-remaster-chrome.zip ($(size dist/wiki-remaster-chrome.zip))"
 step "firefox" "dist/wiki-remaster-firefox.zip ($(size dist/wiki-remaster-firefox.zip))"
