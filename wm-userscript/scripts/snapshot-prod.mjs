@@ -3,17 +3,19 @@
 //
 //   bun run build && bun scripts/snapshot-prod.mjs   ->  mock/snapshot.json
 import { realSite } from "./real-site.mjs";
+import { renameSync, existsSync, readFileSync } from "node:fs";
 
 const OUT = new URL("../mock/snapshot.json", import.meta.url).pathname;
 const PER_RARITY = 40;
 const RARITIES = ["C", "PC", "R", "SR", "UR", "L"];
 const PAUSE_MS = 450; // the game reads bursts as automation: one request at a time, spaced
 
-// [*] step  [+] done  [-] warning, kept going  [x] fatal
+// [*] step  [+] done  [=] already up to date  [-] warning, kept going  [x] fatal
 const tty = process.stdout.isTTY && !process.env.NO_COLOR;
 const c = (code, s) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
 const hdr = (s) => console.log(`${c("1;34", "[*]")} ${s}`);
 const ok = (s) => console.log(`${c("1;32", "[+]")} ${s}`);
+const same = (s) => console.log(c("2", `[=] ${s}`));
 const warn = (s) => console.error(`${c("1;33", "[-]")} ${s}`);
 const die = (s) => { console.error(`${c("31", "[x]")} ${s}`); process.exit(2); };
 const tick = (n, total, s) => tty && process.stdout.write(`\r    ${String(n).padStart(3)}/${total} ${s}\x1b[K`);
@@ -66,6 +68,19 @@ await site.close();
 // typical price per rarity: the median of the real sold averages
 const median = (xs) => { const s = xs.filter((x) => x != null).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
 const prices = Object.fromEntries(RARITIES.map((r) => [r, median(cards.filter((x) => x.rarity === r).map((x) => x.avg))]));
-await Bun.write(OUT, JSON.stringify({ capturedAt: new Date().toISOString(), prices, cards }, null, 1) + "\n");
-ok(`${cards.length} cards, typical prices ${Object.entries(prices).map(([r, p]) => `${r} ${p ?? "-"}`).join(" ")}`);
-ok(`mock/snapshot.json in ${Math.round((Date.now() - started) / 1000)} s`);
+// stable output: cards in a fixed order, so an unchanged game gives an unchanged file
+const ORDER = Object.fromEntries(RARITIES.map((r, i) => [r, i]));
+cards.sort((a, b) => ORDER[a.rarity] - ORDER[b.rarity] || String(a.id).localeCompare(String(b.id)));
+const body = (o) => JSON.stringify({ prices: o.prices, cards: o.cards });
+const previous = existsSync(OUT) ? JSON.parse(readFileSync(OUT, "utf8")) : null;
+const summary = `${cards.length} cards, typical prices ${Object.entries(prices).map(([r, p]) => `${r} ${p ?? "-"}`).join(" ")}`;
+if (previous && body(previous) === body({ prices, cards })) {
+  same(`mock/snapshot.json unchanged (${summary})`);
+} else {
+  // atomic: written next to it, then renamed over it in one step; never a half-written file
+  const tmp = `${OUT}.tmp`;
+  await Bun.write(tmp, JSON.stringify({ capturedAt: new Date().toISOString(), prices, cards }, null, 1) + "\n");
+  renameSync(tmp, OUT);
+  ok(summary);
+  ok(`mock/snapshot.json written in ${Math.round((Date.now() - started) / 1000)} s`);
+}

@@ -28,3 +28,4 @@ wm-userscript/dist/*
 # Prod test screenshots
 wm-userscript/.prod-test/
 wm-userscript/.prod-profile/
+wm-userscript/mock/snapshot.json.tmp
