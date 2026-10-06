@@ -169,3 +169,21 @@ button.pk-chip:hover{border-color:var(--line2)}
 .view{padding:clamp(var(--s5),3.5vw,var(--s7));padding-bottom:max(clamp(var(--s5),3.5vw,var(--s7)),72px);max-width:1600px;width:100%;margin:0 auto}
 /* a pack reveal is a moment, not a list: let it use the whole width on big screens */
 .view:has(> .pulls > .reveal-all){max-width:none}
+
+/* the sidebar folds to a rail of icons (wide screens only: phones have the tab bar); remembered */
+.side-toggle{margin-left:auto;display:grid;place-items:center;width:30px;height:30px;border-radius:8px;border:0;background:none;color:var(--fg-faint);cursor:pointer;transition:color .15s,background .15s}
+.side-toggle:hover{color:var(--fg);background:var(--elev)}
+.side-toggle svg{width:18px;height:18px}
+@media(min-width:901px){
+  .app{transition:grid-template-columns .22s ease}
+  .app.rail{--sidebar:72px}
+  .app.rail .side{padding-inline:var(--s2)}
+  .app.rail .brand{justify-content:center;padding:0}
+  .app.rail .brand .mk,.app.rail .brand b,.app.rail .side .nav-long,.app.rail .nav-lbl,.app.rail .foot-txt,.app.rail .hintline,.app.rail .side-foot .ghost{display:none}
+  .app.rail .side-toggle{margin:0}
+  .app.rail .nav button{justify-content:center;padding-inline:0}
+  .app.rail .nav-sep{font-size:0;padding:0;margin:var(--s3) 10px;border-top:1px solid var(--line)}
+  .app.rail .nav-grid{grid-template-columns:1fr}
+  .app.rail .side-foot{align-items:center;padding-inline:0}
+}
+@media(prefers-reduced-motion:reduce){.app{transition:none}}

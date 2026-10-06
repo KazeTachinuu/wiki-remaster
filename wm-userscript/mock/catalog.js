@@ -1,4 +1,4 @@
-// Mock catalog for local WikiMasters prototype.
+// Mock catalog for the local Wiki Remaster dev server.
 // Seeded with real card data captured from the live app (titles, categories,
 // stats, Wikimedia images) plus a few extra commons/legendaries for variety.
 // rarity order: C=0 PC=1 R=2 SR=3 UR=4 L=5

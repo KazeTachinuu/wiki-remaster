@@ -18,7 +18,7 @@ const manifest = {
   manifest_version: 3,
   name: "Wiki Remaster",
   version: pkg.version,
-  description: "A redesign of wiki-masters.com, on the game's own data and your session.",
+  description: "Unofficial redesign of wiki-masters.com, on the game's own data and your own session.",
   homepage_url: "https://github.com/KazeTachinuu/wiki-remaster",
   icons,
   content_scripts: [{ matches: sites, js: ["content.js"], run_at: "document_start", world: "MAIN" }],

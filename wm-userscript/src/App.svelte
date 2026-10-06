@@ -10,7 +10,7 @@
   import LoadBar from "./components/LoadBar.svelte";
   import SoundControl from "./components/SoundControl.svelte";
   import SoundSettings from "./components/SoundSettings.svelte";
-  import { settings, toggleHideStats, useOriginalSite } from "./lib/settings.svelte.js";
+  import { settings, toggleHideStats, useOriginalSite, toggleSideRail } from "./lib/settings.svelte.js";
   import HumanCheck from "./components/HumanCheck.svelte";
   import { ago, clock } from "./lib/format.js";
   import { packTimer } from "./lib/packTimer.svelte.js";
@@ -174,7 +174,7 @@
   $effect(() => tabTicks(appEl.getRootNode()));
   let help = $state(false);
   let menuOpen = $state(false);
-  const SHORTCUTS = [["/", "Rechercher"], ["1 à 5", "Changer d'écran"], ["Espace", "Ouvrir un paquet"], ["Flèches", "Parcourir les cartes révélées"], ["Échap", "Fermer"], ["?", "Afficher cette aide"]];
+  const SHORTCUTS = [["/", "Rechercher"], ["1 à 5", "Changer d'écran"], ["Espace", "Ouvrir un paquet"], ["Flèches", "Parcourir les cartes révélées"], ["Échap", "Fermer"], ["[", "Replier ou déplier le menu"], ["?", "Afficher cette aide"]];
   function onKey(e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const el = e.composedPath()[0];
@@ -186,6 +186,7 @@
     if (e.key === "Escape") { if (help || notifOpen || menuOpen) e.preventDefault(); help = false; notifOpen = false; menuOpen = false; return; }
     if (appEl?.querySelector(".modal-backdrop")) return; // a dialog owns the keyboard
     if (e.key === "?") help = !help;
+    if (e.key === "[") toggleSideRail();
     else if (e.key === "/") { e.preventDefault(); appEl?.querySelector("input.search")?.focus(); }
     else if (/^[1-5]$/.test(e.key)) go(VIEWS[e.key - 1]);
   }
@@ -193,13 +194,16 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="app" bind:this={appEl}>
+<div class="app" class:rail={settings.sideRail} bind:this={appEl}>
   <LoadBar />
   <aside class="side">
-    <div class="brand"><span class="mk"></span><b>WikiMasters</b></div>
+    <div class="brand"><span class="mk"></span><b>Wiki Remaster</b>
+      <button type="button" class="side-toggle" onclick={toggleSideRail} aria-expanded={!settings.sideRail}
+        aria-label={settings.sideRail ? "Déplier le menu" : "Replier le menu"} title={(settings.sideRail ? "Déplier le menu" : "Replier le menu") + " ( [ )"}><Icon name="sidebar" width={1.7} /></button>
+    </div>
     <nav class="nav" bind:this={navEl} use:scrollFade={{ axis: "x" }}>
       {#each VIEWS as v}
-        <button type="button" class:on={view === v.id} aria-current={view === v.id ? "page" : undefined} onclick={() => go(v)}><Icon name={v.icon} width={1.7} /><span class="nav-long">{v.label}</span><span class="nav-short">{v.short ?? v.label}</span></button>
+        <button type="button" class:on={view === v.id} aria-current={view === v.id ? "page" : undefined} title={settings.sideRail ? v.label : undefined} onclick={() => go(v)}><Icon name={v.icon} width={1.7} /><span class="nav-long">{v.label}</span><span class="nav-short">{v.short ?? v.label}</span></button>
       {/each}
       <div class="nav-sep">Le reste du site</div>
       <div class="nav-grid">
@@ -210,7 +214,7 @@
     </nav>
     <div class="side-foot">
       {#if data.canReset}<button class="ghost" onclick={reset}>Réinitialiser</button>{/if}
-      <button class="foot-link" onclick={() => (help = true)}><span class="kbd">?</span>Raccourcis clavier</button>
+      <button class="foot-link" onclick={() => (help = true)} title="Raccourcis clavier"><span class="kbd">?</span><span class="foot-txt">Raccourcis clavier</span></button>
       <div class="hintline">{data.isReal ? "Connecté à WikiMasters" : "Serveur de test local"}</div>
     </div>
   </aside>

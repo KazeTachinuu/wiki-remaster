@@ -5,6 +5,7 @@ const KEY = "wm-settings";
 const DEFAULTS = {
   hideStats: false, // hide ATK/DEF everywhere
   hideSensitive: true, // blur images flagged nsfw_image until revealed
+  sideRail: false, // the sidebar folded to a rail of icons (wide screens)
   collection: { sort: "rarity", filter: "ALL", favOnly: false, shinyOnly: false },
   catalog: { sort: "rarity", rarity: "", wishOnly: false },
   market: { tab: "browse", sort: "recent", rarity: "" },
@@ -28,6 +29,7 @@ $effect.root(() => {
 
 export const toggleHideStats = () => (settings.hideStats = !settings.hideStats);
 export const toggleHideSensitive = () => (settings.hideSensitive = !settings.hideSensitive);
+export const toggleSideRail = () => (settings.sideRail = !settings.sideRail);
 
 /** Switch back to the native site (the overlay stays off until re-enabled). */
 export function useOriginalSite(path) {

@@ -24,7 +24,7 @@ size()  { du -h "$1" | cut -f1; }
 command -v bun >/dev/null || die "bun is required: https://bun.sh"
 cd "$(dirname "$0")/wm-userscript"
 VERSION=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' package.json)
-hdr "wiki-remaster $VERSION"
+hdr "Wiki Remaster $VERSION"
 
 quiet bun install
 step "dependencies"

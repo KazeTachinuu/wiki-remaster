@@ -1,4 +1,4 @@
-/* WikiMasters app. Flat, elegant, modern. Airy spacing on an 8px rhythm. */
+/* Wiki Remaster. Flat, elegant, modern. Airy spacing on an 8px rhythm. */
 /* Mounted in a shadow root, so tokens live on :host (and :root for the dev fallback). */
 :host, :root {
   --bg:#0C0D0C; --surface:#141613; --elev:#191C18; --elev2:#20241F;

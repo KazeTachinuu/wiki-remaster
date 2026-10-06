@@ -24,7 +24,7 @@ export default defineConfig(({ command }) => ({
               namespace: "hugo.wikimasters",
               version: pkg.version,
               description:
-                "Redesigned client for wiki-masters.com. Uses the real API and session.",
+                "Unofficial redesign of wiki-masters.com, on the game's own data and your own session.",
               author: "Hugo Sibony",
               match: ["https://www.wiki-masters.com/*", "https://wiki-masters.com/*"],
               runAt: "document-start",
