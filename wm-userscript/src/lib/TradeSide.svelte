@@ -9,10 +9,13 @@
   import { nf } from "./format.js";
   let { label, items, coins = 0, values, cols = 1, narrow = false, empty = "Rien", onopen } = $props();
   const value = $derived(sideValue(items, coins, values));
+  // nothing priced at all: say so once, quietly; partly priced: "≈ total", the gap in the tooltip
+  const none = $derived(value.unknown > 0 && value.unknown === items.length && !coins);
+  const missing = $derived(value.unknown ? `${value.unknown} carte${value.unknown > 1 ? "s" : ""} sans valeur estimée` : null);
 </script>
 
 <section class="tside">
-  <header class="tside-head"><span>{label}</span><span class="tside-total">{value.unknown ? "≈ " : ""}{nf(value.total)} pts{#if value.unknown}<em> · {value.unknown} sans valeur</em>{/if}</span></header>
+  <header class="tside-head"><span>{label}</span>{#if none}<span class="tside-total is-none" title={missing}>Non estimé</span>{:else}<span class="tside-total" title={missing}>{value.unknown ? "≈ " : ""}{nf(value.total)} pts</span>{/if}</header>
   {#if !items.length && !coins}
     <div class="tside-none">{empty}</div>
   {:else}

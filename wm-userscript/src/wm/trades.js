@@ -89,7 +89,7 @@ export function verdict(give, get) {
   return { kind: diff > 0 ? "advantage" : "disadvantage", diff };
 }
 
-const BALANCE = { unknown: () => "Valeur incertaine", balanced: () => "Équilibré", advantage: (d) => `+${nf(d)} pour vous`, disadvantage: (d) => `${nf(d)} pour vous` };
+const BALANCE = { unknown: () => "Non estimé", balanced: () => "Équilibré", advantage: (d) => `+${nf(d)} pour vous`, disadvantage: (d) => `${nf(d)} pour vous` };
 /** A verdict in one short line (list rows, composer bar). */
 export const balanceLabel = (v) => BALANCE[v.kind](v.diff);
 const TITLE = { unknown: BALANCE.unknown(), balanced: BALANCE.balanced(), advantage: "À votre avantage", disadvantage: "À votre désavantage" };
@@ -115,8 +115,8 @@ export function dealLine(giveCards, giveCoins, getCards, getCoins) {
   return `${keep(withCoins(giveCards, giveCoins, true) || "rien")} ${keep(`contre ${withCoins(getCards, getCoins, !mineWord) || "rien"}`)}`;
 }
 
-const BADGE = { unknown: () => "?", balanced: () => "=", advantage: (d) => `+${nf(d)}`, disadvantage: (d) => nf(d) };
-/** A verdict as a list badge: the signed gap in points, "=" when balanced, "?" when a value is missing. */
+const BADGE = { unknown: () => "-", balanced: () => "=", advantage: (d) => `+${nf(d)}`, disadvantage: (d) => nf(d) };
+/** A verdict as a list badge: the signed gap in points, "=" when balanced, a dash when a value is missing. */
 export const balanceBadge = (v) => BADGE[v.kind](v.diff);
 
 /** The row `delta` steps from the selected one (arrow keys), held at the ends; the first row when none is selected. */

@@ -1,5 +1,6 @@
 <script>
-  // Is the deal fair, from my side: a title and the gap (or how many cards have no value yet).
+  // Is the deal fair, from my side: a title and the gap. With a card unpriced there is no verdict
+  // to give, so only the swap icon stays (each side already says what it could not estimate).
   import Icon from "./Icon.svelte";
   import { verdictTitle } from "../wm/index.js";
   import { nf } from "./format.js";
@@ -8,7 +9,6 @@
 
 <div class="tm-verdict" data-k={v.kind}>
   <Icon name="trades" />
-  <b>{verdictTitle(v)}</b>
-  {#if v.kind === "unknown"}<span>{v.unknown} carte{v.unknown > 1 ? "s" : ""} sans valeur</span>
-  {:else if v.kind !== "balanced"}<span>{v.diff > 0 ? "+" : ""}{nf(v.diff)} pts</span>{/if}
+  {#if v.kind !== "unknown"}<b>{verdictTitle(v)}</b>{/if}
+  {#if v.kind === "advantage" || v.kind === "disadvantage"}<span>{v.diff > 0 ? "+" : ""}{nf(v.diff)} pts</span>{/if}
 </div>

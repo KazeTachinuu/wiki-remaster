@@ -796,7 +796,8 @@
 .trade-status{display:inline-flex;align-items:center;font-size:11.5px;font-weight:700;line-height:1;padding:4px 9px;border-radius:999px;background:var(--elev2);color:var(--fg-soft);white-space:nowrap}
 .trade-status[data-s="pending"]{background:color-mix(in oklab,var(--r-l) 14%,transparent);color:var(--r-l)}
 .trade-status[data-s="accepted"]{background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--accent)}
-.trade-status[data-s="declined"],.trade-status[data-s="cancelled"]{color:var(--fg-faint)}
+.trade-status[data-s="declined"]{background:color-mix(in oklab,var(--bad) 15%,transparent);color:var(--bad)}
+.trade-status[data-s="cancelled"]{color:var(--fg-faint)}
 .tr-head{margin-bottom:var(--s4);align-items:center}
 .tr-split{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
 .tr-col,.tr-pane{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);min-width:0}
@@ -862,7 +863,7 @@
 .tside{flex:none;display:flex;flex-direction:column;gap:var(--s3);min-width:0;padding:calc(var(--deal-pad) - 1px);border-radius:var(--radius);background:var(--elev);border:1px solid var(--line)}
 .tside-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px var(--s2);white-space:nowrap;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-soft)}
 .tside-total{text-transform:none;letter-spacing:0;color:var(--fg);font:700 16px/1 var(--display);font-variant-numeric:tabular-nums;white-space:nowrap}
-.tside-total em{font:500 12px var(--body);color:var(--fg-faint);font-style:normal}
+.tside-total.is-none{font:500 13px var(--body);color:var(--fg-faint)}
 .tside-none{color:var(--fg-faint);font-size:13px;padding:var(--s3) 0;width:var(--card-w)}
 .tside-cards{display:flex;flex-wrap:wrap;align-content:flex-start;gap:var(--deal-gap);margin-inline:auto;
   width:calc(var(--cols,1) * var(--card-w) + (var(--cols,1) - 1) * var(--deal-gap))}
@@ -893,7 +894,7 @@
 .tm-verdict{align-self:center;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;color:var(--fg-soft);min-width:120px}
 .tm-verdict svg{width:22px;height:22px}
 .tm-verdict b{font:700 14px/1.2 var(--display);color:var(--fg)}
-.tm-verdict span{font-variant-numeric:tabular-nums;white-space:nowrap}
+.tm-verdict span{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .tm-verdict[data-k="advantage"] b,.tm-verdict[data-k="advantage"] span{color:var(--accent)}
 .tm-verdict[data-k="disadvantage"] b,.tm-verdict[data-k="disadvantage"] span{color:var(--bad)}
 /* in the pane: a medallion between facing sides, a strip between stacked ones */

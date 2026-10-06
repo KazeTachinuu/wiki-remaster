@@ -139,7 +139,7 @@ describe("chatMe", () => {
 
 describe("balanceLabel", () => {
   it("says the verdict in one short line, signed from my side", () => {
-    expect(balanceLabel({ kind: "unknown", diff: 0, unknown: 1 })).toBe("Valeur incertaine");
+    expect(balanceLabel({ kind: "unknown", diff: 0, unknown: 1 })).toBe("Non estimé");
     expect(balanceLabel({ kind: "balanced", diff: 10 })).toBe("Équilibré");
     expect(balanceLabel({ kind: "advantage", diff: 1500 })).toBe(`+${(1500).toLocaleString("fr")} pour vous`);
     expect(balanceLabel({ kind: "disadvantage", diff: -200 })).toBe("-200 pour vous");
@@ -182,7 +182,7 @@ describe("balanceBadge", () => {
     expect(balanceBadge({ kind: "advantage", diff: 50 })).toBe("+50");
     expect(balanceBadge({ kind: "disadvantage", diff: -1500 })).toBe(`-${(1500).toLocaleString("fr")}`);
     expect(balanceBadge({ kind: "balanced", diff: 4 })).toBe("=");
-    expect(balanceBadge({ kind: "unknown", diff: 0, unknown: 2 })).toBe("?");
+    expect(balanceBadge({ kind: "unknown", diff: 0, unknown: 2 })).toBe("-");
   });
 });
 

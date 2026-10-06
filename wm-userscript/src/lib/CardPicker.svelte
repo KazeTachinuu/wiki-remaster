@@ -33,6 +33,18 @@
     ranked = untrack(() => new Map(values));
   });
   const shown = $derived(pickList(items, { q, rarity, sort, values: ranked, isLocked }));
+
+  // A paged list (a friend's cards) arrives in rarity order, and a filter only sees the pages loaded
+  // so far: while it matches less than a screenful, the next page loads by itself, one at a time
+  // and a short pause apart (the game reads bursts as automation), until the list ends.
+  const ENOUGH = 12, PAUSE_MS = 400;
+  const filtering = $derived(!!(q.trim() || rarity));
+  const seeking = $derived(filtering && !!more && !moreError && shown.length < ENOUGH);
+  $effect(() => {
+    if (!seeking || loadingMore || loading) return;
+    const t = setTimeout(() => untrack(() => more()), PAUSE_MS);
+    return () => clearTimeout(t);
+  });
 </script>
 
 <div class="picker">
@@ -57,13 +69,13 @@
         </button>
       {:else}
         {#if error && !loading}<div class="empty"><b>Impossible de charger ces cartes.</b><button class="btn" onclick={onretry}>Réessayer</button></div>
-        {:else}<div class="empty"><b>{loading ? "Chargement..." : items.length ? "Aucune carte ne correspond" : "Aucune carte"}</b></div>{/if}
+        {:else}<div class="empty"><b>{loading ? "Chargement..." : seeking ? "Recherche dans la suite de la collection..." : items.length ? "Aucune carte ne correspond" : "Aucune carte"}</b></div>{/if}
       {/each}
     </div>
     {#if more}
       <div class="picker-more">
         {#if moreError && !loadingMore}<span class="modal-msg">Impossible de charger la suite.</span>{/if}
-        <button class="btn" disabled={loadingMore} onclick={more}>{loadingMore ? "Chargement..." : moreError ? "Réessayer" : "Charger plus"}</button>
+        <button class="btn" disabled={loadingMore || seeking} onclick={more}>{loadingMore || seeking ? "Chargement..." : moreError ? "Réessayer" : "Charger plus"}</button>
       </div>
     {/if}
   </div>
