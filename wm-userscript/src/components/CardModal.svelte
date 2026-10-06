@@ -79,14 +79,17 @@
       .then((d) => { summary = d.extract || ""; sumState = summary ? "done" : "none"; }, () => { if (!ctl.signal.aborted) sumState = "none"; });
     return () => ctl.abort();
   });
+  // until the market answers: the game's average, usually already known from the card grid
   $effect(() => {
     let live = true;
     marketValueFor(c).then((v) => live && (mval = v));
     return () => (live = false);
   });
 
+  // the card's market, read on opening: its price is the "Valeur estimée" of both tabs (the median
+  // of its sales on a Pro account, else the game's average, see rarityMarket), shared for a minute
   $effect(() => {
-    if (tab !== "market" || marketState !== "idle") return;
+    if (marketState !== "idle") return;
     marketState = "loading";
     // a failure (often the game throttling a burst) is retried once after 3 s, then offers a retry
     data.marketStats(c).then((m) => { market = m; marketState = "done"; }, () => {
@@ -113,7 +116,7 @@
   function openSell() {
     sellOpen = true;
     msg = "";
-    if (!price && mval != null) price = String(mval);
+    if (!price && value != null) price = String(value);
   }
 
   // kind: what happened to the card ("sell" | "discard"), for whoever holds the collection; "unsure"
@@ -164,6 +167,8 @@
   // The card's market: its sales at the rarity it has now. The game re-tiers cards over time and
   // keeps older sales under their old rarity, prices of a card that is no longer the same tier.
   const rm = $derived(rarityMarket(market, c.rarity));
+  // the card's value, the same on both tabs and in the sell form
+  const value = $derived(market ? rm.avg : mval);
   // the cheapest live normal copy
   const deal = $derived(listings ? compareListings(listings, now).rows.find((r) => r.cheapest && !r.is_shiny) ?? null : null);
   const v = $derived(marketVerdict(rm, deal?.price ?? null));
@@ -218,7 +223,7 @@
             <p class="modal-sum">{summary}</p>
           {/if}
           <div class="facts">
-            {#if mval != null}<div class="fact"><div class="fk">Valeur estimée</div><div class="fv val">{nf(mval)} pts</div></div>{/if}
+            {#if value != null}<div class="fact"><div class="fk">Valeur estimée</div><div class="fv val">{nf(value)} pts</div></div>{/if}
             {#if !readonly}<div class="fact"><div class="fk">Exemplaires</div><div class="fv">{item.count}{#if item.is_shiny} · brillante{/if}</div></div>{/if}
             {#if c.pageviews != null}<div class="fact"><div class="fk" title="Vues de l'article Wikipédia sur 30 jours">Vues (30 j)</div><div class="fv">{nf(c.pageviews)}</div></div>{/if}
             {#if !settings.hideStats}
@@ -258,7 +263,7 @@
                 <div class="sell2-block">
                   <div class="sell2-lab">
                     <span>Prix de départ</span>
-                    {#if mval != null}<button type="button" class="sell2-suggest" onclick={() => (price = String(mval))}>Estimé {nf(mval)}</button>{/if}
+                    {#if value != null}<button type="button" class="sell2-suggest" onclick={() => (price = String(value))}>Estimé {nf(value)}</button>{/if}
                   </div>
                   <div class="af-input-row">
                     <input class="af-input" type="number" min="1" step="1" inputmode="numeric" bind:value={price} placeholder="0" />
@@ -300,7 +305,7 @@
                 <div class="mk-kpi">
                   <span class="mk-h">Prix du marché</span>
                   <b class="gold">{nf(rm.avg)}</b>
-                  <small>{rm.count ? `${rm.count} vente${rm.count > 1 ? "s" : ""}, de ${nf(rm.min)} à ${nf(rm.max)}` : "moyenne des ventes"}</small>
+                  <small>{rm.basis === "median" ? `médiane de ${rm.count} vente${rm.count > 1 ? "s" : ""}, de ${nf(rm.min)} à ${nf(rm.max)}` : "moyenne des ventes"}</small>
                 </div>
                 {#if v.last != null}
                   <div class="mk-kpi">

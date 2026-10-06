@@ -2,15 +2,19 @@
 // at, so prices only compare within one rarity (the game's own Pro market view groups them so).
 
 /**
- * One rarity's market: the average every account sees (the summary), and from a Pro account's
- * sale list the price series (oldest first), count, min, max and the 10 latest sales.
+ * One rarity's market: its price, and from a Pro account's sale list the price series (oldest
+ * first), count, min, max and the 10 latest sales. The price (`avg`) is the median of the sales
+ * when we have them (one sale at fifty times the usual does not move it), else the average every
+ * account sees (the game's summary); `basis` says which.
  */
 export function rarityMarket(market, rarity) {
   const sales = (market?.sales || []).filter((s) => s.rarity === rarity && s.price != null).sort((a, b) => a.at - b.at);
   const prices = sales.map((s) => s.price);
-  const avg = market?.averages?.[rarity] ?? (prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : null);
+  const median = prices.length ? saleStats(sales).median : null;
+  const avg = median ?? market?.averages?.[rarity] ?? null;
   return {
     avg,
+    basis: median != null ? "median" : avg != null ? "average" : null,
     series: sales,
     count: prices.length,
     min: prices.length ? Math.min(...prices) : null,

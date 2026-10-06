@@ -11,13 +11,17 @@ const market = {
 describe("rarityMarket", () => {
   it("keeps one rarity's sales, oldest first, with its stats and latest sales", () => {
     const r = rarityMarket(market, "R");
-    expect(r).toMatchObject({ avg: 40, count: 2, min: 30, max: 50 });
+    expect(r).toMatchObject({ avg: 40, basis: "median", count: 2, min: 30, max: 50 });
     expect(r.series.map((s) => s.price)).toEqual([50, 30]);
     expect(r.recent.map((s) => s.price)).toEqual([30, 50]);
   });
-  it("uses the summary's average, else the sales' own", () => {
-    expect(rarityMarket(market, "SR").avg).toBe(120);
-    expect(rarityMarket({ averages: {} }, "L")).toMatchObject({ avg: null, count: 0, recent: [] });
+  it("prices at the median of the sales, which one extreme sale does not move", () => {
+    const sales = [10, 12, 11, 13, 2222].map((price, i) => ({ rarity: "C", price, at: i }));
+    expect(rarityMarket({ averages: { C: 454 }, sales }, "C")).toMatchObject({ avg: 12, basis: "median" });
+  });
+  it("without sales (no Pro account), the game's average", () => {
+    expect(rarityMarket({ averages: { L: 300 } }, "L")).toMatchObject({ avg: 300, basis: "average" });
+    expect(rarityMarket({ averages: {} }, "L")).toMatchObject({ avg: null, basis: null, count: 0, recent: [] });
   });
 });
 

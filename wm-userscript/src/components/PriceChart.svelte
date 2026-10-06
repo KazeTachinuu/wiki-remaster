@@ -36,7 +36,7 @@
            each a focusable readout; its mark sits at the day itself (--x) -->
       {#each chart.points as p, i (p.at)}
         <button class="pc-slice" class:on={hover === i || picked === p.key} class:pickable={!!onpick} aria-pressed={onpick ? picked === p.key : undefined}
-          onclick={() => onpick?.(picked === p.key ? null : { key: p.key, at: p.at, week: chart.grouping === "week", count: p.count })} class:dense={full || chart.points.length > 24} style:left="{p.x0}%" style:width="{p.x1 - p.x0}%" style:--x="{p.x - p.x0}%" style:--y="{p.y}%"
+          onclick={() => onpick?.(picked === p.key ? null : { key: p.key, at: p.at, week: chart.grouping === "week", count: p.count })} class:dense={full || chart.points.length > 24} style:left="{p.x0}%" style:width="{p.x1 - p.x0}%" style:--x="{p.x1 > p.x0 ? ((p.x - p.x0) / (p.x1 - p.x0)) * 100 : 50}%" style:--y="{p.y}%"
           onpointerenter={() => (hover = i)} onpointerleave={() => hover === i && (hover = null)} onfocus={() => (hover = i)} onblur={() => (hover = null)}
           aria-label="{per} {dshort(p.at)} : tendance {nf(p.trend)} points ; {daySales(p)}"></button>
       {/each}

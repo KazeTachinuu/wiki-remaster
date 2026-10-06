@@ -36,17 +36,14 @@
 .auc-bal{font-size:12px;color:var(--fg-faint)}
 .auc-bal.low{color:var(--bad)}
 .auc-note{color:var(--fg-soft);font-size:13px}
-.auc-bottom{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
+.auc-bottom{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:var(--s4);align-items:start}
 .auc-panel{background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:14px 16px;min-width:0}
 .auc-panel h3{font:600 11.5px/1.3 var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint);margin-bottom:var(--s2)}
-.auc-chart{position:relative;height:130px;margin-left:36px}
-.auc-chart svg{width:100%;height:100%;display:block;overflow:visible}
-.auc-chart .mc-y{position:absolute;left:-36px;top:0;bottom:0}
-.auc-pt{position:absolute;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--elev)}
-.auc-axis{display:flex;justify-content:space-between;margin:8px 0 0 36px;font-size:11px;color:var(--fg-faint)}
 .auc-empty{color:var(--fg-faint);font-size:13px;padding:2px 0 4px}
-.auc-feed{list-style:none;margin:0;padding:0;max-height:176px;overflow:auto}
-.auc-feed li{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:13px}
+.auc-feed{list-style:none;margin:0;padding:0 6px;max-height:300px;overflow:hidden auto}
+.auc-feed li{display:flex;align-items:center;gap:8px;padding:7px 6px;margin:0 -6px;border-top:1px solid var(--line);border-radius:8px;font-size:13px;transition:background .12s}
+.auc-feed li.hot{background:color-mix(in oklab,var(--accent) 12%,transparent)}
+.auc-feed li.dim{opacity:.38}
 .auc-feed li:first-child{border-top:0}
 .auc-feed .who{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .auc-feed .me .who{color:var(--accent)}
@@ -54,3 +51,62 @@
 .auc-feed .amt{color:var(--r-l);font-weight:700;font-variant-numeric:tabular-nums}
 .auc-feed li:not(.top) .amt{color:color-mix(in oklab,var(--r-l) 70%,var(--fg-soft))}
 .auc-feed .when{color:var(--fg-faint);font-size:11.5px;min-width:74px;text-align:right}
+
+
+.auc-feed .auc-more{height:1px;padding:0;border:0}
+
+/* The price panel (AuctionPrice): the verdict, the market gauge, the pace of bids and the
+   bidders, on the sale's own timeline. Plain HTML, so its text stays crisp at any width. */
+.ap{display:flex;flex-direction:column;gap:8px}
+.ap-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);flex-wrap:wrap}
+.ap-head h3{margin:0}
+.ap-chip{font:600 12px var(--body);padding:3px 10px;border-radius:999px;white-space:nowrap;color:var(--fg);background:var(--elev2)}
+.ap-chip[data-z="good"]{color:var(--accent);background:color-mix(in oklab,var(--accent) 14%,transparent)}
+.ap-chip[data-z="warm"]{color:var(--r-ur);background:color-mix(in oklab,var(--r-ur) 14%,transparent)}
+.ap-chip[data-z="bad"]{color:var(--bad);background:color-mix(in oklab,var(--bad) 14%,transparent)}
+.ap-verdict{margin:0;font-size:13.5px;line-height:1.4;color:var(--fg-soft)}
+.ap-verdict b{color:var(--fg);font-weight:600}
+/* the gauge: zones as a rail, the market and my bid as ticks, the price as a gold pin */
+.ap-gauge{position:relative;height:44px;margin:24px 6px 0}
+.ap-zones span{position:absolute;top:0;height:8px;border-radius:4px;background:var(--zc);opacity:.4}
+.ap-zones span + span{margin-left:2px}
+.ap-zones span[data-z="good"]{--zc:var(--accent)}
+.ap-zones span[data-z="fair"]{--zc:var(--fg-faint)}
+.ap-zones span[data-z="warm"]{--zc:var(--r-ur)}
+.ap-zones span[data-z="bad"]{--zc:var(--bad)}
+.ap-zones em{position:absolute;top:12px;left:50%;translate:-50% 0;font:normal 500 11px var(--body);color:var(--fg-faint);white-space:nowrap}
+.ap-mark{position:absolute;top:4px;translate:-50% -50%}
+.ap-mark.market{width:2px;height:20px;background:var(--fg);opacity:.7;border-radius:1px;translate:-50% -50%;top:4px}
+.ap-mark.market b{position:absolute;top:34px;left:50%;translate:-50% 0;font:600 11px var(--body);color:var(--fg-soft);white-space:nowrap}
+.ap-mark.mine{width:12px;height:12px;border-radius:50%;background:var(--elev);border:2px solid var(--r-l)}
+.ap-mark.price{width:18px;height:18px;border-radius:50%;background:var(--r-l);box-shadow:0 0 0 3px var(--elev),0 0 14px color-mix(in oklab,var(--r-l) 60%,transparent)}
+.ap-mark.price b{position:absolute;bottom:calc(100% + 4px);left:50%;translate:-50% 0;font:700 13px var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ap-mark.price.flip b{left:auto;right:-4px;translate:0 0}
+/* section titles with their figures */
+.ap-sub{display:flex;align-items:baseline;gap:var(--s2);margin-top:4px}
+.ap-sub .mk-h{margin:0}
+.ap-facts{font-size:12.5px;color:var(--fg-soft);font-variant-numeric:tabular-nums}
+.ap-facts b{color:var(--fg)}
+.ap-facts .hot{color:var(--r-ur);font-weight:600}
+.ap-dot{margin:0 6px;color:var(--fg-faint)}
+/* the pace: bids per half-hour, the bursts warm */
+.ap-pace{position:relative;display:flex;align-items:flex-end;gap:2px;height:30px;border-bottom:1px solid var(--line2)}
+.ap-pace span{flex:1;min-height:0;border-radius:2px 2px 0 0;background:color-mix(in oklab,var(--fg-faint) 55%,transparent)}
+.ap-pace span.hot{background:color-mix(in oklab,var(--r-ur) 85%,transparent)}
+.ap-now,.ap-track-now{position:absolute;top:0;bottom:0;border-left:1px dashed color-mix(in oklab,var(--fg) 45%,transparent)}
+.ap-axis{position:relative;display:flex;justify-content:space-between;font-size:10.5px;color:var(--fg-faint);font-variant-numeric:tabular-nums}
+.ap-axis-now{position:absolute;top:0;translate:-100% 0;padding-right:4px;color:var(--fg-soft);background:var(--elev)}
+/* the bidders: one lane each, their bids as ticks on the sale's time, their best at the end */
+.ap-lanes{display:flex;flex-direction:column;gap:2px}
+.ap-lane{display:grid;grid-template-columns:20px minmax(0,92px) minmax(0,1fr) auto;align-items:center;gap:10px;padding:3px 8px;margin:0 -8px;border-radius:10px;transition:background .12s}
+.ap-lane:hover,.ap-lane:focus-visible{background:var(--elev2)}
+.ap-lane.lead{background:color-mix(in oklab,var(--accent) 10%,transparent)}
+.ap-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-lane.mine .ap-name{color:var(--r-l)}
+.ap-track{position:relative;height:14px;border-radius:4px;background:linear-gradient(var(--line2),var(--line2)) center/100% 1px no-repeat}
+.ap-track i{position:absolute;top:2px;bottom:2px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--fg-soft)}
+.ap-lane.lead .ap-track i{background:var(--accent)}
+.ap-lane.mine .ap-track i{background:var(--r-l)}
+.ap-track .ap-track-now{width:0;margin:0;background:none;top:0;bottom:0}
+.ap-best{font:700 13px var(--display);color:var(--r-l);font-variant-numeric:tabular-nums;min-width:40px;text-align:right}
+.ap-more{margin:4px 0 0;font-size:12px;color:var(--fg-faint)}

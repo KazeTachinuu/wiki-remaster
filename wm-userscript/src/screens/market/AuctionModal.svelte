@@ -4,6 +4,9 @@
   import { anchorCentered } from "../../lib/anchor.js";
   import Icon from "../../components/Icon.svelte";
   import { data, RNAME, marketValueFor } from "../../wm/index.js";
+  import { rarityMarket } from "../../wm/market.js";
+  import AuctionPrice from "../../components/AuctionPrice.svelte";
+  import { inView } from "../../lib/inView.js";
   import ListingCompare from "../../components/ListingCompare.svelte";
   import { nf, ago, countdown, secondsUntil } from "../../lib/format.js";
 
@@ -42,7 +45,9 @@
     const card = auction.card;
     let live = true; // a late answer for a card no longer shown is dropped
     data.sameCard(card).then((l) => live && (others = l), () => live && (others = []));
-    marketValueFor(card).then((v) => live && (soldAvg = v));
+    // the market price: the median of the card's sales at its rarity on a Pro account, else the
+    // game's average (rarityMarket); the same answer as the card window's, shared for a minute
+    data.marketStats(card).then((m) => live && (soldAvg = rarityMarket(m, card.rarity).avg), () => marketValueFor(card).then((v) => live && (soldAvg = v)));
     return () => (live = false);
   });
 
@@ -62,6 +67,12 @@
   const repriceAt = $derived((Date.parse(a.createdAt) + Date.parse(a.endAt)) / 2);
   const canReprice = $derived(mine && phase === "live" && a.bid == null && now >= repriceAt);
   const bidders = $derived(new Set(bids.map((b) => b.bidder)).size);
+  // the bid list draws the latest ones, more as it scrolls (a very active auction has hundreds)
+  const FEED_STEP = 60;
+  let feedShown = $state(FEED_STEP);
+  // the bidder hovered in the price panel: their bids light up in the list
+  let focus = $state(null);
+  const bidderOf = (b) => b.bidderId ?? b.bidder ?? "?";
 
   let amount = $derived(String(auction.bid != null ? auction.bid + 1 : auction.base ?? 1));
   let newBase = $state("");
@@ -92,20 +103,6 @@
   const reprice = () => run(() => data.reprice(a.id, Number(newBase)), () => `Mise de départ baissée à ${nf(Number(newBase))} pts.`);
   const cancel = () => run(() => data.cancelAuction(a.id), () => "Vente annulée, la carte revient dans votre collection.");
   const settle = () => run(() => data.settle(a.id), () => "Enchère finalisée.");
-
-  // Price ladder: the base, then every bid in order, evenly spaced (a bidding war in the
-  // last minutes of a 2-day auction stays readable).
-  const chart = $derived.by(() => {
-    const steps = [...bids].filter((b) => b.at).sort((x, y) => Date.parse(x.at) - Date.parse(y.at)).map((b) => b.amount);
-    const vs = a.base != null ? [a.base, ...steps] : steps;
-    if (vs.length < 2) return null;
-    const min = Math.min(...vs), max = Math.max(...vs), span = max - min || 1;
-    const W = 100, H = 40, pad = 4;
-    const pts = vs.map((v, i) => [pad + (i / (vs.length - 1)) * (W - 2 * pad), pad + (1 - (v - min) / span) * (H - 2 * pad)]);
-    let d = `M${pts[0][0]} ${pts[0][1]}`;
-    for (let i = 1; i < pts.length; i++) d += ` H${pts[i][0]} V${pts[i][1]}`;
-    return { d, area: `${d} V${H} H${pts[0][0]} Z`, dots: pts.slice(1), min, max };
-  });
 
   const dateLabel = (iso) => (iso ? new Date(iso).toLocaleString("fr", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
@@ -220,22 +217,7 @@
     <ListingCompare listings={others} current={a} {soldAvg} {now} onpick={(r) => onswitch?.(r)} />
 
     <div class="auc-bottom">
-      <section class="auc-panel">
-        <h3>Évolution du prix</h3>
-        {#if chart}
-          <div class="auc-chart">
-            <div class="mc-y"><span>{nf(chart.max)}</span><span>{nf(chart.min)}</span></div>
-            <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Évolution du prix">
-              <path d={chart.area} fill="var(--accent)" fill-opacity="0.1" />
-              <path d={chart.d} fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke" />
-            </svg>
-            {#each chart.dots as [x, y]}<span class="auc-pt" style="left:{x}%;top:{(y / 40) * 100}%"></span>{/each}
-          </div>
-          <div class="auc-axis"><span>Départ {nf(a.base)}</span><span>{bids.length} enchère{bids.length > 1 ? "s" : ""}</span></div>
-        {:else}
-          <div class="auc-empty">Pas encore d'enchère. {phase === "live" && !mine ? "Soyez le premier." : ""}</div>
-        {/if}
-      </section>
+      <AuctionPrice {a} {bids} {phase} market={soldAvg} me={data.userId} seller={mine} {now} bind:focus />
 
       <section class="auc-panel">
         <h3>Activité</h3>
@@ -243,14 +225,15 @@
           <div class="auc-empty">Aucune enchère.</div>
         {:else}
           <ol class="auc-feed">
-            {#each bids as b, i (b.id)}
-              <li class:top={i === 0} class:me={b.bidderId && b.bidderId === data.userId}>
+            {#each bids.slice(0, feedShown) as b, i (b.id)}
+              <li class:top={i === 0} class:me={b.bidderId && b.bidderId === data.userId} class:hot={focus && bidderOf(b) === focus} class:dim={focus && bidderOf(b) !== focus}>
                 <span class="who">{b.bidder || "Anonyme"}</span>
                 {#if i === 0}<span class="tag">{phase === "sold" ? "Gagnant" : "En tête"}</span>{/if}
                 <span class="amt">{nf(b.amount)}</span>
                 <span class="when">{ago(b.at, now)}</span>
               </li>
             {/each}
+            {#if bids.length > feedShown}<li class="auc-more" use:inView={{ onEnter: () => (feedShown += FEED_STEP), key: feedShown }}></li>{/if}
           </ol>
         {/if}
       </section>
