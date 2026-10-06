@@ -12,7 +12,7 @@
   import { inView } from "../../lib/inView.js";
   import SearchBox from "../../components/SearchBox.svelte";
   import { reuse } from "../../lib/reuse.js";
-  import { data, normSearch, tradeTabs, roundsOf, sideValue, verdict, balanceBadge, balanceLabel, statusLabel, dealLine, stepIn, afterLeaving } from "../../wm/index.js";
+  import { data, normSearch, tradeTabs, chainOf, roundsOf, sideValue, verdict, balanceBadge, balanceLabel, statusLabel, dealLine, stepIn, afterLeaving } from "../../wm/index.js";
   import { ago } from "../../lib/format.js";
   let { profile, onwallet } = $props();
 
@@ -44,7 +44,7 @@
   load();
   // new offers appear without a reload (no realtime: the game's quota is full)
   $effect(() => { const t = setInterval(() => document.visibilityState === "visible" && load(true), 20000); return () => clearInterval(t); });
-  $effect(() => cardValues.load((trades || []).flatMap((t) => [...t.give, ...t.get])));
+
   const tabs = $derived(trades ? tradeTabs(trades) : null);
   const inTab = $derived(tabs?.[tab] ?? null);
   const roundCount = $derived(trades ? roundsOf(trades) : new Map()); // offers per negotiation, in one pass
@@ -82,6 +82,12 @@
   // with its real status until another is chosen
   const selected = $derived(shown && (trades.find((t) => t.id === picks[tab]) ?? shown[0] ?? null));
   const balance = (t) => verdict(sideValue(t.give, t.giveCoins, values), sideValue(t.get, t.getCoins, values));
+  // card prices for what is on screen only: the drawn rows (their balance) and the open
+  // negotiation's offers, never every card of every trade (thousands for a busy trader)
+  $effect(() => {
+    const open = selected && trades ? chainOf(selected, trades) : [];
+    cardValues.load([...(shown ?? []).slice(0, drawn), ...open].flatMap((t) => [...t.give, ...t.get]));
+  });
   // what each drawn row shows, computed here rather than in the markup
   const rows = $derived((shown ?? []).slice(0, drawn).map((t) => ({ t, b: balance(t), rounds: roundCount.get(t.id) ?? 1 })));
   const tabOf = (t) => (t.status !== "pending" ? "history" : t.incoming ? "incoming" : "outgoing");

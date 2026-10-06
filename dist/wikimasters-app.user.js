@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.12.8
+// @version      0.12.9
 // @author       Hugo Sibony
 // @description  Unofficial redesign of wiki-masters.com, on the game's own data and your own session.
 // @license      MIT
@@ -13290,7 +13290,6 @@
 			const t = setInterval(() => document.visibilityState === "visible" && load(true), 2e4);
 			return () => clearInterval(t);
 		});
-		user_effect(() => cardValues.load((get(trades) || []).flatMap((t) => [...t.give, ...t.get])));
 		const tabs = user_derived(() => get(trades) ? tradeTabs(get(trades)) : null);
 		const inTab = user_derived(() => get(tabs)?.[get(tab)] ?? null);
 		const roundCount = user_derived(() => get(trades) ? roundsOf(get(trades)) : new Map());
@@ -13328,6 +13327,10 @@
 		const drawn = user_derived(() => Math.max(get(more), (get(shown)?.findIndex((t) => t.id === get(selected)?.id) ?? -1) + 1));
 		const selected = user_derived(() => get(shown) && (get(trades).find((t) => t.id === picks[get(tab)]) ?? get(shown)[0] ?? null));
 		const balance = (t) => verdict(sideValue(t.give, t.giveCoins, values), sideValue(t.get, t.getCoins, values));
+		user_effect(() => {
+			const open = get(selected) && get(trades) ? chainOf(get(selected), get(trades)) : [];
+			cardValues.load([...(get(shown) ?? []).slice(0, get(drawn)), ...open].flatMap((t) => [...t.give, ...t.get]));
+		});
 		const rows = user_derived(() => (get(shown) ?? []).slice(0, get(drawn)).map((t) => ({
 			t,
 			b: balance(t),
@@ -14006,7 +14009,7 @@
 	var root_26 = from_html(`<div><!> <aside class="side"><div class="brand"><span class="mk"></span><b>Wiki Remaster</b> <button type="button" class="side-toggle"><!></button></div> <nav class="nav"><!> <div class="nav-sep">Le reste du site</div> <div class="nav-grid"></div></nav> <div class="side-foot"><!> <button class="foot-link" title="Raccourcis clavier"><span class="kbd">?</span><span class="foot-txt">Raccourcis clavier</span></button> <div class="hintline"> <!></div></div></aside> <main class="main"><header class="topbar"><div class="crumb"><span class="nav-long"> </span><span class="nav-short"> </span></div> <div class="wallet"><!> <button><span>ATK</span></button> <!> <button class="bell menu-btn"><!><!></button> <div class="notif"><button aria-label="Notifications"><!> <!></button> <!></div> <!> <button type="button"><span class="pk-ring"><!></span> <b> </b><span class="chip-cap"> </span> <!> <!></button> <span class="chip" title="WikiBidous"><!><b> </b></span></div></header> <section class="view"><!></section></main> <!> <!> <!> <!></div>`);
 	function App($$anchor, $$props) {
 		push($$props, true);
-		const VERSION = "0.12.8";
+		const VERSION = "0.12.9";
 		const REPO = "https://github.com/KazeTachinuu/wiki-remaster";
 		let update$1 = state(null);
 		if (isUserscript()) availableUpdate(VERSION, { metaUrl: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.meta.js" }).then((v) => set(update$1, v, true));
