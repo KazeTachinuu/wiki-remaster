@@ -14,7 +14,8 @@ ok()   { printf "${G}[+]${N} %s\n" "$1"; }
 die()  { printf "${R}[x]${N} %s\n" "$1" >&2; exit 1; }
 
 TOTAL=4 I=0
-step() { I=$((I + 1)); ok "[$I/$TOTAL] $1"; }
+# step "label" ["detail"]: the detail (a path, a size) is printed dim
+step() { I=$((I + 1)); printf "${G}[+]${N} [%d/%d] %-13s ${D}%s${N}\n" "$I" "$TOTAL" "$1" "${2:-}"; }
 
 # run quietly; on failure, show what the tool said
 LOG=$(mktemp); trap 'rm -f "$LOG"' EXIT
@@ -30,8 +31,8 @@ quiet bun install
 step "dependencies"
 
 quiet bunx vite build
-step "tampermonkey  ${D}dist/wikimasters-app.user.js ($(size dist/wikimasters-app.user.js))${N}"
+step "tampermonkey" "dist/wikimasters-app.user.js ($(size dist/wikimasters-app.user.js))"
 
 quiet bun scripts/extension.mjs
-step "chrome        ${D}dist/wiki-remaster-chrome.zip ($(size dist/wiki-remaster-chrome.zip))${N}"
-step "firefox       ${D}dist/wiki-remaster-firefox.zip ($(size dist/wiki-remaster-firefox.zip))${N}"
+step "chrome" "dist/wiki-remaster-chrome.zip ($(size dist/wiki-remaster-chrome.zip))"
+step "firefox" "dist/wiki-remaster-firefox.zip ($(size dist/wiki-remaster-firefox.zip))"
