@@ -1,7 +1,8 @@
 // README card comparison, from the real site (read-only): one card of each rarity you own, as the
 // original site draws it and as the remaster does, side by side in docs/screenshots.
 //
-//   bun run build && bun scripts/readme-shots.mjs [--show]
+//   bun run build && bun scripts/readme-shots.mjs [--show] [--pack]
+//   --pack also opens ONE real pack for the "Tout révéler" shot (spends a pack, adds its cards)
 import { realSite } from "./real-site.mjs";
 import { RARITIES_DESC, RNAME } from "../src/wm/schema.js";
 
@@ -183,6 +184,31 @@ await ev(() => { const i = document.querySelector("#wm-host").shadowRoot.querySe
 await site.waitFor(`[...${ROOT}.querySelectorAll(".grid .wc-name")].slice(0, 4).every((n) => /ch[aâ]teau/i.test(n.textContent))`, 30000).catch(() => {});
 await screen("catalog", ".grid .card-btn");
 await go("/marketplace"); await screen("market", ".auc-item");
+// an auction open: its price, time left, the bid box, the card's other listings. Chosen, not the
+// first one: a picture, nothing sensitive, and bids if any, so the chart and activity show
+const auctionId = await ev(async () => {
+  const unsafe = /porno|sex|érot|erot|tueu|meurtr|crimin|terror|nazi|attentat|drogue|guerre/i;
+  const list = (await fetch("/api/marketplace?page=1&limit=50").then((r) => r.json())).auctions || [];
+  const ok = list.filter((a) => a.card?.image_url && !a.card.hide_image && !a.card.nsfw_image && !unsafe.test(`${a.card.category || ""} ${a.card.wikipedia_title || ""}`));
+  return (ok.find((a) => a.current_bid != null) ?? ok[0])?.id ?? null;
+});
+await go(auctionId ? `/marketplace/${auctionId}` : "/marketplace");
+if (!auctionId) await ev(() => document.querySelector("#wm-host").shadowRoot.querySelector(".auc-item .card-btn").click());
+await site.waitFor(`${ROOT}.querySelector(".auc") && !${ROOT}.querySelector(".auc .sk")`, 30000);
+await screen("auction", ".auc .auc-panel");
+// --pack (a write: spends one pack, adds its cards): the whole pack at once, "Tout révéler"
+if (process.argv.includes("--pack")) {
+  await go("/pulls");
+  await loaded(site, ".booster");
+  await ev(() => document.querySelector("#wm-host").shadowRoot.querySelector(".btn.primary.big").click());
+  // the game may ask for its human check first: only a person can pass it (run with --show)
+  if (await site.waitFor(`${ROOT}.querySelector(".reveal-skip")`, 120000).then(() => true, () => false)) {
+    await ev(() => document.querySelector("#wm-host").shadowRoot.querySelector(".reveal-skip").click());
+    await site.waitFor(`[...${ROOT}.querySelectorAll(".reveal-grid img.wc-photo, .reveal-grid img.wc-bg")].every((i) => i.complete)`, 30000);
+    await Bun.sleep(2500); // the cards' entrance
+    await Bun.write(`${OUT}reveal.png`, await view.screenshot());
+  } else console.error("reveal: no pack opened (the game's human check? rerun with --pack --show and tick it)");
+}
 // a trade, open: the deal, the values, the verdict
 // (values keep loading in the background here, so wait for the rows and the deal, not an idle page)
 await go("/trades");

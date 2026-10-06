@@ -44,6 +44,8 @@ Live bids, your sales and wins, every listing of a card side by side.
 
 ![Market](docs/screenshots/market.png)
 
+![An auction](docs/screenshots/auction.png)
+
 ### Trades
 Both sides as real cards with their value and a verdict; counter-offers as one timeline.
 
