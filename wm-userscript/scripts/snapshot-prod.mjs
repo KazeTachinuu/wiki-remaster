@@ -1,5 +1,6 @@
-// A snapshot of the live game for the local mock (read-only): real cards of every rarity with
-// their real sold average, and the typical price per rarity. No usernames, no account data.
+// A snapshot of the live game for the local mock (read-only): real cards of every rarity and the
+// typical price per rarity, from the marketplace (the game's fast endpoint: full cards with live
+// prices; the catalogue and sales endpoints take 6 to 15 s a request). No usernames, no account data.
 // Safe to re-run: written atomically, in a stable order, and left untouched when nothing changed.
 //
 //   bun run build && bun scripts/snapshot-prod.mjs   ->  mock/snapshot.json
@@ -8,11 +9,10 @@ import { renameSync, existsSync, readFileSync } from "node:fs";
 
 const OUT = new URL("../mock/snapshot.json", import.meta.url).pathname;
 const PER_RARITY = 40;
-const PRICED = 10; // the mock needs a typical price per rarity: a sample of cards is enough
+const MAX_PAGES = 6; // marketplace pages of 50 listings per rarity
 const RARITIES = ["C", "PC", "R", "SR", "UR", "L"];
 const NAME = { C: "Commun", PC: "Peu Commun", R: "Rare", SR: "Super Rare", UR: "Ultra Rare", L: "Légendaire" };
-// the game reads bursts as automation: like the app's own value lane, 2 requests at a time, spaced
-const LANES = 2, PAUSE_MS = 450;
+const PAUSE_MS = 450; // the game reads bursts as automation: one request at a time, spaced
 const UNSAFE = /porno|sex|érot|erot|tueu|meurtr|crimin|terror|nazi|attentat|drogue|guerre|massacre/i;
 
 // [*] step  [+] done  [=] already up to date  [-] warning, kept going  [x] fatal
@@ -42,7 +42,7 @@ const stop = await site.preflight();
 if (stop) { await site.close(); die(stop); }
 const me = await site.ev(() => window.__wm?.getProfile?.()?.username ?? null).catch(() => null);
 tickEnd();
-ok(`logged in${me ? ` as ${me}` : ""}: ${PER_RARITY} cards per rarity, ${PRICED} of them priced, ${LANES} requests at a time`);
+ok(`logged in${me ? ` as ${me}` : ""}: up to ${PER_RARITY} cards per rarity from the marketplace, one request every ${PAUSE_MS} ms`);
 
 let slowest = 0;
 const get = async (path) => {
@@ -54,51 +54,36 @@ const get = async (path) => {
   await Bun.sleep(PAUSE_MS);
   return d;
 };
-// run `jobs` LANES at a time, calling onDone(count) after each
-async function lanes(jobs, onDone) {
-  const results = new Array(jobs.length); let next = 0, done = 0;
-  await Promise.all(Array.from({ length: LANES }, async () => { while (next < jobs.length) { const k = next++; results[k] = await jobs[k](); onDone(++done); } }));
-  return results;
-}
-
-// time left from the pace measured so far: requests still to make x average time per request
 let requestsDone = 0;
-const left = (rarityIndex, pricesLeft) => { const each = requestsDone ? (Date.now() - started) / requestsDone : PAUSE_MS + 300; return secs(((pricesLeft + (RARITIES.length - rarityIndex - 1) * (PRICED + 2)) * each) / LANES); };
 
 const cards = [], recap = [];
 for (const [i, rarity] of RARITIES.entries()) {
   const label = `[${i + 1}/${RARITIES.length}] ${NAME[rarity].padEnd(11)}`;
-  // 1. pick: mostly cards with a picture, a quarter at most without (the mock draws a sky for those)
-  const picked = [];
-  for (let page = 0; page < 8 && picked.length < PER_RARITY; page++) {
-    tick(`${label} ${dim("picking")} page ${page + 1}, ${picked.length}/${PER_RARITY} kept`);
-    const d = await get(`/api/cards?page=${page}&rarity=${rarity}`);
-    for (const card of d?.cards || []) {
-      if (picked.length >= PER_RARITY) break;
-      if (card.nsfw_image || UNSAFE.test(`${card.category || ""} ${card.wikipedia_title || ""}`) || (card.wikipedia_title || "").length < 3) continue;
-      if (!card.image_url && picked.filter((x) => !x.image_url).length >= PER_RARITY / 4) continue;
-      picked.push(card);
+  // distinct cards listed at this rarity, each with its listing prices (several copies: several prices)
+  const byCard = new Map();
+  for (let page = 1; page <= MAX_PAGES && byCard.size < PER_RARITY; page++) {
+    tick(`${label} ${dim("marketplace")} page ${page}, ${byCard.size}/${PER_RARITY} cards  ${dim(`server ${secs(slowest)} at worst`)}`);
+    const d = await get(`/api/marketplace?page=${page}&limit=50&rarity=${rarity}`);
+    for (const a of d?.auctions || []) {
+      const card = a.card;
+      if (!card?.id || card.rarity !== rarity || card.nsfw_image || UNSAFE.test(`${card.category || ""} ${card.wikipedia_title || ""}`)) continue;
+      const price = a.effective_bid ?? a.current_bid ?? a.base_amount;
+      if (byCard.has(card.id)) { if (price != null) byCard.get(card.id).prices.push(price); continue; }
+      if (byCard.size < PER_RARITY) byCard.set(card.id, { card, prices: price != null ? [price] : [] });
     }
+    if (!d?.hasMore) break;
   }
-  // 2. price a sample (spread over the picked cards): their real sold average at this rarity
-  const sample = picked.filter((_, k) => k % Math.ceil(picked.length / PRICED) === 0).slice(0, PRICED);
-  const avgs = new Map();
-  await lanes(sample.map((card) => async () => {
-    const s = await get(`/api/marketplace/cards/${card.id}/sales?scope=summary`);
-    avgs.set(card.id, s?.summary?.[card.rarity]?.average ?? null);
-  }), (n) => tick(`${label} ${dim("prices")} ${String(n).padStart(2)}/${sample.length}  ${dim(`about ${left(i, sample.length - n)} left, server ${secs(slowest)} at worst`)}`));
-  const priced = [...avgs.values()].filter((v) => v != null).length;
-  for (const card of picked) cards.push({
+  for (const { card, prices } of byCard.values()) cards.push({
     id: card.id, wikipedia_title: card.wikipedia_title, wikipedia_url: card.wikipedia_url, category: card.category, summary: card.summary ?? null,
     rarity: card.rarity, atk: card.atk, def: card.def, q_score: card.q_score, pageviews: card.pageviews,
-    image_url: card.image_url, hide_image: !!card.hide_image, avg: avgs.get(card.id) ?? null,
+    image_url: card.image_url, hide_image: !!card.hide_image, avg: medianOf(prices),
   });
   tickEnd();
   const mine = cards.filter((x) => x.rarity === rarity);
   const median = medianOf(mine.map((x) => x.avg));
-  recap.push([NAME[rarity], picked.length, mine.filter((x) => x.image_url).length, priced, median]);
-  if (picked.length < PER_RARITY) warn(`${NAME[rarity]}: only ${picked.length} usable cards found`);
-  ok(`${label} ${String(picked.length).padStart(2)} cards, ${priced}/${sample.length} sampled with a sold average, typical ${median ?? "-"} pts`);
+  recap.push([NAME[rarity], mine.length, mine.filter((x) => x.image_url && !x.hide_image).length, mine.filter((x) => x.avg != null).length, median]);
+  if (mine.length < PER_RARITY) warn(`${NAME[rarity]}: ${mine.length} distinct cards on the market (fewer listed than ${PER_RARITY})`);
+  ok(`${label} ${String(mine.length).padStart(2)} cards, typical listing ${median ?? "-"} pts`);
 }
 await site.close();
 
