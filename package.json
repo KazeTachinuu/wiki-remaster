@@ -1,0 +1,10 @@
+{
+  "name": "wiki-remaster",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --cwd wm-userscript dev",
+    "build": "./build.sh",
+    "test": "bun run --cwd wm-userscript test",
+    "check": "bun run --cwd wm-userscript check"
+  }
+}
