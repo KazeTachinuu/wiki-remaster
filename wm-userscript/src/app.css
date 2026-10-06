@@ -19,7 +19,7 @@
 /* Any element tagged with a rarity gets its colour as --rc. */
 [data-r="C"]{--rc:var(--r-c)}[data-r="PC"]{--rc:var(--r-pc)}[data-r="R"]{--rc:var(--r-r)}
 [data-r="SR"]{--rc:var(--r-sr)}[data-r="UR"]{--rc:var(--r-ur)}[data-r="L"]{--rc:var(--r-l)}
-#wm-app-root{font-family:var(--body);color:var(--fg);-webkit-font-smoothing:antialiased;line-height:1.5}
+#wm-app-root{color-scheme:dark;font-family:var(--body);color:var(--fg);-webkit-font-smoothing:antialiased;line-height:1.5}
 #wm-app-root button{font-family:inherit;cursor:pointer}
 #wm-app-root img{display:block}
 #wm-app-root a{color:inherit;text-decoration:none}
@@ -426,7 +426,7 @@
 .search-wrap{position:relative;flex:1 1 300px;min-width:220px;display:flex;align-items:center}
 .search-ico{position:absolute;left:14px;width:17px;height:17px;color:var(--fg-faint);pointer-events:none}
 .search{width:100%;background:var(--elev);border:1px solid var(--line);border-radius:11px;padding:11px 38px 11px 40px;color:var(--fg);font-family:var(--body);font-size:14px}
-.search::placeholder{color:var(--fg-faint)}
+.search::placeholder,.af-input::placeholder{color:var(--fg-faint)}
 .search:focus{border-color:var(--fg-soft);background:var(--elev2)}
 .search::-webkit-search-cancel-button{display:none}
 .search-clear{position:absolute;right:8px;width:24px;height:24px;border:none;border-radius:7px;background:transparent;color:var(--fg-faint);font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center}
@@ -437,6 +437,7 @@
 .isel:hover,.isel:focus-within{border-color:var(--line2)}
 .isel svg{width:16px;height:16px;color:var(--fg-soft);flex:none}
 .isel select{appearance:none;-webkit-appearance:none;background:none;border:none;color:var(--fg);font-family:var(--body);font-size:14px;font-weight:500;padding:0 18px 0 0;height:100%;cursor:pointer;outline:none}
+#wm-app-root option{background:var(--elev);color:var(--fg)}
 .isel::after{content:"";position:absolute;right:12px;width:8px;height:8px;border-right:2px solid var(--fg-soft);border-bottom:2px solid var(--fg-soft);transform:rotate(45deg) translateY(-2px);pointer-events:none}
 .iconbtn{display:inline-flex;align-items:center;gap:8px;background:var(--elev);border:1px solid var(--line);color:var(--fg-soft);height:42px;padding:0 14px;border-radius:11px;font-family:var(--body);font-size:14px;font-weight:500;white-space:nowrap;transition:.15s}
 .iconbtn svg{width:17px;height:17px;flex:none}
