@@ -20,6 +20,8 @@
   // Fall back from a broken photo to the rarity art (never a blank card).
   let imgFailed = $state(false);
   let paper = $state(false); // a see-through image (a map, a diagram): shown on paper
+  // no picture: the title's first letter or digit, as a medallion on the rarity art
+  const initial = $derived((card.title?.match(/[\p{L}\p{N}]/u)?.[0] ?? "?").toUpperCase());
   let artFailed = $state(false);
   let showPhoto = $derived(!!card.image_url && !imgFailed);
 
@@ -56,6 +58,7 @@
       <img class="wc-photo" src={card.image_url} alt={card.title} loading="lazy" crossorigin="anonymous" onload={(e) => (paper = seeThrough(e.currentTarget))} onerror={() => (imgFailed = true)} use:fadeIn />
     {:else if !artFailed}
       <img class="wc-bg" src={art} alt="" aria-hidden="true" loading="lazy" onerror={() => (artFailed = true)} use:fadeIn />
+      <span class="wc-mono" aria-hidden="true">{initial}</span>
     {/if}
     {#if shiny}<span class="wc-holo" class:onyx={onyx} aria-hidden="true"></span>{/if}
     {#if blurred}<span class="wc-nsfw" aria-hidden="true">Contenu sensible</span>{/if}

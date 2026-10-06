@@ -23,6 +23,20 @@
 .wc-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scale(1.8);z-index:0}
 .wc-bg.onyx{transform:none}
 .wc[data-r="C"] .wc-bg,.wc[data-r="PC"] .wc-bg{filter:brightness(.6) saturate(1.2)}
+/* no picture: the rarity art over the whole card, lit, with the title's initial as a medallion */
+.wc.is-noimg .wc-bg{filter:brightness(.82) saturate(1.1)}
+.wc.is-noimg[data-r="C"] .wc-bg,.wc.is-noimg[data-r="PC"] .wc-bg{filter:brightness(.6) saturate(1.3)}
+/* a fine dot grid over the art: texture for the flat ones (Commun), barely there on the others */
+.wc.is-noimg .wc-face::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(rgba(255,255,255,.13) 1px,transparent 1.6px) 0 0/12px 12px;
+  -webkit-mask:linear-gradient(180deg,#000 30%,transparent 80%);mask:linear-gradient(180deg,#000 30%,transparent 80%)}
+.wc-mono{position:absolute;z-index:2;left:50%;top:38%;translate:-50% -50%;width:44%;aspect-ratio:1;border-radius:50%;
+  display:grid;place-items:center;font:700 clamp(30px,20cqw,96px)/1 var(--display);color:#fff;
+  background:radial-gradient(circle at 50% 35%,rgba(255,255,255,.14),rgba(8,10,8,.42) 70%);
+  border:1.5px solid color-mix(in oklab,var(--rc) 75%,#fff 25%);
+  box-shadow:0 0 0 6px color-mix(in oklab,var(--rc) 18%,transparent),0 14px 30px -12px rgba(0,0,0,.6);
+  text-shadow:0 0 18px color-mix(in oklab,var(--rc) 70%,transparent),0 2px 6px rgba(0,0,0,.5)}
+.wc.is-noimg .wc-cap{background:linear-gradient(to top,rgba(5,6,5,.94),rgba(5,6,5,.7) 62%,transparent)}
 .wc-photo.onyx-photo{object-fit:cover;z-index:1}
 /* a see-through image (a map, a line drawing) on paper, as Wikipedia shows it; room for the caption below */
 .wc.paper .wc-blur{display:none}
