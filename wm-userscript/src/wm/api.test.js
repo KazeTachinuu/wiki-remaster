@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { api, retry, health } from "./api.js";
+import { api, retry, health, readSupabaseCall } from "./api.js";
 
 // A scripted fetch: each call takes the next step (a status, or "network" to throw).
 let calls;
@@ -94,5 +94,30 @@ describe("api headers", () => {
     await api("/api/trades/1", { method: "PATCH", body: { action: "accept" }, headers: { "x-wiki-calendar-tz": "Europe/Paris" } });
     expect(seen["x-wiki-calendar-tz"]).toBe("Europe/Paris");
     expect(seen["content-type"]).toBe("application/json");
+  });
+});
+
+describe("readSupabaseCall", () => {
+  const me = "11111111-2222-3333-4444-555555555555";
+  const friend = "99999999-8888-7777-6666-555555555555";
+  const jwt = (sub) => "Bearer x." + btoa(JSON.stringify({ sub })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_") + ".sig";
+  const auth = { headers: { apikey: "k", Authorization: jwt(me) } };
+
+  it("takes the user from the token, not from the queried row", () => {
+    const c = readSupabaseCall(`https://abc.supabase.co/rest/v1/profiles?id=eq.${friend}`, auth);
+    expect(c).toEqual({ base: "https://abc.supabase.co", path: "/rest/v1/profiles", headers: { apikey: "k", authorization: jwt(me) }, userId: me });
+  });
+  it("rejects look-alike URLs, so the token is never replayed elsewhere", () => {
+    for (const url of [
+      "https://evil.example/?x=.supabase.co/rest/v1/",
+      "https://abc.supabase.co.evil.example/rest/v1/profiles",
+      "http://abc.supabase.co/rest/v1/profiles",
+      "https://abc.supabase.co/auth/v1/token",
+      "not a url",
+    ]) expect(readSupabaseCall(url, auth)).toBeNull();
+  });
+  it("captures no identity without both credentials or with an unreadable token", () => {
+    expect(readSupabaseCall("https://abc.supabase.co/rest/v1/profiles", { headers: { apikey: "k" } }).userId).toBeNull();
+    expect(readSupabaseCall("https://abc.supabase.co/rest/v1/profiles", { headers: { apikey: "k", authorization: "Bearer junk" } }).userId).toBeNull();
   });
 });

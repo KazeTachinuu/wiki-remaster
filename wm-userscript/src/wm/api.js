@@ -169,6 +169,34 @@ function header(init, name) {
   return entries.find(([k]) => k.toLowerCase() === name)?.[1] ?? null;
 }
 
+// The logged-in user is the `sub` of the bearer token, never an id from a URL: the app also
+// queries other players' rows (a friend's profile), and those must not become "me".
+function tokenSubject(authorization) {
+  try {
+    const b64 = authorization.replace(/^Bearer\s+/i, "").split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const sub = JSON.parse(atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), "="))).sub;
+    return /^[0-9a-f-]{36}$/i.test(sub) ? sub : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read a fetch call as a Supabase REST call of the app: `{ base, path, headers, userId }`, or null.
+ * Only https `*.supabase.co` hosts count, judged on the parsed URL (a substring test would accept
+ * `https://other.site/?x=.supabase.co/rest/v1/`). `base` and `headers` always come from the same
+ * call, so captured credentials are only ever replayed to the origin they were sent to.
+ */
+export function readSupabaseCall(url, init) {
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  if (u.protocol !== "https:" || !/^[a-z0-9-]+\.supabase\.co$/i.test(u.hostname) || !u.pathname.startsWith("/rest/v1/")) return null;
+  const apikey = header(init, "apikey");
+  const authorization = header(init, "authorization");
+  const creds = apikey && authorization ? { apikey, authorization } : null;
+  return { base: u.origin, path: u.pathname, headers: creds, userId: creds && tokenSubject(authorization) };
+}
+
 // Read a response body without consuming the app's copy.
 const peek = (ret, fn) => ret.then((res) => res.clone().json()).then(fn).catch(() => {});
 
@@ -178,24 +206,16 @@ export function initCapture() {
   origFetch = window.fetch;
   window.fetch = function (...args) {
     const ret = origFetch.apply(window, args);
-    const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
-    if (!url?.includes(".supabase.co/rest/v1/")) return ret;
+    const call = readSupabaseCall(typeof args[0] === "string" ? args[0] : args[0]?.url, args[1]);
+    if (!call) return ret;
+    if (call.headers && call.userId) sb = { base: call.base, headers: call.headers, userId: call.userId };
 
-    const apikey = header(args[1], "apikey");
-    const authorization = header(args[1], "authorization");
-    const userId = url.match(/[?&](?:id|user_id)=eq\.([0-9a-f-]{36})/i)?.[1];
-    sb = {
-      base: new URL(url).origin,
-      headers: apikey && authorization ? { apikey, authorization } : sb?.headers,
-      userId: userId || sb?.userId,
-    };
-
-    if (url.includes("/rpc/sync_profile_packs")) {
+    if (call.path === "/rest/v1/rpc/sync_profile_packs") {
       const issued = epoch;
       ret.then((res) => res.ok && peek(Promise.resolve(res), (j) => { if (epoch === issued) patchProfile(j); }), () => {});
-    } else if (url.includes("/rest/v1/profiles")) {
+    } else if (call.path === "/rest/v1/profiles") {
       peek(ret, (j) => {
-        const row = Array.isArray(j) ? j[0] : j;
+        const row = (Array.isArray(j) ? j : [j]).find((r) => r?.id && r.id === sb?.userId);
         if (row?.is_pro !== undefined) patchProfile({ is_pro: row.is_pro });
       });
     }

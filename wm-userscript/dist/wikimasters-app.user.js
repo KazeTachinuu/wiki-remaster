@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.11.1
+// @version      0.11.2
 // @author       Hugo Sibony
 // @description  Redesigned client for wiki-masters.com. Uses the real API and session.
 // @homepage     https://github.com/KazeTachinuu/wiki-remaster
@@ -4229,32 +4229,56 @@
 		if (typeof h.get === "function") return h.get(name);
 		return (Array.isArray(h) ? h : Object.entries(h)).find(([k]) => k.toLowerCase() === name)?.[1] ?? null;
 	}
+	function tokenSubject(authorization) {
+		try {
+			const b64 = authorization.replace(/^Bearer\s+/i, "").split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+			const sub = JSON.parse(atob(b64.padEnd(b64.length + (4 - b64.length % 4) % 4, "="))).sub;
+			return /^[0-9a-f-]{36}$/i.test(sub) ? sub : null;
+		} catch {
+			return null;
+		}
+	}
+	function readSupabaseCall(url, init) {
+		let u;
+		try {
+			u = new URL(url);
+		} catch {
+			return null;
+		}
+		if (u.protocol !== "https:" || !/^[a-z0-9-]+\.supabase\.co$/i.test(u.hostname) || !u.pathname.startsWith("/rest/v1/")) return null;
+		const apikey = header(init, "apikey");
+		const authorization = header(init, "authorization");
+		const creds = apikey && authorization ? {
+			apikey,
+			authorization
+		} : null;
+		return {
+			base: u.origin,
+			path: u.pathname,
+			headers: creds,
+			userId: creds && tokenSubject(authorization)
+		};
+	}
 	var peek = (ret, fn) => ret.then((res) => res.clone().json()).then(fn).catch(() => {});
 	function initCapture() {
 		if (!isReal) return;
 		origFetch = window.fetch;
 		window.fetch = function(...args) {
 			const ret = origFetch.apply(window, args);
-			const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
-			if (!url?.includes(".supabase.co/rest/v1/")) return ret;
-			const apikey = header(args[1], "apikey");
-			const authorization = header(args[1], "authorization");
-			const userId = url.match(/[?&](?:id|user_id)=eq\.([0-9a-f-]{36})/i)?.[1];
-			sb = {
-				base: new URL(url).origin,
-				headers: apikey && authorization ? {
-					apikey,
-					authorization
-				} : sb?.headers,
-				userId: userId || sb?.userId
+			const call = readSupabaseCall(typeof args[0] === "string" ? args[0] : args[0]?.url, args[1]);
+			if (!call) return ret;
+			if (call.headers && call.userId) sb = {
+				base: call.base,
+				headers: call.headers,
+				userId: call.userId
 			};
-			if (url.includes("/rpc/sync_profile_packs")) {
+			if (call.path === "/rest/v1/rpc/sync_profile_packs") {
 				const issued = epoch;
 				ret.then((res) => res.ok && peek(Promise.resolve(res), (j) => {
 					if (epoch === issued) patchProfile(j);
 				}), () => {});
-			} else if (url.includes("/rest/v1/profiles")) peek(ret, (j) => {
-				const row = Array.isArray(j) ? j[0] : j;
+			} else if (call.path === "/rest/v1/profiles") peek(ret, (j) => {
+				const row = (Array.isArray(j) ? j : [j]).find((r) => r?.id && r.id === sb?.userId);
 				if (row?.is_pro !== void 0) patchProfile({ is_pro: row.is_pro });
 			});
 			return ret;
@@ -5558,10 +5582,9 @@
 	};
 	var SOUNDS = {
 		rip(t) {
-			noise(t, .32, .55, "bandpass", 700, 4200, 1.1);
-			for (let i = 0; i < 7; i++) noise(t + .02 + i * .035, .03, .18, "highpass", 3500, 5e3, .7);
-			tone("sine", 130, 42, t + .04, .3, .5);
-			noise(t + .28, .45, .12, "lowpass", 2500, 300, .7);
+			noise(t, .22, .22, "bandpass", 500, 1800, .8);
+			tone("sine", 110, 48, t + .03, .26, .32);
+			noise(t + .16, .4, .07, "lowpass", 1400, 250, .6);
 		},
 		flip(t) {
 			noise(t, .09, .32, "bandpass", 2200, 900, 1.4);
