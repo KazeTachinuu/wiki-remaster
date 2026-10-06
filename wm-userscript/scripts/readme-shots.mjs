@@ -217,11 +217,12 @@ for (const tab of ["Reçues", "Envoyées", "Historique"]) {
   await ev((t) => [...document.querySelector("#wm-host").shadowRoot.querySelectorAll(".tr-tabs [role=tab], [role=tab]")].find((b) => b.textContent.includes(t))?.click(), tab);
   if (await site.waitFor(`${ROOT}.querySelector(".tr-row:not(.sk)")`, 8000).then(() => true, () => false)) break;
 }
-await ev(() => document.querySelector("#wm-host").shadowRoot.querySelector(".tr-row:not(.sk)").click());
-await site.waitFor(`${ROOT}.querySelector(".tp-sides .card-btn img")`, 30000);
-await Bun.sleep(2500);
-await blurNames(site); await Bun.sleep(200);
-await Bun.write(`${OUT}trade.png`, await view.screenshot());
+if (await ev(() => { const r = document.querySelector("#wm-host").shadowRoot.querySelector(".tr-row:not(.sk)"); r?.click(); return !!r; })) {
+  await site.waitFor(`${ROOT}.querySelector(".tp-sides .card-btn img")`, 30000);
+  await Bun.sleep(2500);
+  await blurNames(site); await Bun.sleep(200);
+  await Bun.write(`${OUT}trade.png`, await view.screenshot());
+} else console.error("trade: no trade to show, kept the previous shot");
 await view.evaluate(prevOff ? `localStorage.setItem("wm-off", ${JSON.stringify(prevOff)})` : `localStorage.removeItem("wm-off")`);
 await view.evaluate(`localStorage.removeItem("wm-debug")`);
 await close();
