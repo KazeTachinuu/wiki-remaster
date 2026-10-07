@@ -7,6 +7,11 @@ describe("needsHuman", () => {
     expect(needsHuman({ data: { human_verification_required: true } })).toBe(true);
     expect(needsHuman({ code: "bid_too_low" })).toBe(false);
   });
+  it("recognises the anti-bot refusal by its wording on routes whose code is not known", () => {
+    expect(needsHuman(new Error("Vérification anti-bot requise."))).toBe(true);
+    expect(needsHuman({ code: "turnstile_required" })).toBe(true);
+    expect(needsHuman(new Error("La vérification a échoué. Réessaie."))).toBe(false);
+  });
 });
 
 describe("withHumanCheck", () => {

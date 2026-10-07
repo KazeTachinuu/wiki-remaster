@@ -26,7 +26,7 @@ const VALUE_TTL = 24 * 3600e3;
 const RATE_PAUSE_MS = 60e3;
 export { backgroundLane, pageLane };
 const saved = Object.fromEntries(Object.entries(load("values", Infinity) || {}).filter(([, [, t]]) => Date.now() - t < VALUE_TTL));
-const inflight = new Map(); // card id -> Promise, shared by concurrent callers
+const inflight = new Map(); // "card id|rarity" -> Promise, shared by concurrent callers
 // The browser keeps ~5 MB for the whole site, the game's own data included: the saved values stop
 // at the most recent few thousand (about 60 bytes each), however many cards are browsed.
 const VALUE_KEEP = 4000;
@@ -38,13 +38,15 @@ let saveTimer = null;
 
 /** A card's market value: its sold average at its current rarity, or null. */
 export function marketValueFor(card) {
-  const hit = saved[card.id];
+  // the same card sells at another price at another rarity (cards change rarity over time)
+  const key = `${card.id}|${card.rarity}`;
+  const hit = saved[key];
   if (hit) return Promise.resolve(hit[0]);
-  if (!inflight.has(card.id)) {
+  if (!inflight.has(key)) {
     // A failure is not remembered, so the next view retries instead of showing "no value".
     // A rate limit pauses the lane, then this card waits in it and tries again (twice at most).
     const fetchValue = (left) => backgroundLane.run(() => data.marketValue(card)).then((v) => {
-      saved[card.id] = [v, Date.now()];
+      saved[key] = [v, Date.now()];
       saveTimer ??= setTimeout(() => { saveTimer = null; save("values", newest(saved, VALUE_KEEP)); }, 1000);
       return v;
     }, (e) => {
@@ -52,9 +54,9 @@ export function marketValueFor(card) {
       backgroundLane.pause(RATE_PAUSE_MS);
       return left > 0 ? fetchValue(left - 1) : null;
     });
-    inflight.set(card.id, fetchValue(2).finally(() => inflight.delete(card.id)));
+    inflight.set(key, fetchValue(2).finally(() => inflight.delete(key)));
   }
-  return inflight.get(card.id);
+  return inflight.get(key);
 }
 
 // --- Collection: asked of the server, page by page -----------------------------------------

@@ -3,9 +3,10 @@
  * Every call here is verified against the live site (docs/API_REFERENCE.md).
  */
 
-import { api, supabase, getProfile, patchProfile, bumpEpoch, getUserId, refreshProfile } from "../api.js";
+import { api, supabase, getProfile, patchProfile, bumpEpoch, getUserId, refreshProfile, sessionReady } from "../api.js";
 import { newInPack, pickCopy, nCard, nAuction, nBid, nNotification, nTrade, nMessage, validateCards } from "../schema.js";
 import { whoAmI, chatMe, otherOf, needMe } from "../trades.js";
+import { nUser, nMe, nPlayer, showcaseOf, friendshipsOf, waitingBy, achievementsOf } from "../social.js";
 
 const PAGE = 50; // server page size; the market rejects limit > 50
 const PACK_CAP = 10;
@@ -66,6 +67,8 @@ export const RealData = {
   isReal: true,
   canReset: false,
   get userId() { return getUserId(); },
+  /** My id, once the game's session is known (a screen opened at once waits for it). */
+  async meNow() { await sessionReady(); return needMe(this.userId); },
 
   /**
    * Packs, coins and Pro status. `sync` asks the game for its pack count first (a pack is due);
@@ -219,7 +222,7 @@ export const RealData = {
 
   /** Propose (or counter, with parentId). `give`/`get` are Items ({ userCardId, card }). */
   async proposeTrade({ to, give = [], get = [], giveCoins = 0, getCoins = 0, parentId = null }) {
-    const me = needMe(this.userId);
+    const me = await this.meNow();
     const items = [
       ...give.map((it) => ({ user_card_id: it.userCardId, card_id: it.card.id, offered_by: me })),
       ...get.map((it) => ({ user_card_id: it.userCardId, card_id: it.card.id, offered_by: to })),
@@ -266,13 +269,13 @@ export const RealData = {
 
   /** My tags, by name: [{ id, name, color }]. */
   async myTags() {
-    const me = needMe(this.userId);
+    const me = await this.meNow();
     return ((await supabase(`tags?select=*&user_id=eq.${encodeURIComponent(me)}&order=name.asc`)) || []).map(nTag).filter(Boolean);
   },
 
   /** A new tag (or mine already named so: names are unique per player). */
   async createTag(name, color) {
-    const me = needMe(this.userId);
+    const me = await this.meNow();
     try {
       const [row] = await supabase("tags", { method: "POST", body: { user_id: me, name, color }, label: "Nouvelle étiquette" });
       return nTag(row);
@@ -286,6 +289,82 @@ export const RealData = {
   /** Put a tag on one copy, or take it off. */
   tagCard: (userCardId, tagId) => supabase("user_card_tags", { method: "POST", body: { user_card_id: userCardId, tag_id: tagId }, label: "Étiquette" }),
   untagCard: (userCardId, tagId) => supabase(`user_card_tags?user_card_id=eq.${encodeURIComponent(userCardId)}&tag_id=eq.${encodeURIComponent(tagId)}`, { method: "DELETE", label: "Étiquette" }),
+
+  // --- friends, profile, showcase, achievements: the calls of the game's own pages ---------------
+
+  /** Every friendship of mine: my friends, the requests I received and sent (see friendshipsOf). */
+  async friendships() {
+    const d = await api("/api/friends", { label: "Chargement de vos amis" });
+    const rows = d.friendships || [];
+    const asTrade = (f) => ({ initiator_id: f.requester_id ?? f.requester?.id, recipient_id: f.addressee_id ?? f.addressee?.id, initiator: f.requester, recipient: f.addressee });
+    return friendshipsOf(rows, whoAmI(rows.map(asTrade), this.userId, getProfile()?.username));
+  },
+  /** My pending trades per friend (see waitingBy): the light read, no cards. */
+  async waitingTrades() {
+    const raw = (await api("/api/trades?active=1", { quiet: true })).trades || [];
+    return waitingBy(raw, whoAmI(raw, this.userId, getProfile()?.username));
+  },
+  /** Players by name (two letters at least), as "Rechercher un joueur". */
+  async searchPlayers(q) {
+    const d = await api(`/api/friends/search?q=${encodeURIComponent(q)}`, { quiet: true });
+    return (d.users || []).map(nUser);
+  },
+  requestFriend: (userId) => api("/api/friends", { method: "POST", body: { addressee_id: userId }, label: "Demande d'ami" }),
+  answerFriend: (fid, accept) => api(`/api/friends/${encodeURIComponent(fid)}`, { method: "PATCH", body: { action: accept ? "accept" : "decline" }, label: accept ? "Acceptation" : "Refus" }),
+  acceptAllFriends: () => api("/api/friends/accept-all", { method: "POST", label: "Acceptation des demandes" }),
+  /** Cancels a request I sent. */
+  dropFriendship: (fid) => api(`/api/friends/${encodeURIComponent(fid)}`, { method: "DELETE", label: "Annulation de la demande" }),
+
+  /** My profile as the game's profile page reads it: name, avatar, public or not, since when. */
+  async me() {
+    return nMe(await supabase("rpc/get_my_profile", { method: "POST", body: {} }));
+  },
+  /** `patch`: { is_public } | { avatar_user_card_id, avatar_pos_x, avatar_pos_y } | { clear_avatar: true }. */
+  async updateProfile(username, patch) {
+    const d = await api(`/api/profile/${encodeURIComponent(username)}`, { method: "PATCH", body: patch, label: "Profil" });
+    return d.profile ? nMe(d.profile) : null;
+  },
+  /** How many cards I own, and how many of each rarity (the counts alone, no cards). */
+  async collectionStats() {
+    const d = await api("/api/my-collection/stats", { quiet: true });
+    const total = Number(d.total);
+    return { total: Number.isFinite(total) ? total : null, rarityCounts: d.rarityCounts || {} };
+  },
+
+  /** My showcase: its 40 places (a copy or null each) and the names given to its galleries. */
+  async showcase() {
+    return showcaseOf(await api("/api/showcase", { quiet: true }), (uc) => mapCollection([uc])[0]);
+  },
+
+  // --- another player's profile, as the game's profile page reads it ---------------------------
+  /** Who they are and where we stand (friends or not). A missing player throws 404. */
+  async player(username) {
+    return nPlayer(await api(`/api/profile/${encodeURIComponent(username)}`, { label: "Chargement du profil" }));
+  },
+  async playerShowcase(username) {
+    return showcaseOf(await api(`/api/profile/${encodeURIComponent(username)}/showcase`, { quiet: true }), (uc) => mapCollection([uc])[0]);
+  },
+  /** Their card count, by rarity, and their first cards (rarest first). */
+  async playerCollection(username) {
+    const d = await api(`/api/profile/${encodeURIComponent(username)}/collection?page=0&stats=1`, { quiet: true });
+    const total = Number(d.total);
+    return { total: Number.isFinite(total) ? total : null, rarityCounts: d.rarityCounts || {}, items: mapCollection(d.collection || []) };
+  },
+  showcasePut: (position, userCardId) => api("/api/showcase", { method: "PUT", body: { position, user_card_id: userCardId }, label: "Vitrine" }),
+  showcaseClear: (position) => api("/api/showcase", { method: "DELETE", body: { position }, label: "Vitrine" }),
+  /** `name` null gives the gallery its default name back. */
+  showcaseName: (index, name) => api("/api/showcase/gallery", { method: "PUT", body: { gallery_index: index, name }, label: "Vitrine" }),
+
+  /** Every achievement, with mine (see achievementsOf). */
+  async achievements() {
+    const me = await this.meNow();
+    const [list, mine] = await Promise.all([supabase("achievements?select=*"), supabase(`user_achievements?select=*&user_id=eq.${encodeURIComponent(me)}`)]);
+    return achievementsOf(list, mine);
+  },
+  /** Asks the game to award what I earned since (its page does on every visit). */
+  syncAchievements: () => api("/api/achievements/check", { method: "POST", body: { event: "achievements_sync" }, quiet: true }),
+  /** { claimed_at, amount, already_claimed } */
+  claimAchievement: (id) => api("/api/achievements/claim", { method: "POST", body: { achievement_id: id }, label: "Récompense" }),
 
   humanCheck: (token) => api("/api/human-check", { method: "POST", body: { token }, label: "Vérification" }),
 

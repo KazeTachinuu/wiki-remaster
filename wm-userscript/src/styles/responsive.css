@@ -10,9 +10,9 @@
     border-right:0;border-top:1px solid var(--line);background:color-mix(in oklab,var(--surface) 97%,transparent);}
   .side .brand,.nav-sep,.nav-grid,.side-foot{display:none}
   .nav{flex:1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;overflow:visible}
-  .nav button{flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden}
-  .nav button svg{width:22px;height:22px}
-  .nav button.on{background:none}
+  .nav>button{flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden}
+  .nav>button svg{width:22px;height:22px}
+  .nav>button.on{background:none}
   .nav-long{display:none}
   .nav-short{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
   .main{padding-bottom:var(--tabbar)}

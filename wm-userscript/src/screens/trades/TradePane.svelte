@@ -10,7 +10,6 @@
   import TradeChat from "./TradeChat.svelte";
   import CardModal from "../../components/CardModal.svelte";
   import Icon from "../../components/Icon.svelte";
-  import { withHumanCheck } from "../../lib/humanCheck.js";
   import { dealLayout, sideShape, DEAL } from "./dealLayout.js";
   import { data, SIDE, forgetCollection, sideValue, verdict, chainOf, timeline, dealLine, statusLabel } from "../../wm/index.js";
   import { ago, nf } from "../../lib/format.js";
@@ -65,7 +64,7 @@
   async function act(action) {
     busy = true; msg = "";
     try {
-      const write = () => withHumanCheck(() => data.tradeAction(t.id, action));
+      const write = () => data.tradeAction(t.id, action);
       await (action === "accept" ? sounded(write) : write());
       if (action === "accept") forgetCollection(); // cards changed hands
       ondone?.(t);

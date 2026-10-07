@@ -8,7 +8,7 @@ const DEFAULTS = {
   sideRail: false, // the sidebar folded to a rail of icons (wide screens)
   collection: { sort: "rarity", filter: "ALL", favOnly: false },
   catalog: { sort: "rarity", rarity: "", wishOnly: false },
-  market: { tab: "browse", sort: "recent", rarity: "" },
+  market: { tab: "browse", sort: "recent", rarity: "", deal: "good" },
 };
 
 function load() {

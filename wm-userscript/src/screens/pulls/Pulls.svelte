@@ -3,7 +3,7 @@
   import { play } from "../../sound/sound.js";
   import { data, session, recordPull, collectionAdd } from "../../wm/index.js";
   import { useOriginalSite } from "../../lib/settings.svelte.js";
-  import { withHumanCheck, needsHuman } from "../../lib/humanCheck.js";
+  import { needsHuman } from "../../lib/humanCheck.js";
   import { countdown, secondsUntil } from "../../lib/format.js";
   import { packTimer } from "../../lib/packTimer.svelte.js";
   // inline (no request), so also same-origin for the foil-shine mask
@@ -36,7 +36,7 @@
     busy = true; opening = true; error = ""; needVerify = false;
     play("rip");
     try {
-      const [d] = await Promise.all([withHumanCheck(opener), new Promise((r) => setTimeout(r, 900))]);
+      const [d] = await Promise.all([opener(), new Promise((r) => setTimeout(r, 900))]);
       if (!d?.cards?.length) throw new Error("Aucune carte reçue. Réessayez dans un instant.");
       recordPull(d.cards);
       collectionAdd();

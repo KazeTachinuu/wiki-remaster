@@ -147,7 +147,7 @@ describe("chainOf", () => {
 describe("otherOf", () => {
   it("otherOf picks the side that is not me", () => {
     const f = { requester: { id: "me", username: "Moi" }, addressee: { id: "u3", username: "Capucine", avatar_url: null } };
-    expect(otherOf(f, "me")).toEqual({ id: "u3", username: "Capucine", avatar: null });
+    expect(otherOf(f, "me")).toEqual({ id: "u3", username: "Capucine", avatar: null, ax: 50, ay: 50 });
     expect(() => otherOf(f, null)).toThrow(NO_ME);
   });
 });

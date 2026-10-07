@@ -3,7 +3,7 @@
   // when, what moves, how fair), on the right the selected trade in full (TradePane), with its
   // actions and the conversation, from 1000px wide. Narrower screens show the list alone; a row opens the same pane
   // full screen. The header opens the composer (TradeComposer).
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import Avatar from "../../components/Avatar.svelte";
   import TradePane from "./TradePane.svelte";
   import TradeComposer from "./TradeComposer.svelte";
@@ -115,6 +115,21 @@
     picks[tab] = full.id;
     mode = "trade";
   }
+  // opened on one offer (/trades?offre=<id>, from Amis): its tab, selected and open, scrolled to,
+  // its row lit for a moment; the address goes back to /trades
+  let wanted = new URLSearchParams(location.search).get("offre");
+  let flash = $state(null);
+  $effect(() => {
+    if (!wanted || !trades) return;
+    const t = trades.find((x) => x.id === wanted);
+    wanted = null;
+    history.replaceState({}, "", "/trades");
+    if (!t) return;
+    untrack(() => { openTrade(t); reading = true; flash = t.id; });
+    tick().then(() => rowsEl?.querySelector(`[data-id="${CSS.escape(t.id)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+    setTimeout(() => (flash = null), 2600);
+  });
+
   // up/down move the selection, focus following
   async function onRowsKey(e) {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -179,7 +194,7 @@
       {:else}
         <div class="tr-rows" bind:this={rowsEl}>
           {#each rows as { t, b, rounds } (t.id)}
-            <button class="tr-row" class:on={selected?.id === t.id} data-id={t.id} aria-current={selected?.id === t.id ? "true" : undefined}
+            <button class="tr-row" class:on={selected?.id === t.id} class:flash={flash === t.id} data-id={t.id} aria-current={selected?.id === t.id ? "true" : undefined}
               onclick={() => select(t)} onkeydown={onRowsKey} aria-label="Échange avec {t.other.username}, {dealLine(t.give.length, t.giveCoins, t.get.length, t.getCoins)}, {balanceLabel(b)}">
               <Avatar user={t.other} size={40} />
               <span class="tr-row-main">

@@ -19,7 +19,7 @@ Updates are automatic, and the sidebar (or the phone menu) says when a new versi
 ## Screens
 
 ### Packs
-Tear-open reveal with rarity sounds; the next-pack countdown and the Pro daily pack show from every screen.
+Tear-open reveal with rarity sounds (from the rarity you choose up); the next-pack countdown and the Pro daily pack show from every screen.
 
 ![Packs](docs/screenshots/packs.png)
 
@@ -46,7 +46,7 @@ All 2.8 M cards, searched by the game's server, with your wishlist.
 ![Catalogue](docs/screenshots/catalog.png)
 
 ### Market
-Live bids, your sales and wins, every listing of a card side by side.
+Live bids, your sales and wins, every listing of a card side by side. Each price shows its gap to the card's market price; Affaires gathers the bargains among the sales seen (under the market, -25 %, -50 %, a price ceiling); alerts watch a search (« singapour », a rarity, a price) and tell you when a new sale shows up.
 
 ![Market](docs/screenshots/market.png)
 
@@ -56,6 +56,12 @@ Live bids, your sales and wins, every listing of a card side by side.
 Both sides as real cards with their value and a verdict; counter-offers as one timeline. Built for busy traders: find a trade by friend or card, hundreds of cards in a trade as mini cards, long negotiations folded.
 
 ![Trade](docs/screenshots/trade.png)
+
+### Friends and profiles
+Friends as in a messaging app: the list, then the friend you pick with your offers in progress, the last message and their showcase, a trade or a message one click away. One search for friends and every player; requests counted on the menu. Every player's profile: last seen, collection by rarity, showcase as they arranged it, or a clean private state.
+
+### Achievements
+Every achievement with your progress where it can be counted, medals by tier, the next goals, every reward claimed in one go and counted on the menu. New achievements from the game show up with no update.
 
 ### Phone
 App layout with a bottom tab bar.

@@ -7,6 +7,7 @@
  * credentials to replay `sync_profile_packs` ourselves on any route.
  */
 
+import { withHumanCheck } from "../lib/humanCheck.js";
 import { load, save } from "./cache.js";
 
 const isReal = /(^|\.)wiki-masters\.com$/.test(globalThis.location?.hostname ?? "");
@@ -86,7 +87,14 @@ async function attempt(path, init, timeout) {
  * plus `status`, `code`, `min`, the raw body as `data`, and `uncertain` for writes whose outcome
  * is unknown (server error or no answer).
  */
-export async function api(path, { method = "GET", body, quiet = false, label, headers } = {}) {
+export function api(path, opts = {}) {
+  // a write the server keeps for humans asks for the check, then runs once more (not the check itself)
+  const write = (opts.method ?? "GET") !== "GET" && path !== HUMAN_CHECK;
+  return write ? withHumanCheck(() => request(path, opts)) : request(path, opts);
+}
+const HUMAN_CHECK = "/api/human-check";
+
+async function request(path, { method = "GET", body, quiet = false, label, headers } = {}) {
   const read = method === "GET";
   const init = { method, credentials: "include", headers: { ...(body && { "content-type": "application/json" }), ...headers }, body: body && JSON.stringify(body) };
   const tracked = quiet ? null : activity.start(label || labelFor(path, read), read ? retry.delays.length + 1 : 1);
@@ -133,6 +141,20 @@ let sb = null; // { base, headers, userId } from the app's Supabase traffic
 
 export const getProfile = () => profile;
 export const getUserId = () => sb?.userId ?? null;
+
+// The game's session is learned from its own first request, a moment after the page opens: a
+// screen opened straight away (a reload on Succès) waits for it rather than failing.
+const SESSION_WAIT_MS = 10e3;
+const sessionWaiters = new Set();
+/** Resolves true once the game's session is known (at once when it is), false after 10 s. */
+export function sessionReady(ms = SESSION_WAIT_MS) {
+  if (sb?.headers && sb.userId) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = (ok) => { clearTimeout(t); sessionWaiters.delete(done); resolve(ok); };
+    const t = setTimeout(() => done(false), ms);
+    sessionWaiters.add(done);
+  });
+}
 export const bumpEpoch = () => { epoch++; };
 
 /** Merge into the captured profile and tell the UI to re-read it. */
@@ -168,6 +190,7 @@ export async function refreshProfile() {
  * PostgREST errors keep their `code` (23505: already exists).
  */
 export async function supabase(path, { method = "GET", body, label } = {}) {
+  if (!sb?.headers) await sessionReady();
   if (!sb?.headers) throw Object.assign(new Error("Session du jeu pas encore prête : réessayez dans un instant."), { status: 0 });
   const tracked = label ? activity.start(label, 1) : null;
   try {
@@ -231,7 +254,10 @@ export function initCapture() {
     const ret = origFetch.apply(window, args);
     const call = readSupabaseCall(typeof args[0] === "string" ? args[0] : args[0]?.url, args[1]);
     if (!call) return ret;
-    if (call.headers && call.userId) sb = { base: call.base, headers: call.headers, userId: call.userId };
+    if (call.headers && call.userId) {
+      sb = { base: call.base, headers: call.headers, userId: call.userId };
+      for (const done of [...sessionWaiters]) done(true);
+    }
 
     if (call.path === "/rest/v1/rpc/sync_profile_packs") {
       const issued = epoch;

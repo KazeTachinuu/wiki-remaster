@@ -6,12 +6,14 @@
 
 import { api } from "../api.js";
 import { RealData } from "./real.js";
+import { nMe, achievementsOf } from "../social.js";
 
 export const MockData = {
   ...RealData,
   isReal: false,
   canReset: true,
   userId: "me",
+  meNow: async () => "me", // no game session to wait for here
 
   async profile() {
     const p = await api("/api/profile", { quiet: true });
@@ -39,4 +41,7 @@ export const MockData = {
   },
   tagCard: (userCardId, tagId) => api("/api/__sb/card-tags", { method: "POST", body: { user_card_id: userCardId, tag_id: tagId }, label: "Étiquette" }),
   untagCard: (userCardId, tagId) => api(`/api/__sb/card-tags?user_card_id=${encodeURIComponent(userCardId)}&tag_id=${encodeURIComponent(tagId)}`, { method: "DELETE", label: "Étiquette" }),
+  // my profile and achievements: the game reads them from its database, the dev API stands in
+  me: () => api("/api/__sb/me", { quiet: true }).then(nMe),
+  achievements: () => api("/api/__sb/achievements", { quiet: true }).then((d) => achievementsOf(d.achievements, d.mine)),
 };

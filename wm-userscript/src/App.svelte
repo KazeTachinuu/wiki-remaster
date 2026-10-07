@@ -7,6 +7,10 @@
   import Catalog from "./screens/catalog/Catalog.svelte";
   import Marketplace from "./screens/market/Marketplace.svelte";
   import Trades from "./screens/trades/Trades.svelte";
+  import Friends from "./screens/social/Friends.svelte";
+  import Achievements from "./screens/social/Achievements.svelte";
+  import Profile from "./screens/social/Profile.svelte";
+  import PlayerProfile from "./screens/social/PlayerProfile.svelte";
   import LoadBar from "./components/LoadBar.svelte";
   import SoundControl from "./components/SoundControl.svelte";
   import SoundSettings from "./components/SoundSettings.svelte";
@@ -17,8 +21,8 @@
   import { tabTicks } from "./sound/sfx.js";
   import { scrollFade } from "./lib/scrollFade.js";
   import { availableUpdate, isUserscript } from "./wm/update.js";
+  import { watches, startWatching, markAlertsRead } from "./lib/watches.svelte.js";
 
-  // Rebuilt screens. Order matters for matching: "/global-collection" contains "collection".
   // the running version (vite.config.js) and where it comes from
   const VERSION = __APP_VERSION__;
   const REPO = "https://github.com/KazeTachinuu/wiki-remaster";
@@ -27,31 +31,41 @@
   let update = $state(null);
   if (isUserscript()) availableUpdate(VERSION, { metaUrl: __META_URL__ }).then((v) => (update = v));
 
+  // The main screens (keys 1 to 5), then the smaller ones that sit with the rest of the site.
   const VIEWS = [
     { id: "pulls", path: "/pulls", label: "Ouvrir des paquets", short: "Paquets", icon: "pulls" },
     { id: "collection", path: "/collection", label: "Ma collection", short: "Collection", icon: "collection" },
     { id: "catalog", path: "/global-collection", label: "Toutes les cartes", short: "Cartes", icon: "catalog" },
     { id: "market", path: "/marketplace", label: "Marché", icon: "market" },
     { id: "trades", path: "/trades", label: "Échanges", icon: "trades" },
+    { id: "friends", path: "/friends", label: "Amis", icon: "friends", more: true },
+    { id: "achievements", path: "/achievements", label: "Succès", icon: "achievements", more: true },
+    { id: "profile", path: "/profile", label: "Profil", icon: "profile", more: true },
   ];
-  // Everything else is the native site (full navigation).
-  const NATIVE = [
-    ["/battle", "Duels", "battle"],
-    ["/guild", "Guilde", "guild"],
-    ["/friends", "Amis", "friends"],
-    ["/dms", "Messages", "dms"],
-    ["/leaderboard", "Classement", "leaderboard"],
-    ["/achievements", "Succès", "achievements"],
-    ["/profile", "Profil", "profile"],
-    ["/settings", "Paramètres", "settings"],
+  const MAIN = VIEWS.filter((v) => !v.more);
+  // The sidebar's grid: our smaller screens among the original site's pages (full navigation).
+  const view_ = (id) => VIEWS.find((v) => v.id === id);
+  const MORE = [
+    { path: "/battle", label: "Duels", icon: "battle" },
+    { path: "/guild", label: "Guilde", icon: "guild" },
+    view_("friends"),
+    { path: "/dms", label: "Messages", icon: "dms" },
+    { path: "/leaderboard", label: "Classement", icon: "leaderboard" },
+    view_("achievements"),
+    view_("profile"),
+    { path: "/settings", label: "Paramètres", icon: "settings" },
   ];
 
+  // the longest path first: "/global-collection" contains "collection"
   const viewFromPath = () =>
-    (["catalog", "market", "collection", "trades"].map((id) => VIEWS.find((v) => v.id === id)).find((v) => location.pathname.startsWith(v.path)) || VIEWS[0]).id;
+    ([...VIEWS].sort((a, b) => b.path.length - a.path.length).find((v) => v.path !== "/pulls" && location.pathname.startsWith(v.path)) || VIEWS[0]).id;
   let view = $state(viewFromPath());
   // /marketplace/<id>: the market opens straight onto that auction
   const auctionFromPath = () => location.pathname.match(/^\/marketplace\/([^/]+)/)?.[1] ?? null;
   let openAuction = $state(auctionFromPath());
+  // /profile/<name>: another player's profile
+  const playerFromPath = () => { const m = location.pathname.match(/^\/profile\/([^/]+)/); return m ? decodeURIComponent(m[1]) : null; };
+  let player = $state(playerFromPath());
   const current = $derived(VIEWS.find((v) => v.id === view));
 
   // a narrow screen lays the nav out as one scrolling row: keep the current view in sight
@@ -64,12 +78,15 @@
     navEl.scrollTo({ left: navEl.scrollLeft + r.left - n.left - (n.width - r.width) / 2 });
   });
 
+  // the original site's page (the dev server has none: the live site's)
+  const native = (path) => (data.isReal ? path : "https://www.wiki-masters.com" + path);
+
   function go(v) {
     view = v.id;
     if (location.pathname !== v.path) history.pushState({}, "", v.path);
   }
   $effect(() => {
-    const onRoute = () => { view = viewFromPath(); openAuction = auctionFromPath(); };
+    const onRoute = () => { view = viewFromPath(); openAuction = auctionFromPath(); player = playerFromPath(); };
     window.addEventListener("wm:route", onRoute);
     return () => window.removeEventListener("wm:route", onRoute);
   });
@@ -112,6 +129,7 @@
   let collKey = $state(0);
   function onchanged() {
     loadProfile();
+    setTimeout(() => loadRewards(true), 60e3); // a pack opened: a collection achievement may have unlocked
     collKey++;
   }
   async function reset() {
@@ -129,12 +147,48 @@
   let notifs = $state([]);
   let notifOpen = $state(false);
   let toasts = $state([]);
-  const unread = $derived(notifs.filter((n) => !n.read));
+  // the game's notifications and my market watches' alerts, newest first
+  const bell = $derived([...watches.alerts, ...notifs].sort((a, b) => String(b.at).localeCompare(String(a.at))));
+  const unread = $derived(bell.filter((n) => !n.read));
+  // each watch checks the market now and then; a new sale it finds pops up like a notification
+  $effect(() => startWatching(toast));
   let seen = null; // ids already known, so only new arrivals toast (none on first load)
+
+  // friend requests waiting: the Amis tile shows how many. Read once, then again only when a
+  // friend request notification arrives (the notifications are polled anyway) or Amis reports it.
+  let requests = $state(0);
+  const loadRequests = () => data.friendships().then((f) => (requests = f.incoming.length), () => {});
+  loadRequests();
+  function onRequests(n) {
+    requests = n;
+    // seen on Amis: their notifications are read
+    const ids = notifs.filter((x) => !x.read && x.type === "friend_request").map((x) => x.id);
+    if (ids.length) markRead(ids);
+  }
+
+  // achievement rewards waiting: the Succès tile shows how many. The game is asked to award what
+  // was earned (as its Succès page does) once the app has settled and a minute after each pack
+  // opening (a collection achievement may unlock), otherwise at most every ten minutes; Succès
+  // reports its own count.
+  let rewards = $state(0);
+  // when the game was last asked, kept across reloads so reopening the app does not ask again
+  const REWARDS_KEY = "wm-rewards-at";
+  const rewardsAt = () => { try { return Number(localStorage.getItem(REWARDS_KEY)) || 0; } catch { return 0; } };
+  function loadRewards(force = false) {
+    if (!force && Date.now() - rewardsAt() < 10 * 60e3) return;
+    try { localStorage.setItem(REWARDS_KEY, String(Date.now())); } catch {}
+    data.syncAchievements().catch(() => {}).then(() => data.achievements()).then((l) => (rewards = l.filter((a) => a.state === "claim").length), () => {});
+  }
+  $effect(() => { const t = setTimeout(loadRewards, 20e3); return () => clearTimeout(t); });
+  // the count on a tile of the sidebar and the menu
+  const countOn = (id) => (id === "friends" ? requests : id === "achievements" ? rewards : 0);
+  const COUNT_SAYS = { friends: ["demande reçue", "demandes reçues"], achievements: ["récompense à réclamer", "récompenses à réclamer"] };
+  const countLabel = (m, n) => (n ? `${m.label}, ${n} ${COUNT_SAYS[m.id][n > 1 ? 1 : 0]}` : m.label);
 
   async function loadNotifs() {
     const list = await data.notifications().catch(() => null);
     if (!list) return;
+    if (seen && list.some((n) => n.type === "friend_request" && !seen.has(n.id))) loadRequests();
     if (seen) for (const n of list) if (!n.read && !seen.has(n.id)) toast(n);
     seen = new Set(list.map((n) => n.id));
     notifs = list;
@@ -161,9 +215,14 @@
     return () => (document.title = baseTitle);
   });
 
+  // a watch's alert is read here only; the game's notifications are read on its server too
+  const isAlert = (id) => id.startsWith("watch:");
   function markRead(ids) {
-    for (const n of notifs) if (!ids || ids.includes(n.id)) n.read = true;
-    data.markRead(ids).catch(() => {});
+    markAlertsRead(ids && ids.filter(isAlert));
+    const theirs = ids && ids.filter((id) => !isAlert(id));
+    if (theirs && !theirs.length) return;
+    for (const n of notifs) if (!theirs || theirs.includes(n.id)) n.read = true;
+    data.markRead(theirs).catch(() => {});
   }
   function openNotif(n, e) {
     if (!n.read) markRead([n.id]);
@@ -197,7 +256,7 @@
     if (e.key === "?") help = !help;
     if (e.key === "[") toggleSideRail();
     else if (e.key === "/") { e.preventDefault(); appEl?.querySelector("input.search")?.focus(); }
-    else if (/^[1-5]$/.test(e.key)) go(VIEWS[e.key - 1]);
+    else if (/^[1-5]$/.test(e.key)) go(MAIN[e.key - 1]);
   }
 </script>
 
@@ -211,13 +270,18 @@
         aria-label={settings.sideRail ? "Déplier le menu" : "Replier le menu"} title={(settings.sideRail ? "Déplier le menu" : "Replier le menu") + " ( [ )"}><Icon name="sidebar" width={1.7} /></button>
     </div>
     <nav class="nav" bind:this={navEl} use:scrollFade={{ axis: "x" }}>
-      {#each VIEWS as v}
+      {#each MAIN as v}
         <button type="button" class:on={view === v.id} aria-current={view === v.id ? "page" : undefined} title={settings.sideRail ? v.label : undefined} onclick={() => go(v)}><Icon name={v.icon} width={1.7} /><span class="nav-long">{v.label}</span><span class="nav-short">{v.short ?? v.label}</span></button>
       {/each}
       <div class="nav-sep">Le reste du site</div>
       <div class="nav-grid">
-        {#each NATIVE as [path, label, icon]}
-          <a href={data.isReal ? path : "https://www.wiki-masters.com" + path} title={label} aria-label={label}><Icon name={icon} width={1.7} /><span class="nav-lbl">{label}</span></a>
+        {#each MORE as m (m.path)}
+          {#if m.id}
+            {@const n = countOn(m.id)}
+            <button type="button" class:on={view === m.id} aria-current={view === m.id ? "page" : undefined} title={countLabel(m, n)} aria-label={countLabel(m, n)} onclick={() => go(m)}><span class="nav-ico"><Icon name={m.icon} width={1.7} />{#if n}<span class="nav-badge">{n}</span>{/if}</span><span class="nav-lbl">{m.label}</span></button>
+          {:else}
+            <a href={native(m.path)} title={m.label} aria-label={m.label}><Icon name={m.icon} width={1.7} /><span class="nav-lbl">{m.label}</span></a>
+          {/if}
         {/each}
       </div>
     </nav>
@@ -247,7 +311,7 @@
           aria-label={settings.hideStats ? "Afficher l'ATK et la DEF" : "Masquer l'ATK et la DEF"} title={settings.hideStats ? "Afficher l'ATK et la DEF" : "Masquer l'ATK et la DEF"}><span>ATK</span></button>
         <SoundControl />
         <!-- phones and tablets: sound, ATK/DEF and the original site's pages, in one sheet -->
-        <button class="bell menu-btn" aria-label={update ? "Menu, mise à jour disponible" : "Menu"} aria-expanded={menuOpen} onclick={() => (menuOpen = true)}><Icon name="menu" width={1.8} />{#if update}<span class="upd-dot on-icon"></span>{/if}</button>
+        <button class="bell menu-btn" aria-label={update ? "Menu, mise à jour disponible" : requests || rewards ? "Menu, du nouveau à voir" : "Menu"} aria-expanded={menuOpen} onclick={() => (menuOpen = true)}><Icon name="menu" width={1.8} />{#if update || requests || rewards}<span class="upd-dot on-icon"></span>{/if}</button>
         <div class="notif">
           <button class="bell" class:has={unread.length > 0} aria-label="Notifications"
             onclick={() => { notifOpen = !notifOpen; if (notifOpen) loadNotifs(); }}>
@@ -261,7 +325,7 @@
                 Notifications{#if unread.length}<span class="notif-count">{unread.length}</span>
                   <button class="link-btn" onclick={() => markRead()}>Tout marquer comme lu</button>{/if}
               </div>
-              {#each notifs as n (n.id)}
+              {#each bell as n (n.id)}
                 <svelte:element this={n.href ? "a" : "div"} href={n.href} {...asButton(n)} class="notif-item" class:unread={!n.read} onclick={(e) => openNotif(n, e)}>
                   {#if !n.read}<span class="notif-dot"></span>{/if}
                   <div class="notif-body">
@@ -297,6 +361,16 @@
         <Catalog />
       {:else if view === "trades"}
         <Trades {profile} onwallet={() => loadProfile()} />
+      {:else if view === "friends"}
+        <Friends {profile} onwallet={() => loadProfile()} onrequests={onRequests} />
+      {:else if view === "achievements"}
+        <Achievements onwallet={() => loadProfile()} onrewards={(n) => (rewards = n)} />
+      {:else if view === "profile"}
+        {#if player}
+          {#key player}<PlayerProfile username={player} {profile} onwallet={() => loadProfile()} />{/key}
+        {:else}
+          <Profile onopen={(path) => history.pushState({}, "", path)} />
+        {/if}
       {:else}
         <Marketplace {profile} onwallet={() => loadProfile()} openId={openAuction} />
       {/if}
@@ -315,8 +389,13 @@
       <section class="sheet-sec">
         <b class="sheet-title">Le reste du site</b>
         <div class="sheet-grid">
-          {#each NATIVE as [path, label, icon]}
-            <a href={data.isReal ? path : "https://www.wiki-masters.com" + path}><Icon name={icon} width={1.7} /><span>{label}</span></a>
+          {#each MORE as m (m.path)}
+            {#if m.id}
+              {@const n = countOn(m.id)}
+              <button type="button" class:on={view === m.id} onclick={() => { menuOpen = false; go(m); }}><span class="nav-ico"><Icon name={m.icon} width={1.7} />{#if n}<span class="nav-badge">{n}</span>{/if}</span><span>{m.label}</span></button>
+            {:else}
+              <a href={native(m.path)}><Icon name={m.icon} width={1.7} /><span>{m.label}</span></a>
+            {/if}
           {/each}
         </div>
       </section>

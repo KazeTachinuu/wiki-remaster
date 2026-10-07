@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { dealOf, gaugeOf, paceOf, biddersOf } from "./auction.js";
+import { dealOf, gapTag, bargains, DEALS, gaugeOf, paceOf, biddersOf } from "./auction.js";
 
 describe("dealOf", () => {
   it("puts a price in its market zone, with the gap in words", () => {
@@ -11,6 +11,38 @@ describe("dealOf", () => {
   });
   it("is null without a market price", () => {
     expect(dealOf(10, null)).toBe(null);
+  });
+});
+
+describe("gapTag", () => {
+  it("says in a few characters how far a price is from the market", () => {
+    expect(gapTag(10, 48)).toEqual({ zone: "good", text: "-79 %" });
+    expect(gapTag(102, 100)).toEqual({ zone: "fair", text: "≈ marché" });
+    expect(gapTag(220, 100)).toEqual({ zone: "bad", text: "+120 %" });
+    expect(gapTag(10, null)).toBe(null);
+  });
+});
+
+describe("DEALS", () => {
+  it("reads as the tag does: a -37 % sale is a -25 % deal, not a -50 % one", () => {
+    const sale = { id: "x", price: 63, status: "active", endAt: new Date(Date.now() + 3600e3).toISOString(), card: { rarity: "UR" } };
+    const hit = (id) => bargains([sale], () => 100, { cap: DEALS.find((d) => d.id === id).cap }).length;
+    expect([hit("good"), hit("quarter"), hit("half")]).toEqual([1, 1, 0]);
+    expect(gapTag(63, 100).text).toBe("-37 %");
+  });
+});
+
+describe("bargains", () => {
+  const now = Date.parse("2026-10-07T12:00:00Z");
+  const at = (h) => new Date(now + h * 3600e3).toISOString();
+  const sale = (id, price, worth, rarity = "R", end = 2, status = "active") => ({ id, price, worth, status, endAt: at(end), card: { rarity } });
+  const sales = [sale("a", 40, 100), sale("b", 10, 100), sale("c", 90, 100), sale("d", 5, null), sale("e", 10, 100, "L"), sale("f", 1, 100, "R", -1), sale("g", 30, 100, "R", 1)];
+  const worthOf = (a) => a.worth;
+  it("keeps the running sales priced under the cap, the best deal first", () => {
+    expect(bargains(sales, worthOf, { cap: 0.5, now }).map((a) => a.id)).toEqual(["b", "e", "g", "a"]);
+  });
+  it("narrows by rarity and by a price ceiling", () => {
+    expect(bargains(sales, worthOf, { cap: 0.85, rarity: "R", max: 35, now }).map((a) => a.id)).toEqual(["b", "g"]);
   });
 });
 

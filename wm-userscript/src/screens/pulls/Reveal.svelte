@@ -4,7 +4,7 @@
   import Icon from "../../components/Icon.svelte";
   import { RNAME, data, pickCopy, collectionRemove } from "../../wm/index.js";
   import { untrack } from "svelte";
-  import { reveal, play } from "../../sound/sound.js";
+  import { reveal, play, chime } from "../../sound/sound.js";
   // copies: my copies of the pack's cards (rows), when the pack sent them; onaction(kind) after a
   // card was sold or discarded from its detail
   let { cards, copies = null, ondone, onaction } = $props();
@@ -13,8 +13,8 @@
   let selected = $state(null);
   // Every card that comes into view answers with its rarity. "Tout révéler" lays out the cards not
   // seen yet one after another (`from` on), each with the swish and its rarity's chime (a single
-  // bell for a Commune, up to the Légendaire's fanfare), at a pace that keeps a 15-card pack
-  // around two seconds.
+  // bell for a Commune, up to the Légendaire's fanfare; from the rarity chosen in the sound
+  // settings), at a pace that keeps a 15-card pack around two seconds.
   let from = $state(0); // the first card the grid deals in (the ones before were already seen)
   const step = $derived(Math.round(Math.min(260, Math.max(130, 2200 / Math.max(1, cards.length - from)))));
   $effect(() => {
@@ -22,7 +22,7 @@
     untrack(() => cards.slice(from).forEach((c, k) => {
       const t = (k * step) / 1000;
       play("flip", t);
-      play(c.rarity, t + 0.1);
+      chime(c.rarity, t + 0.1);
     }));
   });
   function revealAll() {

@@ -8,6 +8,7 @@
 import { CATALOG, RARITY_WEIGHTS, SNAPSHOT_PRICES } from "../mock/catalog.js";
 import { buildWorld, advanceMarket } from "../mock/world.js";
 import { pastSales, SALES_CAP } from "../mock/history.js";
+import { ACHIEVEMENTS, COLLECT } from "../mock/achievements.js";
 
 const PAGE = 50;
 const PACK_SIZE = 5;
@@ -49,6 +50,11 @@ function rng(seed) {
   return () => { s = (s * 1103515245 + 12345) >>> 0; return s / 4294967296; };
 }
 
+// players who keep their profile to their friends
+const PRIVATE_PROFILES = new Set(["u_elsa"]);
+// players the search finds who are not friends yet
+const STRANGERS = ["Kami", "Karoube", "Kays", "Kaulain", "Karl Contout", "Margaux", "Noé", "Zélie"];
+
 export default function mockApiPlugin() {
   return {
     name: "vite-mock-api",
@@ -58,12 +64,16 @@ export default function mockApiPlugin() {
 
       let seq = 0;
       const state = {
-        profile: { username: "Toi", packs_remaining: PACK_CAP, packs_last_regen_at: Date.now(), wikibidous_balance: START_BALANCE, pity_counter: 0, is_pro: true, is_vip: false, special_packs: false },
+        profile: { username: "Toi", packs_remaining: PACK_CAP, packs_last_regen_at: Date.now(), wikibidous_balance: START_BALANCE, pity_counter: 0, is_pro: true, is_vip: false, special_packs: false,
+          is_public: true, avatar_url: null, avatar_pos_x: 50, avatar_pos_y: 50, created_at: iso(Date.now() - 40 * 86400000) },
         proDaily: null, // the calendar day the Pro daily pack was claimed
         specialAt: 0, // when the next special pack can be opened
         collection: new Map(), // user card id -> { id, card, count, is_shiny, starred, obtained_at, tags }
         tags: [], // my tags: { id, name, color } (the game keeps them in its database, see /api/__sb)
         read: new Set(), // read notification ids
+        showcase: new Map(), // showcase position -> user card id
+        galleries: {}, // gallery index -> the name given to it
+        achievements: new Map(), // achievement id -> { unlocked_at, claimed_at }
       };
 
       const addOwned = (card, is_shiny) => {
@@ -97,6 +107,15 @@ export default function mockApiPlugin() {
           addOwned({ ...base, id: `${base.id}~${i}`, wikipedia_title: `${base.wikipedia_title} ${i + 1}`, ...(SEED.noImg ? { image_url: null } : {}) }, Math.random() < SEED.shiny);
         }
         FRIENDS = world.friendships.filter((f) => f.includes("me")).map(([a, b]) => userOf(a === "me" ? b : a));
+        // players met by the search, not friends; requests change, so each world keeps its own list
+        world.players.push(...STRANGERS.map((username, i) => ({ id: `u_s${i}`, username })));
+        world.requests = world.requests.map((r) => [...r]);
+        state.showcase = new Map();
+        state.galleries = {};
+        // a few achievements unlocked, two of them with their reward still waiting
+        const day = 86400000;
+        state.achievements = new Map([["first_sr", 9, true], ["collect_50", 30, true], ["collect_100", 20, true], ["first_dupe", 12, true], ["trades_5", 6, true], ["first_ur", 1, false], ["collect_250", 0.2, false]]
+          .map(([code, d, claimed]) => ["ach_" + code, { unlocked_at: ago(d * day), claimed_at: claimed ? ago((d - 0.1) * day) : null }]));
         state.trades = world.trades;
         state.chats = world.chats;
         state.humanRequired = false;
@@ -217,10 +236,14 @@ export default function mockApiPlugin() {
           return send(res, fault.status || 525, { error: "<!DOCTYPE html><title>525: SSL handshake failed</title>" });
         }
 
+        // the check asked (/api/__fault { human: true }): every other write is refused too, worded as
+        // the live game words it on its other routes (no code), until the check is passed
+        if (state.humanRequired && m !== "GET" && !/^\/api\/(__|reset$|human-check$|packs\/|trades)/.test(p)) return send(res, 403, { error: "Vérification anti-bot requise." });
+
         // Mock-only: the real profile comes from Supabase, see src/wm/api.js.
         if (p === "/api/profile") { regen(); return send(res, 200, { ...p_, next_regen_seconds: nextRegenSeconds(), regen_seconds: REGEN_SECONDS, pack_cap: PACK_CAP }); }
         if (p === "/api/reset" && m === "POST") {
-          Object.assign(p_, { packs_remaining: PACK_CAP, wikibidous_balance: START_BALANCE, pity_counter: 0 });
+          Object.assign(p_, { packs_remaining: PACK_CAP, wikibidous_balance: START_BALANCE, pity_counter: 0, is_public: true, avatar_url: null, avatar_pos_x: 50, avatar_pos_y: 50 });
           state.proDaily = null; state.specialAt = 0; state.read.clear();
           seedWorld();
           return send(res, 200, { ok: true });
@@ -274,6 +297,18 @@ export default function mockApiPlugin() {
           return send(res, 200, { packs_remaining: p_.packs_remaining, packs_last_regen_at: iso(p_.packs_last_regen_at) });
         }
         // dev only: switch the account's Pro / V.I.P. status (and the sample special packs) to see every variant
+        // dev only: another player lists a card whose title has `q` (tests the market alerts)
+        if (p === "/api/__auction" && m === "POST") {
+          const { q: words = "" } = await readBody(req);
+          const card = CATALOG.find((c) => norm(c.wikipedia_title).includes(norm(words)));
+          if (!card) return send(res, 404, { error: "Aucune carte ne correspond." });
+          const base = Math.max(1, Math.round(priceOf(card) * 0.6));
+          const a = { id: `auc_dev_${++seq}`, card_id: card.id, card, is_shiny: false, status: "active", base_amount: base, listing_base_amount: base, current_bid: null, effective_bid: base,
+            current_bidder_id: null, current_bidder: null, final_price: null, created_at: iso(), end_at: iso(Date.now() + 3 * 3600e3), settled_at: null, base_repriced_at: null, winner_id: null,
+            seller_id: "u_dorian", seller: { id: "u_dorian", username: "Dorian", avatar_url: null }, user_card_id: "uc_dev_" + seq, bids: [] };
+          world.auctions.push(a);
+          return send(res, 200, { id: a.id, title: card.wikipedia_title });
+        }
         if (p === "/api/__profile" && m === "POST") { Object.assign(p_, await readBody(req)); return send(res, 200, { ok: true }); }
 
         // favourites and tags: the live game writes them to its database (Supabase) from its client;
@@ -457,12 +492,131 @@ export default function mockApiPlugin() {
           state.humanRequired = false;
           return send(res, 200, { ok: true });
         }
-        if (p === "/api/friends") {
-          const row = ([a, b], i, status) => ({ id: `fr_${status}_${i}`, status, requester: userOf(a), addressee: userOf(b), requester_id: a, addressee_id: b, created_at: ago((9 + i) * 86400000) });
-          const mine = (f) => f.includes("me");
-          const accepted = world.friendships.filter(mine).map((f, i) => row(f, i, "accepted"));
-          const incoming = world.requests.filter(([, b]) => b === "me").map((f, i) => row(f, i, "pending"));
-          return send(res, 200, { friendships: [...accepted, ...incoming], counts: { accepted: accepted.length, incoming: incoming.length, outgoing: 0 } });
+        // --- friends, as the game's Amis page uses them ---------------------------------------
+        const fidOf = ([a, b]) => `fr_${a}_${b}`;
+        const friendRow = (pair, status) => { const [a, b] = pair; return { id: fidOf(pair), status, requester: userOf(a), addressee: userOf(b), requester_id: a, addressee_id: b, created_at: ago(9 * 86400000), updated_at: ago(9 * 86400000) }; };
+        const refreshFriends = () => { FRIENDS = world.friendships.filter((f) => f.includes("me")).map(([a, b]) => userOf(a === "me" ? b : a)); };
+        if (p === "/api/friends" && m === "GET") {
+          const accepted = world.friendships.filter((f) => f.includes("me")).map((f) => friendRow(f, "accepted"));
+          const pending = world.requests.filter((f) => f.includes("me")).map((f) => friendRow(f, "pending"));
+          const incoming = pending.filter((f) => f.addressee_id === "me").length;
+          return send(res, 200, { friendships: [...accepted, ...pending], counts: { accepted: accepted.length, incoming, outgoing: pending.length - incoming } });
+        }
+        if (p === "/api/friends" && m === "POST") {
+          const { addressee_id } = await readBody(req);
+          if (!userOf(addressee_id) || addressee_id === "me") return send(res, 404, { error: "Joueur introuvable." });
+          const known = [...world.friendships, ...world.requests].find((f) => f.includes("me") && f.includes(addressee_id));
+          if (known) return send(res, 409, { error: "Une demande existe déjà." });
+          const pair = ["me", addressee_id];
+          world.requests.push(pair);
+          return send(res, 200, { friendship: friendRow(pair, "pending") });
+        }
+        if (p === "/api/friends/search") {
+          const nq = norm(q("q"));
+          if (nq.length < 2) return send(res, 200, { users: [] });
+          const users = world.players.filter((x) => x.id !== "me" && norm(x.username).includes(nq)).slice(0, 10).map((x) => ({ ...userOf(x.id), avatar_pos_x: 50, avatar_pos_y: 50 }));
+          return send(res, 200, { users });
+        }
+        if (p === "/api/friends/accept-all" && m === "POST") {
+          const mineIn = world.requests.filter(([, b]) => b === "me");
+          world.friendships.push(...mineIn);
+          world.requests = world.requests.filter((r) => !mineIn.includes(r));
+          refreshFriends();
+          return send(res, 200, { accepted: mineIn.length });
+        }
+        if ((id = match(p, /^\/api\/friends\/([^/]+)$/)?.[0])) {
+          const req_ = world.requests.find((f) => fidOf(f) === id);
+          if (m === "PATCH" && req_) {
+            const { action } = await readBody(req);
+            world.requests = world.requests.filter((f) => f !== req_);
+            if (action === "accept") { world.friendships.push(req_); refreshFriends(); }
+            return send(res, 200, { ok: true });
+          }
+          if (m === "DELETE" && req_) { world.requests = world.requests.filter((f) => f !== req_); return send(res, 200, { ok: true }); }
+          return send(res, 404, { error: "Demande introuvable." });
+        }
+
+        // --- my profile, showcase and achievements, as the game's Profil and Succès pages --------
+        if (p === "/api/__sb/me") return send(res, 200, { id: "me", ...p_ });
+        // another player's profile, as the game's profile page reads it; Elsa keeps hers private
+        const PRIVATE = PRIVATE_PROFILES;
+        const playerNamed = (name) => world.players.find((x) => x.username === decodeURIComponent(name));
+        const canSee = (pl) => pl.id === "me" || !PRIVATE.has(pl.id) || FRIENDS.some((f) => f.id === pl.id);
+        if ((id = match(p, /^\/api\/profile\/([^/]+)$/)?.[0]) && m === "GET") {
+          const pl = playerNamed(id);
+          if (!pl) return send(res, 404, { error: "Profil introuvable" });
+          const pair = [...world.friendships, ...world.requests].find((f) => f.includes("me") && f.includes(pl.id));
+          const isFriend = world.friendships.some((f) => f.includes("me") && f.includes(pl.id));
+          return send(res, 200, {
+            profile: { id: pl.id, username: pl.username, avatar_url: null, avatar_pos_x: 50, avatar_pos_y: 50, is_public: !PRIVATE.has(pl.id), created_at: ago(60 * 86400000) },
+            isOwn: pl.id === "me", isFriend, friendshipId: pair ? fidOf(pair) : null, pendingRequest: null, lastSeenAt: ago((pl.username.length % 5) * 3600e3 + 120e3),
+          });
+        }
+        if ((id = match(p, /^\/api\/profile\/([^/]+)\/showcase$/)?.[0])) {
+          const pl = playerNamed(id);
+          if (!pl) return send(res, 404, { error: "Profil introuvable" });
+          if (!canSee(pl)) return send(res, 403, { error: "Profil privé" });
+          // the first cards of their collection, the rarest, laid out as a showcase of one or two galleries
+          const rows = friendCards.get(pl.id).sort((a, b) => RANK[b.card.rarity] - RANK[a.card.rarity]).slice(0, pl.username.length % 2 ? 6 : 3);
+          return send(res, 200, {
+            showcase: rows.map((uc, i) => ({ position: i, user_card_id: uc.id, user_card: { id: uc.id, card: uc.card, is_shiny: uc.is_shiny, snapshot_rarity: uc.card.rarity, snapshot_atk: uc.card.atk, snapshot_def: uc.card.def } })),
+            galleries: rows.length > 4 ? [{ gallery_index: 0, name: "Mes préférées" }] : [],
+          });
+        }
+        if ((id = match(p, /^\/api\/profile\/([^/]+)$/)?.[0]) && m === "PATCH") {
+          if (decodeURIComponent(id) !== p_.username) return send(res, 403, { error: "Profil d'un autre joueur." });
+          const b = await readBody(req);
+          if ("is_public" in b) p_.is_public = !!b.is_public;
+          if (b.clear_avatar) Object.assign(p_, { avatar_url: null, avatar_pos_x: 50, avatar_pos_y: 50 });
+          if (b.avatar_user_card_id) {
+            const uc = state.collection.get(b.avatar_user_card_id);
+            if (!uc?.card.image_url) return send(res, 400, { error: "Cette carte n'a pas d'image." });
+            p_.avatar_url = uc.card.image_url;
+          }
+          if (b.avatar_pos_x != null) Object.assign(p_, { avatar_pos_x: b.avatar_pos_x, avatar_pos_y: b.avatar_pos_y });
+          return send(res, 200, { profile: { id: "me", ...p_ } });
+        }
+        if (p === "/api/my-collection/stats") {
+          const mine = [...state.collection.values()];
+          const rarityCounts = Object.fromEntries(Object.keys(RANK).map((r) => [r, mine.filter((u) => u.card.rarity === r).length]).filter(([, n]) => n));
+          return send(res, 200, { total: mine.length, rarityCounts, tagOptions: [] });
+        }
+        if (p === "/api/showcase") {
+          if (m === "GET") {
+            const showcase = [...state.showcase].map(([position, ucId]) => ({ position, ucId, uc: state.collection.get(ucId) })).filter((x) => x.uc)
+              .map(({ position, uc }) => ({ position, user_card: { id: uc.id, card: uc.card, is_shiny: uc.is_shiny, snapshot_rarity: uc.card.rarity, snapshot_atk: uc.card.atk, snapshot_def: uc.card.def } }));
+            return send(res, 200, { showcase, galleries: Object.entries(state.galleries).map(([i, name]) => ({ gallery_index: Number(i), name })) });
+          }
+          const { position, user_card_id } = await readBody(req);
+          if (!(position >= 0 && position < 40)) return send(res, 400, { error: "Place invalide." });
+          if (m === "DELETE") { state.showcase.delete(position); return send(res, 200, { ok: true }); }
+          if (!state.collection.has(user_card_id)) return send(res, 404, { error: "Carte introuvable." });
+          for (const [k, v] of state.showcase) if (v === user_card_id) state.showcase.delete(k); // one place per copy
+          state.showcase.set(position, user_card_id);
+          return send(res, 200, { ok: true });
+        }
+        if (p === "/api/showcase/gallery" && m === "PUT") {
+          const { gallery_index, name } = await readBody(req);
+          if (name) state.galleries[gallery_index] = String(name).slice(0, 40); else delete state.galleries[gallery_index];
+          return send(res, 200, { ok: true });
+        }
+        if (p === "/api/__sb/achievements") {
+          const mine = [...state.achievements].map(([achievement_id, u]) => ({ user_id: "me", achievement_id, ...u }));
+          return send(res, 200, { achievements: ACHIEVEMENTS, mine });
+        }
+        if (p === "/api/achievements/check" && m === "POST") {
+          for (const c of COLLECT) if (state.collection.size >= c.at && !state.achievements.has(c.id)) state.achievements.set(c.id, { unlocked_at: iso(), claimed_at: null });
+          if (state.showcase.size >= 4 && !state.achievements.has("ach_fill_showcase")) state.achievements.set("ach_fill_showcase", { unlocked_at: iso(), claimed_at: null });
+          return send(res, 200, { ok: true });
+        }
+        if (p === "/api/achievements/claim" && m === "POST") {
+          const { achievement_id } = await readBody(req);
+          const u = state.achievements.get(achievement_id), a = ACHIEVEMENTS.find((x) => x.id === achievement_id);
+          if (!u || !a) return send(res, 400, { error: "Succès non débloqué." });
+          if (u.claimed_at) return send(res, 200, { already_claimed: true, claimed_at: u.claimed_at });
+          u.claimed_at = iso();
+          p_.wikibidous_balance += a.wikibidous_reward;
+          return send(res, 200, { claimed_at: u.claimed_at, amount: a.wikibidous_reward });
         }
         if ((id = match(p, /^\/api\/profile\/([^/]+)\/collection$/)?.[0])) {
           // a friend's, or my own (the live route serves mine too: the pack reveal finds a copy by it)
@@ -472,7 +626,10 @@ export default function mockApiPlugin() {
           // like the live route (checked by test:prod): filtered by q and rarity, ordered as
           // collectionOrder, total only with a search
           const all = filterCards(rows, url, (r) => r.card).sort(collectionOrder(q("sort")));
-          return send(res, 200, { collection: all.slice(page * PAGE, page * PAGE + PAGE), total: q("q") ? all.length : null, rarityCounts: {}, tagOptions: [], profileId: f.id, pendingTradeCardIds: pendingCopies(f.id) });
+          if (f.id !== "me" && PRIVATE_PROFILES.has(f.id) && !FRIENDS.some((x) => x.id === f.id)) return send(res, 403, { error: "Profil privé" });
+          const stats = q("stats") === "1";
+          const rarityCounts = stats ? Object.fromEntries(Object.keys(RANK).map((r) => [r, rows.filter((u) => u.card.rarity === r).length]).filter(([, n]) => n)) : {};
+          return send(res, 200, { collection: all.slice(page * PAGE, page * PAGE + PAGE), total: q("q") || stats ? all.length : null, rarityCounts, tagOptions: [], profileId: f.id, pendingTradeCardIds: pendingCopies(f.id) });
         }
         if ((id = match(p, /^\/api\/chat\/([^/]+)$/)?.[0])) {
           if (!state.chats.has(id) && FRIENDS.some((f) => f.id === id)) state.chats.set(id, []);

@@ -123,6 +123,7 @@ export function nNotification(n) {
   const [title, detail] = NOTIF[n.type]?.(d) ?? [];
   return {
     id: n.id,
+    type: n.type || null,
     title: title || plainText(d.title) || "Notification",
     message: detail || plainText(d.message),
     read: !!n.read,

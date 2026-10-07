@@ -143,8 +143,27 @@ export function play(name, delay = 0) {
   try { SOUNDS[name](t); } catch {}
 }
 
-/** A revealed card: the swish, then its rarity's sting. */
+// The rarity chimes can start from a rarity ("wm-chime-from"): below it a revealed card only
+// swishes. All of them by default.
+const CHIME_KEY = "wm-chime-from";
+export const CHIME_ORDER = ["C", "PC", "R", "SR", "UR", "L"];
+const chimeSubs = new Set();
+export function chimeFrom() {
+  try { const r = localStorage.getItem(CHIME_KEY); return CHIME_ORDER.includes(r) ? r : "C"; } catch { return "C"; }
+}
+export function setChimeFrom(r) {
+  try { localStorage.setItem(CHIME_KEY, r); } catch {}
+  for (const f of chimeSubs) f(r);
+}
+export function onChimeChange(f) { chimeSubs.add(f); f(chimeFrom()); return () => chimeSubs.delete(f); }
+
+/** A rarity's chime, unless it is below the chosen threshold. */
+export function chime(rarity, delay = 0) {
+  if (CHIME_ORDER.indexOf(rarity) >= CHIME_ORDER.indexOf(chimeFrom())) play(rarity, delay);
+}
+
+/** A revealed card: the swish, then its rarity's chime. */
 export function reveal(rarity) {
   play("flip");
-  play(rarity, 0.12);
+  chime(rarity, 0.12);
 }

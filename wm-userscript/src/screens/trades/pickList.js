@@ -1,5 +1,5 @@
-// The order of a trade picker's cards: the server searches, filters and sorts by rarity, name or
-// date added (CardPicker asks it); here the cards it sent are ordered (by value, which only we know), with
+// The order of a trade picker's cards: the server searches, filters and sorts by rarity, name, date
+// added or favourites first (CardPicker asks it); here the cards it sent are ordered (by value, which only we know), with
 // the copies locked in a pending trade last (still visible, not pickable). Pure, so the
 // composer's grid stays dumb.
 import { RARITIES_DESC } from "../../wm/schema.js";
@@ -14,9 +14,11 @@ const SORTS = {
   value: (v) => (a, b) => val(v, b) - val(v, a) || RANK[a.card.rarity] - RANK[b.card.rarity] || byName(a, b),
   name: () => byName,
   recent: () => (a, b) => added(b) - added(a) || byName(a, b),
+  // my favourites first (the server reads them so too), then by rarity
+  starred: () => (a, b) => Number(!!b.starred) - Number(!!a.starred) || RANK[a.card.rarity] - RANK[b.card.rarity] || byName(a, b),
 };
 /** Sort options, in the order the picker lists them. */
-export const PICK_SORTS = [["rarity", "Rareté"], ["recent", "Récentes"], ["value", "Valeur estimée"], ["name", "Nom"]];
+export const PICK_SORTS = [["rarity", "Rareté"], ["recent", "Récentes"], ["starred", "Favoris d'abord"], ["value", "Valeur estimée"], ["name", "Nom"]];
 
 /** True once every row has a value entry (null = known to have none), so a value sort can settle. */
 export const allValued = (items, values) => items.every((it) => values.has(it.card.id));

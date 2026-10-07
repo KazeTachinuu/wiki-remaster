@@ -22,8 +22,10 @@
   // rarity and sort go to onquery({ q, rarity, sort }). The estimated value is ours, not the
   // server's: that order ranks the cards loaded so far (no page is read for it).
   // more: loads the next page, called as the end of the grid comes near.
+  // lockReason(row), lockTitle(row): why a locked copy cannot be picked (a pending trade by default)
   let { items = [], picked, locked = new Set(), loading = false, error = false, onretry, onpick,
-        more = null, loadingMore = false, moreError = false, values, watch, load, lead, onquery } = $props();
+        more = null, loadingMore = false, moreError = false, values, watch, load, lead, onquery,
+        lockReason = () => "Échange en attente", lockTitle = () => "Déjà dans un échange en attente" } = $props();
   let q = $state("");
   let rarity = $state("");
   let sort = $state("rarity");
@@ -72,10 +74,10 @@
       {#each shown as it (it.id)}
         {@const off = isLocked(it)}
         {@const on = picked.has(it.id)}
-        <button class="card-btn" class:picking={picked.size} class:picked={on} disabled={off} onclick={() => { pickSound(on); onpick(it); }} aria-pressed={on} title={off ? "Déjà dans un échange en attente" : it.card.title} use:watch={it.card}>
+        <button class="card-btn" class:picking={picked.size} class:picked={on} disabled={off} onclick={() => { pickSound(on); onpick(it); }} aria-pressed={on} title={off ? lockTitle(it) : it.card.title} use:watch={it.card}>
           <Card card={it.card} shiny={it.is_shiny} stats={false} value={values.get(it.card.id)} />
           <PickMark {on} />
-          {#if off}<span class="pick-lock">Échange en attente</span>{/if}
+          {#if off}<span class="pick-lock">{lockReason(it)}</span>{/if}
         </button>
       {:else}
         {#if error && !loading}<div class="empty"><b>Impossible de charger ces cartes.</b><button class="btn" onclick={onretry}>Réessayer</button></div>

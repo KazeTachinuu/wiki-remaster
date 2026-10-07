@@ -1,6 +1,7 @@
 // The game's anti-bot step (Cloudflare Turnstile), shown inside the remaster. Any write that the
-// server refuses with "human_verification_required" opens the dialog; once verified, the write runs
-// exactly once more. One dialog at a time: concurrent callers share the same check.
+// server refuses for it opens the dialog (wm/api.js runs every write through withHumanCheck);
+// once verified, the write runs exactly once more. One dialog at a time: concurrent callers share
+// the same check.
 export const human = {
   open: false,
   subs: new Set(),
@@ -9,7 +10,11 @@ export const human = {
 };
 let waiting = null; // { promise, resolve }
 
-export const needsHuman = (e) => e?.code === "human_verification_required" || e?.data?.human_verification_required === true;
+// The server's refusal asking for the check: its code, its flag, or (any other wording it may use
+// on a route not seen yet) a message about the anti-bot check.
+export const needsHuman = (e) =>
+  e?.code === "human_verification_required" || e?.data?.human_verification_required === true ||
+  /human_verification|turnstile|captcha/i.test(e?.code ?? "") || /anti-bot|vérification humaine/i.test(e?.message ?? "");
 
 /** Called by the dialog: true once the server accepted the token, false if the user closed it. */
 export function resolveHuman(ok) {

@@ -27,6 +27,41 @@ export function dealOf(price, market) {
 }
 
 /**
+ * A sale's price against its market price, for a tag beside the price: the zone (its colour) and
+ * the gap in a few characters ("-79 %", "+120 %", "≈ marché" within 5 %). Null without a market price.
+ */
+export function gapTag(price, market) {
+  const deal = dealOf(price, market);
+  if (!deal) return null;
+  const pct = Math.round((deal.ratio - 1) * 100);
+  return { zone: deal.zone, text: Math.abs(pct) < 5 ? "≈ marché" : `${pct > 0 ? "+" : "-"}${Math.abs(pct)} %` };
+}
+
+// The "Affaires" thresholds, in the words of the tag beside a price (a discount on the market
+// price): `cap` is the most a price may be, as a share of the market price.
+export const DEALS = [
+  { id: "good", cap: ZONES[0].until, label: "Sous le marché" },
+  { id: "quarter", cap: 0.75, label: "-25 % ou mieux" },
+  { id: "half", cap: 0.5, label: "-50 % ou mieux" },
+];
+
+/**
+ * The bargains among the sales seen: still running, with a known market price, priced at most
+ * `cap` times it (and at most `max`, of `rarity`, when given), the best deal first. `worthOf(a)`:
+ * the sale's market price or null.
+ */
+export function bargains(sales, worthOf, { cap, max = null, rarity = "", now = Date.now() }) {
+  const out = [];
+  for (const a of sales) {
+    if (a.status !== "active" || !(Date.parse(a.endAt) > now) || a.price == null) continue;
+    if ((rarity && a.card.rarity !== rarity) || (max != null && a.price > max)) continue;
+    const w = worthOf(a);
+    if (w > 0 && a.price / w <= cap) out.push({ a, ratio: a.price / w });
+  }
+  return out.sort((x, y) => x.ratio - y.ratio || Date.parse(x.a.endAt) - Date.parse(y.a.endAt)).map((x) => x.a);
+}
+
+/**
  * The gauge: the market's zones and the marks on it, in percent of its width. Its scale holds the
  * price and two and a half times the market price, so every zone shows.
  */

@@ -38,3 +38,11 @@ describe("pickList", () => {
     expect(ids(pickList(items, { values }))).toEqual([4, 2, 3, 1]);
   });
 });
+
+describe("favourites first", () => {
+  it("puts my favourites first, then the rarest", () => {
+    const row = (id, rarity, starred = false) => ({ id, starred, card: { id, rarity, title: id } });
+    const out = pickList([row("a", "L"), row("b", "C", true), row("c", "UR", true)], { sort: "starred", values: new Map() });
+    expect(out.map((r) => r.id)).toEqual(["c", "b", "a"]);
+  });
+});

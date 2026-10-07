@@ -7,21 +7,27 @@
 .brand b{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:-.01em}
 .nav{display:flex;flex-direction:column;gap:2px;overflow-y:auto;min-height:0;flex:1;scrollbar-width:none}
 .nav::-webkit-scrollbar{display:none}
-.nav button{display:flex;align-items:center;gap:var(--s3);padding:10px 12px;border-radius:11px;
+.nav>button{display:flex;align-items:center;gap:var(--s3);padding:10px 12px;border-radius:11px;
   color:var(--fg-soft);font-weight:500;font-size:14px;font-family:inherit;cursor:pointer;transition:background .15s,color .15s;
   background:none;border:0;width:100%;text-align:left}
-.nav button svg{width:19px;height:19px;flex:none;opacity:.85}
-.nav button:hover{background:var(--elev);color:var(--fg)}
-.nav button.on{background:color-mix(in oklab,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}
-.nav button.on svg{opacity:1}
+.nav>button svg{width:19px;height:19px;flex:none;opacity:.85}
+.nav>button:hover{background:var(--elev);color:var(--fg)}
+.nav>button.on{background:color-mix(in oklab,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}
+.nav>button.on svg{opacity:1}
 .nav-sep{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-faint);padding:var(--s4) 12px var(--s2)}
-/* the native site's other pages: a compact tile grid */
+/* the smaller screens and the native site's other pages: a compact tile grid */
 .nav-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px}
-.nav-grid a{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 2px 9px;border-radius:10px;
+.nav-grid :is(a,button){background:none;border:0;font-family:inherit;display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 2px 9px;border-radius:10px;
   color:var(--fg-soft);font-size:11px;line-height:1.1;text-align:center;transition:background .15s,color .15s}
-.nav-grid a svg{width:17px;height:17px;opacity:.55}
-.nav-grid a:hover{background:var(--elev);color:var(--fg)}
-.nav-grid a:hover svg{opacity:.9}
+.nav-grid :is(a,button) svg{width:17px;height:17px;opacity:.55}
+.nav-grid :is(a,button):hover{background:var(--elev);color:var(--fg)}
+.nav-grid :is(a,button):hover svg{opacity:.9}
+/* a count on a tile (friend requests waiting) */
+.nav-ico{position:relative;display:inline-flex}
+.nav-badge{position:absolute;top:-6px;left:calc(100% - 6px);min-width:16px;height:16px;padding:0 4px;border-radius:999px;display:grid;place-items:center;
+  background:#f26d6d;color:#fff;font:700 10px/1 var(--display);font-variant-numeric:tabular-nums;box-shadow:0 0 0 2px var(--surface)}
+.nav-grid button.on{background:color-mix(in oklab,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}
+.nav-grid button.on svg{opacity:1}
 .side-foot{display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3) 12px 0;border-top:1px solid var(--line)}
 .ghost{background:transparent;border:1px solid var(--line2);color:var(--fg-soft);
   padding:9px;border-radius:10px;font-size:13px;font-weight:500;transition:.15s}
@@ -33,9 +39,9 @@
 .hintline::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
 @media(max-height:760px) and (min-width:901px){
   .side{padding:var(--s4) var(--s3);gap:var(--s3)}
-  .nav button{padding:8px 12px}
+  .nav>button{padding:8px 12px}
   .nav-sep{padding:var(--s3) 12px 6px}
-  .nav-grid a{padding:7px 2px 6px;gap:4px}
+  .nav-grid :is(a,button){padding:7px 2px 6px;gap:4px}
 }
 
 /* main + topbar */
@@ -125,9 +131,10 @@ button.pk-chip:hover{border-color:var(--line2)}
 .sheet-row span{font-size:12.5px;color:var(--fg-faint)}
 .sheet-title{display:block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-faint);margin-bottom:var(--s2)}
 .sheet-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
-.sheet-grid a{display:flex;flex-direction:column;align-items:center;gap:6px;min-height:64px;justify-content:center;padding:8px 2px;border-radius:12px;color:var(--fg-soft);font-size:12px;text-align:center}
-.sheet-grid a:active,.sheet-grid a:hover{background:var(--elev);color:var(--fg)}
-.sheet-grid a svg{width:20px;height:20px}
+.sheet-grid :is(a,button){background:none;border:0;font-family:inherit;display:flex;flex-direction:column;align-items:center;gap:6px;min-height:64px;justify-content:center;padding:8px 2px;border-radius:12px;color:var(--fg-soft);font-size:12px;text-align:center}
+.sheet-grid :is(a,button):active,.sheet-grid :is(a,button):hover{background:var(--elev);color:var(--fg)}
+.sheet-grid button.on{color:var(--accent)}
+.sheet-grid :is(a,button) svg{width:20px;height:20px}
 .sheet-reset{width:100%;margin-top:var(--s2)}
 /* sound control: same button as the bell, a compact panel with the volume and the mute switch */
 .snd{position:relative;display:flex}
@@ -151,6 +158,29 @@ button.pk-chip:hover{border-color:var(--line2)}
 .snd-vol input:hover::-webkit-slider-thumb,.snd-vol input:active::-webkit-slider-thumb{transform:scale(1.15)}
 .snd-vol input:hover::-moz-range-thumb,.snd-vol input:active::-moz-range-thumb{transform:scale(1.15)}
 .snd-vol output{min-width:4ch;text-align:right;font-variant-numeric:tabular-nums;color:var(--fg);font-size:13px}
+/* the rarity chime threshold: six stops in their colours, lit from the chosen one; a range input
+   on top carries the pointer and the keyboard */
+.chime{display:flex;flex-direction:column;gap:6px;transition:opacity .15s}
+.chime.off{opacity:.5}
+.chime-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:13px;color:var(--fg-soft)}
+.chime-head b{color:var(--fg);font-weight:600;font-size:13px}
+.chime-track{--at:0;--pad:9px;position:relative;height:26px}
+.chime-track::before,.chime-lit{content:"";position:absolute;top:50%;left:var(--pad);right:var(--pad);height:4px;margin-top:-2px;border-radius:2px}
+.chime-track::before{background:var(--line2)}
+.chime-lit{background:linear-gradient(90deg,var(--r-c),var(--r-pc),var(--r-r),var(--r-sr),var(--r-ur),var(--r-l));clip-path:inset(0 0 0 calc(var(--at) / 5 * 100%));transition:clip-path .18s ease}
+.chime-stop{position:absolute;top:50%;left:calc(var(--pad) + var(--i) / 5 * (100% - 2 * var(--pad)));width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;background:var(--elev2);box-shadow:0 0 0 2px var(--surface);transition:background .15s,transform .15s}
+.chime-stop.lit{background:var(--rc)}
+.chime-track input{position:absolute;inset:0;width:100%;height:100%;margin:0;background:none;cursor:pointer;-webkit-appearance:none;appearance:none}
+.chime-track input::-webkit-slider-runnable-track{height:100%;background:none}
+.chime-track input::-moz-range-track{background:none}
+.chime-track input::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;margin-top:4px;border-radius:50%;background:var(--fg);box-shadow:0 1px 5px #000a;transition:transform .12s}
+.chime-track input::-moz-range-thumb{width:18px;height:18px;border:none;border-radius:50%;background:var(--fg);box-shadow:0 1px 5px #000a;transition:transform .12s}
+.chime-track input:hover::-webkit-slider-thumb,.chime-track input:active::-webkit-slider-thumb{transform:scale(1.12)}
+.chime-track input:focus-visible{outline:none}
+.chime-track:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:3px;border-radius:999px}
+.chime-codes{display:flex;justify-content:space-between;padding:0 2px;font:600 10.5px var(--body);color:var(--fg-faint)}
+.chime-codes span{width:18px;text-align:center}
+.chime-codes span.lit{color:var(--rc)}
 .snd-note{font-size:12px;line-height:1.4;color:var(--fg-faint)}
 .notif-panel{position:absolute;top:46px;right:0;width:min(340px,86vw);max-height:66vh;overflow:auto;background:var(--surface);border:1px solid var(--line2);border-radius:var(--radius-lg);box-shadow:0 24px 60px -24px #000;z-index:31;padding:var(--s2);overscroll-behavior:contain}
 .notif-head{display:flex;align-items:center;gap:8px;padding:8px 10px 10px;font-family:var(--display);font-weight:700;font-size:14px}
@@ -181,7 +211,7 @@ button.pk-chip:hover{border-color:var(--line2)}
   .app.rail .brand{justify-content:center;padding:0}
   .app.rail .brand .mk,.app.rail .brand b,.app.rail .side .nav-long,.app.rail .nav-lbl,.app.rail .foot-txt,.app.rail .hintline,.app.rail .side-foot .ghost{display:none}
   .app.rail .side-toggle{margin:0}
-  .app.rail .nav button{justify-content:center;padding-inline:0}
+  .app.rail .nav>button{justify-content:center;padding-inline:0}
   .app.rail .nav-sep{font-size:0;padding:0;margin:var(--s3) 10px;border-top:1px solid var(--line)}
   .app.rail .nav-grid{grid-template-columns:1fr}
   .app.rail .side-foot{align-items:center;padding-inline:0}

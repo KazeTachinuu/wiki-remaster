@@ -10,7 +10,7 @@ export function lazyValues(onvalue, { concurrency = 5 } = {}) {
   const queue = createQueue({ concurrency });
 
   function load(card, front = false) {
-    queue.push(card.id, () => marketValueFor(card).then((v) => onvalue(card.id, v)));
+    queue.push(card.id, () => marketValueFor(card).then((v) => onvalue(card.id, v, card)));
     if (front) queue.prioritize(card.id);
   }
 

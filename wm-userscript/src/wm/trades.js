@@ -2,6 +2,7 @@
 // the deal is fair, and the counter-offer chain. Labels live here, once.
 
 import { nf } from "../lib/format.js";
+import { nUser } from "./social.js";
 
 export const STATUS = {
   pending: "En attente",
@@ -199,5 +200,5 @@ export function timeline(chain) {
 /** The friend in a friendship (whichever side is not me). */
 export function otherOf(f, me) {
   const o = f.requester?.id === needMe(me) ? f.addressee : f.requester;
-  return { id: o?.id, username: o?.username || "?", avatar: o?.avatar_url || null };
+  return nUser(o) ?? nUser({ username: "?" });
 }

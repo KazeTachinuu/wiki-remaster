@@ -12,7 +12,6 @@
   import OfferSide from "./OfferSide.svelte";
   import TradeVerdict from "./TradeVerdict.svelte";
   import { anchorCentered } from "../../lib/anchor.js";
-  import { withHumanCheck } from "../../lib/humanCheck.js";
   import { PageStream } from "../../lib/paged.svelte.js";
   import { valueMap } from "../../lib/lazyValues.js";
   import { nf } from "../../lib/format.js";
@@ -21,11 +20,12 @@
   import { data, normSearch, SIDE, pageLane, myCardsPage, sideValue, verdict, balanceLabel, offerSummary } from "../../wm/index.js";
   // balance: my WikiBidous (null while unknown), the coins I add cannot exceed it
   // onsent(ok): the offer went through (true), or the server answered with an error (false: it may exist anyway)
-  let { counter = null, balance = null, onclose, onsent } = $props();
+  // to: a friend chosen already (from Amis), the friend step is skipped
+  let { counter = null, to = null, balance = null, onclose, onsent } = $props();
 
   // writable deriveds: a counter-offer fills them in, the player edits them from there
   // a counter-offer answers the other player: their copies stay theirs, mine stay mine
-  let friend = $derived(counter?.other ?? null);
+  let friend = $derived(counter?.other ?? to ?? null);
   let friends = $state(null);
   let friendsError = $state(""); // a failed load is not "no friends"
   function loadFriends() {
@@ -89,7 +89,7 @@
   async function send() {
     busy = true; msg = "";
     try {
-      await sounded(() => withHumanCheck(() => data.proposeTrade({ to: friend.id, give: giveItems, get: getItems, giveCoins: coins(giveCoins), getCoins: coins(getCoins), parentId: counter?.id })));
+      await sounded(() => data.proposeTrade({ to: friend.id, give: giveItems, get: getItems, giveCoins: coins(giveCoins), getCoins: coins(getCoins), parentId: counter?.id }));
       onsent?.(true); onclose?.();
     } catch (e) {
       msg = e.message;
