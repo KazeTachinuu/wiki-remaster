@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.12.10
+// @version      0.12.11
 // @author       Hugo Sibony
 // @description  Unofficial redesign of wiki-masters.com, on the game's own data and your own session.
 // @license      MIT
@@ -7983,12 +7983,6 @@
 		let i = state(0);
 		let showAll = state(false);
 		let selected = state(null);
-		const STING = new Set([
-			"R",
-			"SR",
-			"UR",
-			"L"
-		]);
 		let from = state(0);
 		const step = user_derived(() => Math.round(Math.min(260, Math.max(130, 2200 / Math.max(1, $$props.cards.length - get(from))))));
 		user_effect(() => {
@@ -7996,7 +7990,7 @@
 			untrack(() => $$props.cards.slice(get(from)).forEach((c, k) => {
 				const t = k * get(step) / 1e3;
 				play("flip", t);
-				if (STING.has(c.rarity)) play(c.rarity, t + .1);
+				play(c.rarity, t + .1);
 			}));
 		});
 		function revealAll() {
@@ -14401,7 +14395,7 @@
 	var root_26 = from_html(`<div><!> <aside class="side"><div class="brand"><span class="mk"></span><b>Wiki Remaster</b> <button type="button" class="side-toggle"><!></button></div> <nav class="nav"><!> <div class="nav-sep">Le reste du site</div> <div class="nav-grid"></div></nav> <div class="side-foot"><!> <button class="foot-link" title="Raccourcis clavier"><span class="kbd">?</span><span class="foot-txt">Raccourcis clavier</span></button> <div class="hintline"> <!></div></div></aside> <main class="main"><header class="topbar"><div class="crumb"><span class="nav-long"> </span><span class="nav-short"> </span></div> <div class="wallet"><!> <button><span>ATK</span></button> <!> <button class="bell menu-btn"><!><!></button> <div class="notif"><button aria-label="Notifications"><!> <!></button> <!></div> <!> <button type="button"><span class="pk-ring"><!></span> <b> </b><span class="chip-cap"> </span> <!> <!></button> <span class="chip" title="WikiBidous"><!><b> </b></span></div></header> <section class="view"><!></section></main> <!> <!> <!> <!></div>`);
 	function App($$anchor, $$props) {
 		push($$props, true);
-		const VERSION = "0.12.10";
+		const VERSION = "0.12.11";
 		const REPO = "https://github.com/KazeTachinuu/wiki-remaster";
 		let update$1 = state(null);
 		if (isUserscript()) availableUpdate(VERSION, { metaUrl: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.meta.js" }).then((v) => set(update$1, v, true));

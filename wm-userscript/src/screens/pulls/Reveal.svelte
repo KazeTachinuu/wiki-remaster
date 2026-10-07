@@ -12,9 +12,9 @@
   let showAll = $state(false);
   let selected = $state(null);
   // Every card that comes into view answers with its rarity. "Tout révéler" lays out the cards not
-  // seen yet one after another (`from` on), each with the swish, the rare ones also with their
-  // rarity's sting, at a pace that keeps a 15-card pack around two seconds.
-  const STING = new Set(["R", "SR", "UR", "L"]);
+  // seen yet one after another (`from` on), each with the swish and its rarity's chime (a single
+  // bell for a Commune, up to the Légendaire's fanfare), at a pace that keeps a 15-card pack
+  // around two seconds.
   let from = $state(0); // the first card the grid deals in (the ones before were already seen)
   const step = $derived(Math.round(Math.min(260, Math.max(130, 2200 / Math.max(1, cards.length - from)))));
   $effect(() => {
@@ -22,7 +22,7 @@
     untrack(() => cards.slice(from).forEach((c, k) => {
       const t = (k * step) / 1000;
       play("flip", t);
-      if (STING.has(c.rarity)) play(c.rarity, t + 0.1);
+      play(c.rarity, t + 0.1);
     }));
   });
   function revealAll() {
