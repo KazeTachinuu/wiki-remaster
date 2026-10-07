@@ -1,5 +1,5 @@
 <script>
-  import { data, health } from "./wm/index.js";
+  import { data, health, kept, keepNow } from "./wm/index.js";
   import { isOurs } from "./wm/routes.js";
   import Icon from "./components/Icon.svelte";
   import Pulls from "./screens/pulls/Pulls.svelte";
@@ -154,8 +154,8 @@
 
   // friend requests waiting: the Amis tile shows how many. Read once, then again only when a
   // friend request notification arrives (the notifications are polled anyway) or Amis reports it.
-  let requests = $state(0);
-  const loadRequests = () => data.friendships().then((f) => (requests = f.incoming.length), () => {});
+  let requests = $state(kept("friends")?.incoming.length ?? 0); // the last known, until the server answers
+  const loadRequests = () => data.friendships().then((f) => { requests = f.incoming.length; keepNow("friends", f); }, () => {});
   loadRequests();
   function onRequests(n) {
     requests = n;
@@ -168,14 +168,14 @@
   // was earned (as its Succès page does) once the app has settled and a minute after each pack
   // opening (a collection achievement may unlock), otherwise at most every ten minutes; Succès
   // reports its own count.
-  let rewards = $state(0);
+  let rewards = $state(kept("achievements")?.filter((a) => a.state === "claim").length ?? 0);
   // when the game was last asked, kept across reloads so reopening the app does not ask again
   const REWARDS_KEY = "wm-rewards-at";
   const rewardsAt = () => { try { return Number(localStorage.getItem(REWARDS_KEY)) || 0; } catch { return 0; } };
   function loadRewards(force = false) {
     if (!force && Date.now() - rewardsAt() < 10 * 60e3) return;
     try { localStorage.setItem(REWARDS_KEY, String(Date.now())); } catch {}
-    data.syncAchievements().catch(() => {}).then(() => data.achievements()).then((l) => (rewards = l.filter((a) => a.state === "claim").length), () => {});
+    data.syncAchievements().catch(() => {}).then(() => data.achievements()).then((l) => { rewards = l.filter((a) => a.state === "claim").length; keepNow("achievements", l); }, () => {});
   }
   $effect(() => { const t = setTimeout(loadRewards, 20e3); return () => clearTimeout(t); });
   // the count on a tile of the sidebar and the menu

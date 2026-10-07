@@ -9,18 +9,21 @@
   import ChatModal from "../../components/ChatModal.svelte";
   import RarityBreakdown from "../../components/RarityBreakdown.svelte";
   import TradeComposer from "../trades/TradeComposer.svelte";
-  import { data } from "../../wm/index.js";
+  import { data, kept, keepNow } from "../../wm/index.js";
   import { seenLabel, relationOf, filledGalleries } from "../../wm/social.js";
   import { nf } from "../../lib/format.js";
   import { sounded } from "../../sound/sfx.js";
 
   let { username, profile, onwallet } = $props();
 
-  let who = $state(null); // nPlayer
+  // as last shown, at once; the server's answers replace it (wm/index.js: kept)
+  const saved = kept("player." + username.toLowerCase());
+  let who = $state(saved?.who ?? null); // nPlayer
   let missing = $state(false);
   let error = $state("");
-  let shelf = $state(null); // { places, names }, or "hidden"
-  let coll = $state(null); // { total, rarityCounts, items }, or "hidden"
+  let shelf = $state(saved?.shelf ?? null); // { places, names }, or "hidden"
+  let coll = $state(saved?.coll ?? null); // { total, rarityCounts, items }, or "hidden"
+  $effect(() => { if (who) keepNow("player." + username.toLowerCase(), $state.snapshot({ who, shelf, coll })); });
   let split = $state(null); // my friendships, for where we stand when not friends
   let busy = $state(false);
   let note = $state(null);
@@ -29,7 +32,7 @@
   async function load() {
     error = ""; missing = false;
     try { who = await data.player(username); }
-    catch (e) { if (e.status === 404) missing = true; else error = e.message || "Profil indisponible pour le moment."; return; }
+    catch (e) { if (e.status === 404) { missing = true; who = null; } else if (!who) error = e.message || "Profil indisponible pour le moment."; return; }
     data.playerShowcase(username).then((s) => (shelf = s), (e) => (shelf = hidden(e) ? "hidden" : { places: [], names: {} }));
     data.playerCollection(username).then((c) => (coll = c), (e) => (coll = hidden(e) ? "hidden" : null));
     if (!who.isFriend && !who.isOwn) data.friendships().then((s) => (split = s), () => {});

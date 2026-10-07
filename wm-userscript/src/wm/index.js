@@ -84,6 +84,16 @@ export async function myCardsPage(query = {}) {
   return d;
 }
 
+// --- Screens kept between visits ---------------------------------------------------------------
+// What changes slowly (my friends, my profile, my achievements, a player's profile) is kept as the
+// screen last showed it: the screen paints that at once, then the server's answer replaces it and
+// is kept in turn. One copy per browser profile, like the collection's first page; a week at most.
+const KEPT_TTL = 7 * 86400e3;
+/** The last state of a screen's data (`key`), or null. */
+export const kept = (key) => load("kept." + key, KEPT_TTL);
+/** Keep a screen's data as it shows now. */
+export const keepNow = (key, value) => save("kept." + key, value);
+
 // After a change (a pack, a discard, a sale, a trade): the saved first page is asked again.
 export const collectionAdd = () => drop(FIRST_KEY);
 export const collectionRemove = () => drop(FIRST_KEY);

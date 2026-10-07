@@ -100,6 +100,7 @@ bun run test                   # unit tests
 bun run check                  # style check
 bun run publish:firefox        # build and submit to Firefox Add-ons (see docs/STORE.md)
 cd wm-userscript
+bun run sweep                  # every screen in a browser, desktop and phone (test server on :5175, or WM_DEV=url)
 bun run test:prod:login        # once: log in to the game
 bun run test:prod              # build on the real site, read-only
 bun scripts/readme-shots.mjs   # README screenshots, read-only
@@ -110,7 +111,7 @@ scripts/check-live.sh --install # daily live check: desktop alert + GitHub issue
 - Faster market: `WM_MOCK_MARKET_SPEED=60 bun run dev` (an hour a minute)
 - Big mock collection: `WM_MOCK_CARDS=20000 bun run dev` (`WM_MOCK_SHINY=1` all shiny, `WM_MOCK_NOIMG=1` no pictures)
 - Power user: `WM_MOCK_FRIENDS=300 WM_MOCK_TRADES=900 WM_MOCK_CHAIN=150 bun run dev` (friends, trades, one negotiation of 150 offers)
-- Mock faults: `POST /api/__fault` (`{ "status": 525, "count": 2 }`, `{ "delay": 7000 }`, `{ "human": true }`); Pro / V.I.P.: `POST /api/__profile`
+- Mock faults: `POST /api/__fault` (`{ "status": 525, "count": 2 }`, `{ "delay": 7000 }`, `{ "human": true }`); Pro / V.I.P.: `POST /api/__profile`; another player lists a card: `POST /api/__auction` (`{ "q": "Colmar" }`, for the market alerts)
 - `test:prod` diffs API shapes against `docs/api-shapes.json` (`--update-shapes`, `--only=market,trades`, `--write=discard,sell,bid,notif`)
 - API reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.12.14
+// @version      0.12.15
 // @author       Hugo Sibony
 // @description  Unofficial redesign of wiki-masters.com, on the game's own data and your own session.
 // @license      MIT
@@ -209,6 +209,46 @@
 	}
 	var async_mode_flag = false;
 	var legacy_mode_flag = false;
+	var empty = [];
+	function snapshot(value, skip_warning = false, no_tojson = false) {
+		return clone(value, new Map(), "", empty, null, no_tojson);
+	}
+	function clone(value, cloned, path, paths, original = null, no_tojson = false) {
+		if (typeof value === "object" && value !== null) {
+			var unwrapped = cloned.get(value);
+			if (unwrapped !== void 0) return unwrapped;
+			if (value instanceof Map) return new Map(value);
+			if (value instanceof Set) return new Set(value);
+			if (is_array(value)) {
+				var copy = Array(value.length);
+				cloned.set(value, copy);
+				if (original !== null) cloned.set(original, copy);
+				for (var i = 0; i < value.length; i += 1) {
+					var element = value[i];
+					if (i in value) copy[i] = clone(element, cloned, path, paths, null, no_tojson);
+				}
+				return copy;
+			}
+			if (get_prototype_of(value) === object_prototype) {
+				copy = {};
+				cloned.set(value, copy);
+				if (original !== null) cloned.set(original, copy);
+				for (var key of Object.keys(value)) copy[key] = clone(value[key], cloned, path, paths, null, no_tojson);
+				return copy;
+			}
+			if (value instanceof Date) {
+				value.getTime();
+				return structuredClone(value);
+			}
+			if (typeof value.toJSON === "function" && !no_tojson) return clone(value.toJSON(), cloned, path, paths, value);
+		}
+		if (value instanceof EventTarget) return value;
+		try {
+			return structuredClone(value);
+		} catch (e) {
+			return value;
+		}
+	}
 	var component_context = null;
 	function set_component_context(context) {
 		component_context = context;
@@ -4989,6 +5029,8 @@
 			color: x.color ?? null
 		} : null;
 	};
+	var ACHIEVEMENTS_KEY = "achievements.list";
+	var DAY_MS = 864e5;
 	var COLLECTION_SORT = {
 		rarity: null,
 		name: "name",
@@ -5446,8 +5488,7 @@
 		}),
 		async achievements() {
 			const me = await this.meNow();
-			const [list, mine] = await Promise.all([supabase("achievements?select=*"), supabase(`user_achievements?select=*&user_id=eq.${encodeURIComponent(me)}`)]);
-			return achievementsOf(list, mine);
+			return achievementsOf(load$1(ACHIEVEMENTS_KEY, DAY_MS) ?? await supabase("achievements?select=*").then((l) => (save(ACHIEVEMENTS_KEY, l), l)), await supabase(`user_achievements?select=*&user_id=eq.${encodeURIComponent(me)}`));
 		},
 		syncAchievements: () => api("/api/achievements/check", {
 			method: "POST",
@@ -5682,6 +5723,8 @@
 		health: () => health,
 		initCapture: () => initCapture,
 		isRateLimited: () => isRateLimited,
+		keepNow: () => keepNow,
+		kept: () => kept,
 		marketValueFor: () => marketValueFor,
 		myCardsPage: () => myCardsPage,
 		normSearch: () => normSearch,
@@ -5742,6 +5785,9 @@
 		if (!query.page && !query.q && !query.rarity && (query.sort ?? "rarity") === "rarity") save(FIRST_KEY, d);
 		return d;
 	}
+	var KEPT_TTL = 6048e5;
+	var kept = (key) => load$1("kept." + key, KEPT_TTL);
+	var keepNow = (key, value) => save("kept." + key, value);
 	var collectionAdd = () => drop(FIRST_KEY);
 	var collectionRemove = () => drop(FIRST_KEY);
 	var forgetCollection = () => drop(FIRST_KEY);
@@ -15178,7 +15224,10 @@
 	var root_42 = from_html(`<div class="fr-page"><!></div> <!> <!>`, 1);
 	function Friends($$anchor, $$props) {
 		push($$props, true);
-		let split = state(null);
+		let split = state(proxy(kept("friends")));
+		user_effect(() => {
+			if (get(split)) keepNow("friends", snapshot(get(split)));
+		});
 		let error = state("");
 		let note = state(null);
 		let busy = state(proxy(new Set()));
@@ -16064,8 +16113,11 @@
 			]);
 			append($$anchor, span);
 		};
-		let list = state(null);
-		let stats = state(null);
+		let list = state(proxy(kept("achievements")));
+		let stats = state(proxy(kept("stats")));
+		user_effect(() => {
+			if (get(list)) keepNow("achievements", snapshot(get(list)));
+		});
 		let error = state("");
 		let fresh = state(proxy(new Set()));
 		let show = state("all");
@@ -16074,7 +16126,10 @@
 		let claimed = state(proxy(new Map()));
 		async function load() {
 			set(error, "");
-			data.collectionStats().then((s) => set(stats, s, true), () => {});
+			data.collectionStats().then((s) => {
+				set(stats, s, true);
+				keepNow("stats", s);
+			}, () => {});
 			try {
 				set(list, await data.achievements(), true);
 			} catch (e) {
@@ -16701,10 +16756,16 @@
 	var root_19$2 = from_html(`<div class="pf-page"><!></div> <!> <!>`, 1);
 	function Profile($$anchor, $$props) {
 		push($$props, true);
-		let me = state(null);
+		let me = state(proxy(kept("me")));
 		const publicUrl = user_derived(() => get(me) ? `/profile/${encodeURIComponent(get(me).username)}` : null);
-		let stats = state(null);
-		let shelf = state(null);
+		let stats = state(proxy(kept("stats")));
+		let shelf = state(proxy(kept("showcase")));
+		user_effect(() => {
+			if (get(me)) keepNow("me", snapshot(get(me)));
+		});
+		user_effect(() => {
+			if (get(shelf) && !get(shelf).failed) keepNow("showcase", snapshot(get(shelf)));
+		});
 		let error = state("");
 		let note = state(null);
 		async function load() {
@@ -16715,26 +16776,36 @@
 				data.showcase()
 			]);
 			if (m.status === "rejected") {
-				set(error, m.reason?.message || "Profil indisponible pour le moment.", true);
+				if (!get(me)) set(error, m.reason?.message || "Profil indisponible pour le moment.", true);
 				return;
 			}
 			set(me, m.value, true);
-			set(stats, s.status === "fulfilled" ? s.value : null, true);
-			set(shelf, sh.status === "fulfilled" ? sh.value : {
+			if (s.status === "fulfilled") {
+				set(stats, s.value, true);
+				keepNow("stats", s.value);
+			}
+			set(shelf, sh.status === "fulfilled" ? sh.value : get(shelf) ?? {
 				places: Array(SHOWCASE.places).fill(null),
 				names: {},
 				failed: true
 			}, true);
-			data.friendships().then((f) => set(friends, f.friends.length, true), () => {});
-			data.achievements().then((a) => set(ach, {
-				got: a.filter((x) => x.state !== "locked").length,
-				total: a.length,
-				claim: a.filter((x) => x.state === "claim").length
-			}, true), () => {});
+			data.friendships().then((f) => {
+				set(friends, f.friends.length, true);
+				keepNow("friends", f);
+			}, () => {});
+			data.achievements().then((a) => {
+				keepNow("achievements", a);
+				set(ach, achOf(a), true);
+			}, () => {});
 		}
-		let friends = state(null);
+		let friends = state(proxy(kept("friends")?.friends.length ?? null));
 		let shelfEl = state(void 0);
-		let ach = state(null);
+		const achOf = (a) => a && {
+			got: a.filter((x) => x.state !== "locked").length,
+			total: a.length,
+			claim: a.filter((x) => x.state === "claim").length
+		};
+		let ach = state(proxy(achOf(kept("achievements"))));
 		load();
 		const fail = (e) => set(note, {
 			ok: false,
@@ -17345,11 +17416,19 @@
 	var root_21$1 = from_html(`<div class="pf-page"><!></div> <!> <!>`, 1);
 	function PlayerProfile($$anchor, $$props) {
 		push($$props, true);
-		let who = state(null);
+		const saved = kept("player." + $$props.username.toLowerCase());
+		let who = state(proxy(saved?.who ?? null));
 		let missing = state(false);
 		let error = state("");
-		let shelf = state(null);
-		let coll = state(null);
+		let shelf = state(proxy(saved?.shelf ?? null));
+		let coll = state(proxy(saved?.coll ?? null));
+		user_effect(() => {
+			if (get(who)) keepNow("player." + $$props.username.toLowerCase(), snapshot({
+				who: get(who),
+				shelf: get(shelf),
+				coll: get(coll)
+			}));
+		});
 		let split = state(null);
 		let busy = state(false);
 		let note = state(null);
@@ -17360,8 +17439,10 @@
 			try {
 				set(who, await data.player($$props.username), true);
 			} catch (e) {
-				if (e.status === 404) set(missing, true);
-				else set(error, e.message || "Profil indisponible pour le moment.", true);
+				if (e.status === 404) {
+					set(missing, true);
+					set(who, null);
+				} else if (!get(who)) set(error, e.message || "Profil indisponible pour le moment.", true);
 				return;
 			}
 			data.playerShowcase($$props.username).then((s) => set(shelf, s, true), (e) => set(shelf, hidden(e) ? "hidden" : {
@@ -18163,7 +18244,7 @@
 	var root_31 = from_html(`<div><!> <aside class="side"><div class="brand"><span class="mk"></span><b>Wiki Remaster</b> <button type="button" class="side-toggle"><!></button></div> <nav class="nav"><!> <div class="nav-line" aria-hidden="true"></div> <!> <div class="nav-sep">Le reste du site</div> <div class="nav-grid"></div></nav> <div class="side-foot"><!> <button class="foot-link" title="Raccourcis clavier"><span class="kbd">?</span><span class="foot-txt">Raccourcis clavier</span></button> <div class="hintline"> <!></div></div></aside> <main class="main"><header class="topbar"><div class="crumb"><span class="nav-long"> </span><span class="nav-short"> </span></div> <div class="wallet"><!> <button><span>ATK</span></button> <!> <button class="bell menu-btn"><!><!></button> <div class="notif"><button aria-label="Notifications"><!> <!></button> <!></div> <!> <button type="button"><span class="pk-ring"><!></span> <b> </b><span class="chip-cap"> </span> <!> <!></button> <span class="chip" title="WikiBidous"><!><b> </b></span></div></header> <section class="view"><!></section></main> <!> <!> <!> <!></div>`);
 	function App($$anchor, $$props) {
 		push($$props, true);
-		const VERSION = "0.12.14";
+		const VERSION = "0.12.15";
 		const REPO = "https://github.com/KazeTachinuu/wiki-remaster";
 		let update$1 = state(null);
 		if (isUserscript()) availableUpdate(VERSION, { metaUrl: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.meta.js" }).then((v) => set(update$1, v, true));
@@ -18338,15 +18419,18 @@
 		const unread = user_derived(() => get(bell).filter((n) => !n.read));
 		user_effect(() => startWatching(toast));
 		let seen = null;
-		let requests = state(0);
-		const loadRequests = () => data.friendships().then((f) => set(requests, f.incoming.length, true), () => {});
+		let requests = state(proxy(kept("friends")?.incoming.length ?? 0));
+		const loadRequests = () => data.friendships().then((f) => {
+			set(requests, f.incoming.length, true);
+			keepNow("friends", f);
+		}, () => {});
 		loadRequests();
 		function onRequests(n) {
 			set(requests, n, true);
 			const ids = get(notifs).filter((x) => !x.read && x.type === "friend_request").map((x) => x.id);
 			if (ids.length) markRead(ids);
 		}
-		let rewards = state(0);
+		let rewards = state(proxy(kept("achievements")?.filter((a) => a.state === "claim").length ?? 0));
 		const REWARDS_KEY = "wm-rewards-at";
 		const rewardsAt = () => {
 			try {
@@ -18360,7 +18444,10 @@
 			try {
 				localStorage.setItem(REWARDS_KEY, String(Date.now()));
 			} catch {}
-			data.syncAchievements().catch(() => {}).then(() => data.achievements()).then((l) => set(rewards, l.filter((a) => a.state === "claim").length, true), () => {});
+			data.syncAchievements().catch(() => {}).then(() => data.achievements()).then((l) => {
+				set(rewards, l.filter((a) => a.state === "claim").length, true);
+				keepNow("achievements", l);
+			}, () => {});
 		}
 		user_effect(() => {
 			const t = setTimeout(loadRewards, 2e4);

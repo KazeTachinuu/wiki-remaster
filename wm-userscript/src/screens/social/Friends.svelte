@@ -11,7 +11,7 @@
   import SearchBox from "../../components/SearchBox.svelte";
   import TradeComposer from "../trades/TradeComposer.svelte";
   import ChatModal from "../../components/ChatModal.svelte";
-  import { data, normSearch, tradeTabs, dealLine } from "../../wm/index.js";
+  import { data, normSearch, tradeTabs, dealLine, kept, keepNow } from "../../wm/index.js";
   import { relationOf, filledGalleries } from "../../wm/social.js";
   import { inView } from "../../lib/inView.js";
   import { ago } from "../../lib/format.js";
@@ -19,7 +19,9 @@
 
   let { profile, onwallet, onrequests } = $props();
 
-  let split = $state(null); // { friends, incoming, outgoing }
+  // as last shown, at once; the server's answer replaces it (wm/index.js: kept)
+  let split = $state(kept("friends")); // { friends, incoming, outgoing }
+  $effect(() => { if (split) keepNow("friends", $state.snapshot(split)); });
   let error = $state("");
   let note = $state(null); // { ok, text }
   let busy = $state(new Set()); // friendship or player ids with a write under way

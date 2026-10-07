@@ -7,7 +7,7 @@
   import Card from "../../components/Card.svelte";
   import CopyPicker from "./CopyPicker.svelte";
   import RarityBreakdown from "../../components/RarityBreakdown.svelte";
-  import { data, RARITIES_DESC, RNAME } from "../../wm/index.js";
+  import { data, RARITIES_DESC, RNAME, kept, keepNow } from "../../wm/index.js";
   import { SHOWCASE, galleryCount, galleryName } from "../../wm/social.js";
   import { nf } from "../../lib/format.js";
   import { anchorCentered } from "../../lib/anchor.js";
@@ -15,27 +15,31 @@
 
   let { onopen } = $props(); // onopen(path): one of our screens (the collection, the friends)
 
-  let me = $state(null);
+  // as last shown, at once; the server's answers replace it (wm/index.js: kept)
+  let me = $state(kept("me"));
   // how others see me: my profile as a player's profile (PlayerProfile)
   const publicUrl = $derived(me ? `/profile/${encodeURIComponent(me.username)}` : null);
-  let stats = $state(null); // { total, rarityCounts }
-  let shelf = $state(null); // { places, names }
+  let stats = $state(kept("stats")); // { total, rarityCounts }
+  let shelf = $state(kept("showcase")); // { places, names }
+  $effect(() => { if (me) keepNow("me", $state.snapshot(me)); });
+  $effect(() => { if (shelf && !shelf.failed) keepNow("showcase", $state.snapshot(shelf)); });
   let error = $state("");
   let note = $state(null);
   async function load() {
     error = "";
     const [m, s, sh] = await Promise.allSettled([data.me(), data.collectionStats(), data.showcase()]);
-    if (m.status === "rejected") { error = m.reason?.message || "Profil indisponible pour le moment."; return; }
+    if (m.status === "rejected") { if (!me) error = m.reason?.message || "Profil indisponible pour le moment."; return; }
     me = m.value;
-    stats = s.status === "fulfilled" ? s.value : null;
-    shelf = sh.status === "fulfilled" ? sh.value : { places: Array(SHOWCASE.places).fill(null), names: {}, failed: true };
+    if (s.status === "fulfilled") { stats = s.value; keepNow("stats", s.value); }
+    shelf = sh.status === "fulfilled" ? sh.value : shelf ?? { places: Array(SHOWCASE.places).fill(null), names: {}, failed: true };
     // the counts of the stats row, each from its own page's read; one that fails only hides its count
-    data.friendships().then((f) => (friends = f.friends.length), () => {});
-    data.achievements().then((a) => (ach = { got: a.filter((x) => x.state !== "locked").length, total: a.length, claim: a.filter((x) => x.state === "claim").length }), () => {});
+    data.friendships().then((f) => { friends = f.friends.length; keepNow("friends", f); }, () => {});
+    data.achievements().then((a) => { keepNow("achievements", a); ach = achOf(a); }, () => {});
   }
-  let friends = $state(null);
+  let friends = $state(kept("friends")?.friends.length ?? null);
   let shelfEl = $state();
-  let ach = $state(null);
+  const achOf = (a) => a && { got: a.filter((x) => x.state !== "locked").length, total: a.length, claim: a.filter((x) => x.state === "claim").length };
+  let ach = $state(achOf(kept("achievements")));
   load();
 
   const fail = (e) => (note = { ok: false, text: e.message });

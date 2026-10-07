@@ -6,15 +6,17 @@
   // its own page does), then the list is read again: what just unlocked is marked. Families, tiers
   // and order come from the data (see wm/social.js): an achievement the game adds needs no change.
   import Icon from "../../components/Icon.svelte";
-  import { data, RNAME } from "../../wm/index.js";
+  import { data, RNAME, kept, keepNow } from "../../wm/index.js";
   import { FAMILIES, TIERS, tierOf, progressOf, nextUp } from "../../wm/social.js";
   import { nf } from "../../lib/format.js";
   import { sounded } from "../../sound/sfx.js";
 
   let { onwallet, onrewards } = $props(); // onrewards(n): how many rewards wait, for the app's count
 
-  let list = $state(null); // achievementsOf
-  let stats = $state(null); // my collection's counts, for the progress of the locked ones
+  // as last shown, at once; the server's answer replaces it (wm/index.js: kept)
+  let list = $state(kept("achievements")); // achievementsOf
+  let stats = $state(kept("stats")); // my collection's counts, for the progress of the locked ones
+  $effect(() => { if (list) keepNow("achievements", $state.snapshot(list)); });
   let error = $state("");
   let fresh = $state(new Set()); // unlocked by this visit's check
   let show = $state("all"); // all | claim | done | locked
@@ -24,7 +26,7 @@
 
   async function load() {
     error = "";
-    data.collectionStats().then((s) => (stats = s), () => {});
+    data.collectionStats().then((s) => { stats = s; keepNow("stats", s); }, () => {});
     try { list = await data.achievements(); }
     catch (e) { if (!list) error = e.message || "Succès indisponibles pour le moment."; return; }
     // what was earned since the last visit: the game awards it, then we read again

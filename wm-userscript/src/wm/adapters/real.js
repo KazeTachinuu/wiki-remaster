@@ -3,6 +3,7 @@
  * Every call here is verified against the live site (docs/API_REFERENCE.md).
  */
 
+import { load, save } from "../cache.js";
 import { api, supabase, getProfile, patchProfile, bumpEpoch, getUserId, refreshProfile, sessionReady } from "../api.js";
 import { newInPack, pickCopy, nCard, nAuction, nBid, nNotification, nTrade, nMessage, validateCards } from "../schema.js";
 import { whoAmI, chatMe, otherOf, needMe } from "../trades.js";
@@ -28,6 +29,10 @@ const ACTION_LABEL = { accept: "Acceptation de l'échange", decline: "Refus de l
 // a tag as the game stores it ({ id, name, color }), from a row of `tags` or a card's `tags`
 // (sometimes wrapped as { tag: {...} })
 const nTag = (t) => { const x = t?.tag ?? t; return x?.id ? { id: x.id, name: x.name ?? "", color: x.color ?? null } : null; };
+
+// the game's list of achievements, kept a day (a new one shows up within it)
+const ACHIEVEMENTS_KEY = "achievements.list";
+const DAY_MS = 86400e3;
 
 const COLLECTION_SORT = { rarity: null, name: "name", recent: "added", starred: "starred" };
 
@@ -355,11 +360,14 @@ export const RealData = {
   /** `name` null gives the gallery its default name back. */
   showcaseName: (index, name) => api("/api/showcase/gallery", { method: "PUT", body: { gallery_index: index, name }, label: "Vitrine" }),
 
-  /** Every achievement, with mine (see achievementsOf). */
+  /**
+   * Every achievement, with mine (see achievementsOf). The list itself rarely changes: it is asked
+   * once a day; mine every time.
+   */
   async achievements() {
     const me = await this.meNow();
-    const [list, mine] = await Promise.all([supabase("achievements?select=*"), supabase(`user_achievements?select=*&user_id=eq.${encodeURIComponent(me)}`)]);
-    return achievementsOf(list, mine);
+    const list = load(ACHIEVEMENTS_KEY, DAY_MS) ?? (await supabase("achievements?select=*").then((l) => (save(ACHIEVEMENTS_KEY, l), l)));
+    return achievementsOf(list, await supabase(`user_achievements?select=*&user_id=eq.${encodeURIComponent(me)}`));
   },
   /** Asks the game to award what I earned since (its page does on every visit). */
   syncAchievements: () => api("/api/achievements/check", { method: "POST", body: { event: "achievements_sync" }, quiet: true }),
