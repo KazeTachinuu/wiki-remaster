@@ -75,7 +75,7 @@
         {@const off = isLocked(it)}
         {@const on = picked.has(it.id)}
         <button class="card-btn" class:picking={picked.size} class:picked={on} disabled={off} onclick={() => { pickSound(on); onpick(it); }} aria-pressed={on} title={off ? lockTitle(it) : it.card.title} use:watch={it.card}>
-          <Card card={it.card} shiny={it.is_shiny} stats={false} value={values.get(it.card.id)} />
+          <Card card={it.card} shiny={it.is_shiny} stats={false} value={values.get(it.card.id)} have={it.have} />
           <PickMark {on} />
           {#if off}<span class="pick-lock">{lockReason(it)}</span>{/if}
         </button>

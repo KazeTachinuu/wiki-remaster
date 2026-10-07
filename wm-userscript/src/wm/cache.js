@@ -37,3 +37,16 @@ export function save(key, v) {
 export function drop(key) {
   try { localStorage.removeItem(PREFIX + key); } catch {}
 }
+
+/**
+ * A value that belongs to one account: read back only by that same account (`owner`, its id), so
+ * on a shared browser no player ever sees another's. No account known: nothing is read or kept.
+ */
+export function loadFor(key, owner, maxAgeMs) {
+  if (!owner) return null;
+  const e = load(key, maxAgeMs);
+  return e?.owner === owner ? e.v : null;
+}
+export function saveFor(key, owner, v) {
+  if (owner) save(key, { owner, v });
+}

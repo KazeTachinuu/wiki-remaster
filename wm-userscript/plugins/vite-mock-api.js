@@ -560,8 +560,8 @@ export default function mockApiPlugin() {
           const pl = playerNamed(id);
           if (!pl) return send(res, 404, { error: "Profil introuvable" });
           if (!canSee(pl)) return send(res, 403, { error: "Profil privé" });
-          // the first cards of their collection, the rarest, laid out as a showcase of one or two galleries
-          const rows = friendCards.get(pl.id).sort((a, b) => RANK[b.card.rarity] - RANK[a.card.rarity]).slice(0, pl.username.length % 2 ? 6 : 3);
+          // the rarest cards of their collection: three, six, or a full showcase of ten galleries (40)
+          const rows = friendCards.get(pl.id).sort((a, b) => RANK[b.card.rarity] - RANK[a.card.rarity]).slice(0, [3, 6, 40][pl.username.length % 3]);
           return send(res, 200, {
             showcase: rows.map((uc, i) => ({ position: i, user_card_id: uc.id, user_card: { id: uc.id, card: uc.card, is_shiny: uc.is_shiny, snapshot_rarity: uc.card.rarity, snapshot_atk: uc.card.atk, snapshot_def: uc.card.def } })),
             galleries: rows.length > 4 ? [{ gallery_index: 0, name: "Mes préférées" }] : [],

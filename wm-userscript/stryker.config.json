@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Mutation testing of the logic modules (bun run mutate): each mutant breaks the code a little; a mutant the unit tests do not notice is a hole in them. The screens are covered by scripts/sweep.mjs.",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "bun test src --bail"
+  },
+  "coverageAnalysis": "off",
+  "concurrency": 8,
+  "timeoutMS": 20000,
+  "mutate": [
+    "src/wm/*.js",
+    "src/lib/*.js",
+    "src/screens/trades/*.js",
+    "!src/**/*.test.js",
+    "!src/wm/index.js",
+    "!src/wm/session.js",
+    "!src/lib/anchor.js",
+    "!src/lib/art.js",
+    "!src/lib/inView.js",
+    "!src/lib/scrollFade.js",
+    "!src/lib/scrollRow.js",
+    "!src/lib/turnstile.js",
+    "!src/lib/*.svelte.js",
+    "!src/lib/lazyValues.js",
+    "!src/lib/cardArt.js"
+  ],
+  "reporters": [
+    "clear-text",
+    "progress",
+    "html",
+    "json"
+  ],
+  "htmlReporter": {
+    "fileName": "reports/mutation/index.html"
+  },
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": [
+    ".prod-profile",
+    "dist",
+    "extension",
+    "reports",
+    "scripts",
+    "plugins",
+    "mock",
+    ".stryker-tmp"
+  ],
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  }
+}

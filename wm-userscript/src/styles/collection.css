@@ -73,6 +73,8 @@
 .card-btn.picked .wc{opacity:1}
 .pick-overlay{position:absolute;inset:0;z-index:10;border-radius:var(--radius-lg);border:3px solid transparent;display:flex;align-items:flex-start;justify-content:flex-end;padding:9px;pointer-events:none;transition:.15s}
 .pick-overlay .pick-check{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.9);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;}
+/* the card's own flags (owned, starred, count) step aside for the circle instead of hiding under it */
+.card-btn:has(.pick-overlay) .wc-flags{margin-right:30px}
 .pick-overlay.on{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 22%,transparent);box-shadow:0 0 0 2px var(--accent) inset}
 .pick-check svg{width:16px;height:16px}
 .pick-overlay.on .pick-check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}

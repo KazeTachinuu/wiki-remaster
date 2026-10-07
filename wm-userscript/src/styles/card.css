@@ -84,6 +84,10 @@
 .wc-count{background:rgba(0,0,0,.72);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:6px;}
 .wc-new{background:var(--accent);color:var(--accent-ink);font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px}
 .wc-shiny{background:#111014;color:#f3d27a;font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;box-shadow:inset 0 0 0 1px #d7a93c,0 0 10px #e9c15a73;}
+/* already in my collection: a calm green check, readable on any picture */
+.wc-have{width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(0,0,0,.72);
+  border:1px solid color-mix(in oklab,var(--accent) 60%,rgba(255,255,255,.3));color:var(--accent)}
+.wc-have svg{width:12px;height:12px}
 .wc-star{background:rgba(0,0,0,.72);border:1px solid color-mix(in oklab,var(--r-l) 55%,rgba(255,255,255,.3));color:var(--r-l);font-size:12px;font-weight:700;width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;}
 .wc-cap{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:14px 14px 16px;display:flex;flex-direction:column;gap:var(--s1);background:linear-gradient(to top,rgba(5,6,5,.92),rgba(5,6,5,.55) 72%,transparent)}
 .wc.bare .wc-cap{background:none}

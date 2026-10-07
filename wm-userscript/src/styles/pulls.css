@@ -14,10 +14,13 @@
    so it grows on tall screens and never pushes the button below the fold. 0.773 = 2550/3300. */
 .booster-stage{position:relative;overflow-x:clip;display:flex;align-items:center;justify-content:center;width:100%;padding:var(--s3) 0}
 .booster{position:relative;width:clamp(200px,min(calc((100dvh - 540px - var(--tabs-h,0px)) * .773),62vw),480px);aspect-ratio:2550/3300;background:none;border:none;padding:0;cursor:pointer;
-  filter:drop-shadow(0 34px 54px rgba(0,0,0,.6));transition:transform .3s cubic-bezier(.2,.7,.3,1)}
+  transition:transform .3s cubic-bezier(.2,.7,.3,1)}
 .booster:hover:not(:disabled):not(.opening){transform:translateY(-8px)}
 .booster:disabled{cursor:default}
-.booster-main{position:absolute;inset:0;transform-origin:50% 60%;animation:booster-float 5.5s ease-in-out infinite}
+/* the shadow travels with the floating pack on its own layer: drawn once, then only moved (on the
+   button around it, it was blurred again on every frame of the float) */
+.booster-main{position:absolute;inset:0;transform-origin:50% 60%;animation:booster-float 5.5s ease-in-out infinite;
+  filter:drop-shadow(0 34px 54px rgba(0,0,0,.6));will-change:transform}
 /* the pack, its stacked copies and the sheen all draw the one inline image (--pack): it ships once */
 .booster-img{position:absolute;inset:0;background:var(--pack) center/contain no-repeat}
 /* foil sheen, clipped to the pack silhouette via the pack image as a mask */

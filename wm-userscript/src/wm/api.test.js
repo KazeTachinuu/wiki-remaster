@@ -121,3 +121,96 @@ describe("readSupabaseCall", () => {
     expect(readSupabaseCall("https://abc.supabase.co/rest/v1/profiles", { headers: { apikey: "k", authorization: "Bearer junk" } }).userId).toBeNull();
   });
 });
+
+// --- what mutation testing showed was not checked ------------------------------------------------
+import { activity, isRateLimited } from "./api.js";
+import { human, resolveHuman } from "../lib/humanCheck.js";
+
+describe("activity (the loading bar)", () => {
+  it("names each request by what it loads, counts them, and reports the oldest start and the retries", async () => {
+    const seen = [];
+    const stop = activity.subscribe((s) => seen.push(s));
+    script(200);
+    await api("/api/my-collection?page=0");
+    await api("/api/cards");
+    await api("/api/marketplace/x/bid", { method: "POST" });
+    await api("/api/packs/open", { method: "POST" });
+    await api("/api/somewhere");
+    await api("/api/quiet", { quiet: true });
+    await api("/api/x", { label: "Mon libellé" });
+    stop();
+    const labels = seen.filter(Boolean).map((s) => s.label);
+    expect(labels).toEqual(["Chargement de votre collection", "Chargement des cartes", "Envoi en cours", "Ouverture du paquet", "Chargement", "Mon libellé"]);
+    expect(seen[0]).toBe(null);
+    expect(seen.filter((s) => s === null).length).toBe(7);
+  });
+  it("shows the retry in progress, and the earliest start of several", () => {
+    const a = activity.start("A", 4), b = activity.start("B", 1);
+    activity.items.get(a).since = 1000; activity.items.get(b).since = 2000;
+    activity.retrying(a, 2);
+    expect(activity.snapshot()).toEqual({ count: 2, label: "B", since: 1000, retry: { attempt: 2, max: 4 } });
+    activity.retrying(999, 3); // gone: nothing happens
+    activity.end(a); activity.end(b);
+    expect(activity.snapshot()).toBe(null);
+  });
+});
+
+describe("health, notifications", () => {
+  it("tells subscribers only of a change, until they leave", () => {
+    const got = [];
+    const stop = health.subscribe((s) => got.push(s));
+    health.set("ok"); health.set("unstable"); health.set("unstable"); health.set("ok");
+    stop(); health.set("unstable");
+    expect(got).toEqual(["unstable", "ok"]);
+    health.reset();
+    expect(health.state).toBe("ok");
+  });
+});
+
+describe("rate limits and Retry-After", () => {
+  it("recognises the game's refusals for volume", () => {
+    expect([isRateLimited({ status: 429 }), isRateLimited({ code: "rate_limited" }), isRateLimited(new Error("Trop de requêtes automatisées")), isRateLimited(new Error("Trop de requetes")), isRateLimited({ status: 500 }), isRateLimited(null)])
+      .toEqual([true, true, true, true, false, false]);
+  });
+  it("waits as long as the server asks before retrying, at most 10 s", async () => {
+    retry.delays = [5000, 5000, 5000]; // would time the test out if Retry-After were ignored
+    script([503, {}, { "retry-after": "0.01" }], 200);
+    expect(await api("/api/x")).toEqual({});
+    expect(calls.length).toBe(2);
+  });
+});
+
+describe("error messages", () => {
+  const fail = async (step, opts) => { script(step); try { await api("/api/x", opts); } catch (e) { return e; } };
+  it("says what the server said, never an HTML page", async () => {
+    expect((await fail([400, { error: "Prix trop bas." }])).message).toBe("Prix trop bas.");
+    expect((await fail([400, { error: "  <!DOCTYPE html>" }])).message).toBe("Erreur (400), réessayez.");
+    expect((await fail([429, {}])).message).toBe("Trop de requêtes, réessayez dans un instant.");
+    expect((await fail([429, { error: "Doucement." }])).message).toBe("Doucement.");
+    expect((await fail([502, { error: "Bad gateway" }])).message).toBe("Le serveur du jeu ne répond pas pour le moment. Réessayez dans un instant.");
+    expect((await fail([502, {}], { method: "POST" })).message).toBe("Le serveur du jeu n'a pas répondu à temps : vérifiez le résultat avant de réessayer.");
+  });
+  it("keeps the server's code, minimum and body on the error", async () => {
+    const e = await fail([400, { error: "x", code: "bid_too_low", min: 12 }]);
+    expect([e.status, e.code, e.min, e.data.code, e.uncertain]).toEqual([400, "bid_too_low", 12, "bid_too_low", false]);
+    expect((await fail([429, {}])).code).toBe("rate_limited");
+  });
+});
+
+describe("the human check, through a write", () => {
+  it("asks for the check when a write is refused for it, then sends the write once more", async () => {
+    script([403, { code: "human_verification_required" }], 200);
+    const p = api("/api/x", { method: "POST", body: { a: 1 } });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(human.open).toBe(true);
+    resolveHuman(true);
+    expect(await p).toEqual({});
+    expect(calls.map((c) => c.method)).toEqual(["POST", "POST"]);
+  });
+  it("never asks for a read, nor for the check's own request", async () => {
+    script([403, { code: "human_verification_required" }]);
+    await expect(api("/api/x")).rejects.toThrow();
+    await expect(api("/api/human-check", { method: "POST" })).rejects.toThrow();
+    expect(human.open).toBe(false);
+  });
+});

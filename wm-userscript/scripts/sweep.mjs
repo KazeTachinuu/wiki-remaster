@@ -81,24 +81,59 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
   await ev(() => { for (const k of Object.keys(localStorage)) if (k.startsWith("wm-cache:") || k === "wm-watches") localStorage.removeItem(k); });
 
   if (!ONLY) {
+    // packs: the normal one card by card, then all at once; the Pro one
     await step(tag, "packs", () => wait(".pull-actions .btn.primary"));
     await step(tag, "pack-open", async () => (await click(".pull-actions .btn.primary")) && wait("button", "^Tout révéler$", 15000));
+    await step(tag, "pack-next", () => click("button", "Suivant"));
+    await step(tag, "pack-card", async () => (await click(".stage .card-btn")) && wait(".modal .actions button", "Mettre en vente"));
+    await step(tag, "pack-card-close", () => click(".modal-close"));
     await step(tag, "pack-all", async () => (await click("button", "^Tout révéler$")) && (await Bun.sleep(2600), wait(".rg-card")));
     await step(tag, "pack-done", () => click("button", "^Terminé$"));
+    await step(tag, "pro-tab", () => click(".pull-tabs button", "Pack PRO"));
+    await step(tag, "pro-open", async () => (await click(".pull-actions .btn.primary")) && wait("button", "^Tout révéler$", 15000));
+    await step(tag, "pro-all", async () => (await click("button", "^Tout révéler$")) && (await Bun.sleep(2600), true));
+    await step(tag, "pro-done", () => click("button", "^Terminé$"));
+    // the sound settings: the rarity chime slider moves and is kept
+    if (w > 900) await step(tag, "chime", async () => (await click(".snd > button")) && (await wait(".chime-track input")) && (await t("fill", ".chime-track input", "2")) && (await wait(".chime-head b", "Rare et plus")) && (await t("fill", ".chime-track input", "0")) && click(".notif-scrim"));
+
+    // collection: search, sorts, favourites, a card, its market and analysis, selling, selecting
     await go("/collection");
     await step(tag, "collection", () => wait(".grid .card-btn"));
+    await step(tag, "coll-search", async () => (await t("fill", ".coll-head input", "araignee")) && wait(".grid .card-btn"));
+    await step(tag, "coll-sort-recent", async () => (await t("fill", ".coll-head input", "")) && (await t("fill", ".coll-head select", "recent")) && (await Bun.sleep(800), wait(".grid .card-btn")));
+    await step(tag, "coll-favourites", async () => (await t("fill", ".coll-head select", "rarity")) && click(".rl.fav"));
+    await step(tag, "coll-favourites-off", () => click(".rl.fav"));
     await step(tag, "coll-card", async () => (await click(".grid .card-btn")) && wait(".modal"));
     await step(tag, "coll-card-market", async () => (await click("[role=tab]", "^Marché$")) && wait(".mk-kpis, .modal-sum", null, 8000));
+    await step(tag, "analysis", async () => (await click("button", "Analyse complète")) && wait(".ma .pc-plot"));
+    await step(tag, "analysis-day", async () => (await t("count", ".ma .pc-slice")) < 4 || click(".ma .pc-slice", null, 3));
+    await step(tag, "analysis-back", async () => (await click(".ma-back")) && wait(".modal"));
+    await step(tag, "coll-sell-form", async () => (await click("[role=tab]", "^Détails$")) && click(".modal .actions button", "Mettre en vente"));
+    await step(tag, "coll-select", async () => (await click(".modal-close")) && (await click("button", "Sélectionner")) && click(".grid .card-btn", null, 1));
+
+    // catalogue
     await go("/global-collection");
     await step(tag, "catalog", () => wait(".grid .card-btn"));
+    await step(tag, "catalog-search", async () => (await t("fill", "input", "gare")) && (await Bun.sleep(1200), wait(".grid .card-btn")));
+    await step(tag, "catalog-card", async () => (await click(".grid .card-btn")) && (await wait(".modal")) && click("[role=tab]", "^Marché$"));
+
+    // trades: a trade, its conversation, the composer on both sides
     await go("/trades");
     await step(tag, "trades", () => wait("button[aria-label^='Échange avec']"));
     await step(tag, "trade", async () => (await click("button[aria-label^='Échange avec']")) && wait(".tp"));
+    await step(tag, "trade-chat", () => click("[role=tab]", "^Discussion$"));
+    await go("/trades");
+    await step(tag, "composer", async () => (await click("button", "Proposer un échange")) && (await wait(".friend")) && (await click(".friend")) && wait(".composer-tab:not([hidden]) .card-btn"));
+    await step(tag, "composer-search-mine", async () => (await t("fill", ".composer-tab:not([hidden]) input", "araignee")) && wait(".composer-tab:not([hidden]) .card-btn"));
+    await step(tag, "composer-theirs", async () => (await click("[role=tab]", "^Cartes de")) && (await wait(".composer-tab:not([hidden]) .card-btn")) && (await t("fill", ".composer-tab:not([hidden]) input", "araignée")) && (await Bun.sleep(1200), wait(".composer-tab:not([hidden]) .card-btn")));
   }
 
   if (!ONLY || ONLY === "market") {
     await go("/marketplace");
     await step(tag, "market", async () => (await wait(".auc-item")) && wait(".auc-gap", null, 12000));
+    await step(tag, "market-owned", () => wait(".auc-item .wc-have")); // a listing of a card I already own is marked
+    await step(tag, "auction", async () => (await click(".auc-item .card-btn")) && wait(".auc .ap"));
+    await step(tag, "market-won", async () => (await click(".auc .modal-close, .modal-close")) && click(".tabs button", "Remportées|Gagnées"));
     await step(tag, "deals", async () => (await click(".tabs button", "Affaires")) && (await wait(".deal-status", "vues", 8000)) && until(async () => (await t("count", ".auc-item")) > 0, 30000));
     await step(tag, "deals-strict", async () => (await click(".deal-caps button", "-50 %")) && (await Bun.sleep(400), (await t("has", ".auc-item")) || wait(".empty", "Aucune vente")));
     await step(tag, "deals-back", () => click(".tabs button", "Toutes les ventes"));
@@ -112,6 +147,7 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
   if (!ONLY || ONLY === "social") {
     await go("/friends");
     await step(tag, "friends", async () => (await wait(".fr-item")) && (w <= 900 || t("has", ".nav-count", "1")));
+    await step(tag, "friends-filter", async () => (await t("fill", ".fr-side-search input", "joueur01")) && wait(".fr-item", "Joueur010"));
     await step(tag, "friends-find", async () => (await t("fill", ".fr-side-search input", "ka")) && wait(".fr-req", "Kami", 6000));
     await step(tag, "friends-add", async () => (await click(".fr-req .fr-btn", "Ajouter")) && wait(".fr-req small", "Demande envoyée"));
     await step(tag, "friends-accept", async () => (await t("fill", ".fr-side-search input", "")) && (await wait(".fr-reqs .fr-act.yes")) && (await click(".fr-reqs .fr-act.yes")) && (await until(async () => !(await t("has", ".fr-reqs")))) && wait(".coll-head .meta", "304 amis"));
@@ -121,8 +157,10 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
     await step(tag, "friends-chat", async () => (await wait(".fr-item")) && (w > 900 || (await click(".fr-item"))) && (await click(".fr-id-acts .btn", "Écrire")) && wait(".fr-chat .chat"));
     await step(tag, "player", async () => (await click(".fr-chat .modal-close")) && (await click(".fr-id-acts .btn", "Profil")) && (await wait(".pf-hero h1", "Alix")) && wait(".pf-places .pf-place", null, 8000));
     await step(tag, "player-private", async () => { await go("/profile/Elsa"); return (await wait(".pf-private", null, 8000)) && wait(".pf-acts .btn", "Ajouter en ami"); });
+    await step(tag, "player-missing", async () => { await go("/profile/Personne123"); return wait(".empty", "Aucun joueur"); });
     await go("/achievements");
     await step(tag, "achievements", () => wait(".ach"));
+    await step(tag, "achievements-locked", async () => (await click("[role=tab]", "À débloquer")) && (await wait(".ach[data-state=locked]")) && click("[role=tab]", "^Tous"));
     await step(tag, "achievements-human", async () => (await click("[role=tab]", "À réclamer")) && (await post("/api/__fault", { human: true })) && (await click(".ach-claim")) && wait(".hc"));
     await step(tag, "achievements-human-cancel", async () => (await t("key", "Escape")) && (await post("/api/__fault", { human: false })) && wait(".ach-note.bad", "annulée"));
     await step(tag, "achievements-claim-all", async () => (await click(".ach-all")) && wait(".ach-note", "WikiBidous reçus"));
@@ -133,6 +171,10 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
     await step(tag, "profile-public-view", async () => (await click(".pf-public")) && (await wait(".pf-own")) && (await click(".pf-own .link-btn")) && wait(".pf-avatar"));
     await step(tag, "profile-pick", async () => (await click(".pf-empty")) && wait(".pf-pick .card-btn"));
     await step(tag, "profile-place", async () => (await click(".pf-pick .card-btn")) && wait(".pf-place"));
+    await step(tag, "profile-public", () => click(".pf-vis .snd-switch"));
+    await step(tag, "profile-avatar", async () => (await click(".pf-avatar")) && wait(".pf-pick .card-btn"));
+    await step(tag, "profile-frame", async () => (await click(".pf-pick .card-btn:not([disabled])")) && wait(".pf-crop"));
+    await step(tag, "profile-avatar-save", async () => (await click(".pf-frame .btn.primary")) && wait(".pf-avatar img"));
   }
 
   // the chrome: notifications, and on a phone the tab bar (the five main screens) and the menu

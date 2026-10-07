@@ -8,8 +8,9 @@ import * as wm from "./wm/index.js";
 if (!window.__wmMounted) {
 window.__wmMounted = true;
 
-// Patch fetch early (document-start) so we can read the app's own profile call.
-wm.initCapture();
+// Patch fetch early (document-start) so we can read the app's own profile call (the live game
+// only: the test server has no game session to learn).
+if (wm.data.isReal) wm.initCapture(window);
 
 // Test hook for scripts/prod-test.mjs: exposes the domain layer only when opted in.
 try { if (localStorage.getItem("wm-debug")) window.__wm = wm; } catch {}

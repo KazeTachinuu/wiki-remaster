@@ -216,7 +216,7 @@
       {@const gap = gapTag(a.price, worth.get(worthKey(a.card)))}
       <div class="auc-item" use:worthOf.watch={a.card}>
         <button class="card-btn" onclick={() => (selected = a)} aria-label={a.card.title}>
-          <Card card={a.card} shiny={a.is_shiny} />
+          <Card card={a.card} shiny={a.is_shiny} have={a.ownsCard && !a.mine} />
         </button>
         <div class="auc-meta">
           <span class="auc-price-line"><span class="auc-bid" title={a.bid != null ? "Enchère actuelle" : "Mise de départ"}><span class="auc-coin"></span>{nf(a.price)}</span>

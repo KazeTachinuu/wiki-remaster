@@ -33,3 +33,7 @@ wm-userscript/dist/*
 wm-userscript/.prod-test/
 wm-userscript/.prod-profile/
 wm-userscript/mock/snapshot.json.tmp
+
+# Mutation testing (bun run mutate): its reports and working copies
+wm-userscript/reports/
+wm-userscript/.stryker-tmp/

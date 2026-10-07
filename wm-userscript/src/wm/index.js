@@ -5,7 +5,7 @@
 
 import { MockData } from "./adapters/mock.js";
 import { RealData } from "./adapters/real.js";
-import { load, save, drop, sweep } from "./cache.js";
+import { load, save, drop, sweep, loadFor, saveFor } from "./cache.js";
 import { backgroundLane, pageLane } from "./lane.js";
 import { isRateLimited } from "./api.js";
 
@@ -65,13 +65,13 @@ export function marketValueFor(card) {
 // whatever the size of the collection, as the game's own collection page does. Only the first
 // page as it opens (rarity order, no search) is saved, so the screen shows at once.
 
-// One saved first page per browser profile: another account on the same browser sees it until
-// the fresh one lands (a second).
+// The saved first page belongs to the account that saw it (see loadFor): another account on the
+// same browser never sees it.
 const FIRST_TTL = 7 * 86400e3;
-const FIRST_KEY = "collection.first.v1";
+const FIRST_KEY = "collection.first.v2";
 
 /** The first page of my collection as saved last time ({ items, total, counts, pending }), or null. */
-export const savedFirstPage = () => load(FIRST_KEY, FIRST_TTL);
+export const savedFirstPage = () => loadFor(FIRST_KEY, data.userId, FIRST_TTL);
 
 /**
  * One page of my collection, asked of the server (`q`, `rarity`, `sort`: "rarity" | "name"). The
@@ -80,19 +80,21 @@ export const savedFirstPage = () => load(FIRST_KEY, FIRST_TTL);
 export async function myCardsPage(query = {}) {
   const d = await data.myCards(query);
   const opening = !query.page && !query.q && !query.rarity && (query.sort ?? "rarity") === "rarity";
-  if (opening) save(FIRST_KEY, d);
+  if (opening) saveFor(FIRST_KEY, data.userId, d);
   return d;
 }
 
 // --- Screens kept between visits ---------------------------------------------------------------
 // What changes slowly (my friends, my profile, my achievements, a player's profile) is kept as the
 // screen last showed it: the screen paints that at once, then the server's answer replaces it and
-// is kept in turn. One copy per browser profile, like the collection's first page; a week at most.
+// is kept in turn; a week at most.
+// Each copy belongs to the account that saw it (its id): another account on the same browser
+// never sees it, and nothing is shown or kept until the game's session says whose it is.
 const KEPT_TTL = 7 * 86400e3;
-/** The last state of a screen's data (`key`), or null. */
-export const kept = (key) => load("kept." + key, KEPT_TTL);
-/** Keep a screen's data as it shows now. */
-export const keepNow = (key, value) => save("kept." + key, value);
+/** The last state of a screen's data (`key`) for this account, or null. */
+export const kept = (key) => loadFor("kept." + key, data.userId, KEPT_TTL);
+/** Keep a screen's data as it shows now, for this account. */
+export const keepNow = (key, value) => saveFor("kept." + key, data.userId, value);
 
 // After a change (a pack, a discard, a sale, a trade): the saved first page is asked again.
 export const collectionAdd = () => drop(FIRST_KEY);

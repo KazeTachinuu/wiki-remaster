@@ -8,7 +8,8 @@
   import { cardSky } from "../lib/cardSky.js";
   import CardSky from "./CardSky.svelte";
   let { card, count = 1, isNew = false, shiny = false, starred = false, value = undefined,
-        owned = true, wishlisted = false, big = false, caption = true, stats = true } = $props();
+        owned = true, wishlisted = false, big = false, caption = true, stats = true, have = false } = $props();
+  // have: I already own a copy (a market listing, a friend's card), marked with a check
   // stats: false hides ATK/DEF where the value is what matters (trade picking)
   const showStats = $derived(stats && !settings.hideStats);
   let hasValue = $derived(typeof value === "number");
@@ -69,6 +70,7 @@
   <div class="wc-top">
     <span class="wc-rtag" data-r={card.rarity}>{card.rarity}</span>
     <span class="wc-flags">
+      {#if have}<span class="wc-have" title="Déjà dans votre collection" aria-label="Déjà dans votre collection"><Icon name="check" width={3} /></span>{/if}
       {#if wishlisted}<span class="wc-wish" title="Liste de souhaits" aria-label="Liste de souhaits"><Icon name="heart" filled width={0} /></span>{/if}
       {#if starred}<span class="wc-star" title="Favori" aria-label="Favori"><Icon name="star" filled width={0} /></span>{/if}
       {#if shiny}<span class="wc-shiny" title="Brillante" aria-label="Brillante"><Icon name="sparkle" filled width={0} /></span>{/if}

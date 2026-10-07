@@ -10,7 +10,6 @@
 import { withHumanCheck } from "../lib/humanCheck.js";
 import { load, save } from "./cache.js";
 
-const isReal = /(^|\.)wiki-masters\.com$/.test(globalThis.location?.hostname ?? "");
 
 // --- Resilience --------------------------------------------------------------------
 // The game's backend fails intermittently (Cloudflare 525 to its database, 5xx, hangs).
@@ -169,7 +168,7 @@ export function patchProfile(patch) {
 export async function refreshProfile() {
   if (!sb?.headers || !sb.userId) return null;
   try {
-    const r = await origFetch.call(window, `${sb.base}/rest/v1/rpc/sync_profile_packs`, {
+    const r = await origFetch(`${sb.base}/rest/v1/rpc/sync_profile_packs`, {
       method: "POST",
       headers: { ...sb.headers, "content-type": "application/json" },
       body: JSON.stringify({ user_id: sb.userId }),
@@ -192,17 +191,29 @@ export async function refreshProfile() {
 export async function supabase(path, { method = "GET", body, label } = {}) {
   if (!sb?.headers) await sessionReady();
   if (!sb?.headers) throw Object.assign(new Error("Session du jeu pas encore prête : réessayez dans un instant."), { status: 0 });
+  const read = method === "GET";
   const tracked = label ? activity.start(label, 1) : null;
+  // the same time limits as the game's own routes: a database that hangs is said so, never waited on
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), read ? retry.readTimeout : retry.writeTimeout);
   try {
-    const r = await origFetch.call(window, `${sb.base}/rest/v1/${path}`, {
-      method,
-      headers: { ...sb.headers, "content-type": "application/json", prefer: method === "GET" ? "" : "return=representation" },
-      body: body == null ? undefined : JSON.stringify(body),
-    });
+    let r;
+    try {
+      r = await origFetch(`${sb.base}/rest/v1/${path}`, {
+        method, signal: ctl.signal,
+        headers: { ...sb.headers, "content-type": "application/json", prefer: read ? "" : "return=representation" },
+        body: body == null ? undefined : JSON.stringify(body),
+      });
+    } catch {
+      health.set("unstable");
+      throw Object.assign(new Error(errorMessage({}, 0, read)), { status: 0, uncertain: !read });
+    }
+    if (retryable(r.status)) health.set("unstable"); else health.set("ok");
     const d = await r.json().catch(() => null);
-    if (!r.ok) throw Object.assign(new Error(d?.message || "Enregistrement impossible pour le moment."), { status: r.status, code: d?.code });
+    if (!r.ok) throw Object.assign(new Error(d?.message || "Enregistrement impossible pour le moment."), { status: r.status, code: d?.code, uncertain: !read && retryable(r.status) });
     return d;
   } finally {
+    clearTimeout(timer);
     if (tracked) activity.end(tracked);
   }
 }
@@ -246,12 +257,11 @@ export function readSupabaseCall(url, init) {
 // Read a response body without consuming the app's copy.
 const peek = (ret, fn) => ret.then((res) => res.clone().json()).then(fn).catch(() => {});
 
-/** Patch window.fetch (document-start) to capture the app's Supabase profile calls. */
-export function initCapture() {
-  if (!isReal) return;
-  origFetch = window.fetch;
-  window.fetch = function (...args) {
-    const ret = origFetch.apply(window, args);
+/** Patch the page's fetch (document-start) to capture the app's Supabase calls (the live game only). */
+export function initCapture(win = window) {
+  origFetch = win.fetch.bind(win);
+  win.fetch = function (...args) {
+    const ret = origFetch(...args);
     const call = readSupabaseCall(typeof args[0] === "string" ? args[0] : args[0]?.url, args[1]);
     if (!call) return ret;
     if (call.headers && call.userId) {

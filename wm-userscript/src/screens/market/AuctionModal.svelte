@@ -121,11 +121,12 @@
     <button class="modal-close" onclick={() => onclose?.()} aria-label="Fermer"><Icon name="close" width={2} class="x-ico" /></button>
 
     <div class="auc-top">
-      <div class="auc-card"><Card card={a.card} shiny={a.is_shiny} big caption={false} /></div>
+      <div class="auc-card"><Card card={a.card} shiny={a.is_shiny} big caption={false} have={a.ownsCard && !a.mine} /></div>
 
       <div class="auc-body">
         <div class="auc-id">
           <span class="modal-rar" data-r={a.card.rarity}>{RNAME[a.card.rarity] || a.card.rarity}{a.is_shiny ? " · brillante" : ""}</span>
+          {#if a.ownsCard && !a.mine}<span class="auc-have"><Icon name="check" width={2.6} />Déjà dans votre collection</span>{/if}
           <h2 class="auc-name" id="wm-auc-title">{a.card.title}</h2>
           {#if a.card.category}<div class="auc-cat">{a.card.category}</div>{/if}
           <div class="auc-by">{mine ? "Votre vente" : a.seller ? `Vendu par ${a.seller}` : ""}</div>

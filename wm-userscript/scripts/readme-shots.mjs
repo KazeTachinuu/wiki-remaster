@@ -110,10 +110,15 @@ for (const c of picks) {
   // the card with exactly this title, once the (server) search has answered: never the first
   // card of results still showing from before
   const card = `[...document.querySelector("#wm-host").shadowRoot.querySelectorAll(".grid .card-btn")].find((b) => b.querySelector(".wc-name")?.textContent.trim() === ${JSON.stringify(c.title)})`;
-  await waitFor(card, 30000);
-  await Bun.sleep(1500); // the photo fades in
-  const rect = await view.evaluate(`(() => { const b = ${card}; b.scrollIntoView({ block: "center" }); const r = b.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
-  after.push(await crop(rect));
+  // the results may redraw while the photo fades in (the server's answer replacing what showed):
+  // look for the card again, a few times, rather than photograph a card that just left
+  let rect = null;
+  for (let tries = 0; tries < 4 && !rect; tries++) {
+    await waitFor(card, 30000);
+    await Bun.sleep(1500); // the photo fades in
+    rect = await view.evaluate(`(() => { const b = ${card}; if (!b) return null; b.scrollIntoView({ block: "center" }); const r = b.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
+  }
+  after.push(rect ? await crop(rect) : null);
 }
 
 // --- montage ---------------------------------------------------------------------------
@@ -272,6 +277,31 @@ if (devUp) {
   await until(`!!r?.querySelector(".ma .pc-plot")`);
   await Bun.sleep(1200);
   await Bun.write(`${OUT}analysis.png`, await dev.screenshot());
-  dev.close();
   console.log(`${OUT}analysis.png (test server)`);
+
+  // Friends, a player's profile, achievements and Affaires, also from the test server: its players
+  // are made up, so no real player's name or showcase goes into a public README.
+  await fetch(DEV + "/api/reset", { method: "POST" });
+  await fetch(DEV + "/api/__profile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ is_pro: true }) });
+  const shot = async (name, path, ready, before) => {
+    await dev.navigate(DEV + path);
+    await until(ready);
+    if (before) { await at(before); await Bun.sleep(400); }
+    await Bun.sleep(1800);
+    await Bun.write(`${OUT}${name}.png`, await dev.screenshot());
+    console.log(`${OUT}${name}.png (test server)`);
+  };
+  await dev.resize(1440, 913);
+  await shot("friends", "/friends", `!!r?.querySelector(".fr-offer") && !!r?.querySelector(".fr-cards .pf-place")`);
+  await shot("profile", "/profile/Alix", `!!r?.querySelector(".pf-places .pf-place")`);
+  await shot("achievements", "/achievements", `!!r?.querySelector(".ach")`);
+  await shot("deals", "/marketplace", `!!r?.querySelector(".auc-item")`, `[...r.querySelectorAll(".tabs button")].find((b) => /Affaires/.test(b.textContent))?.click()`);
+  await until(`!!r?.querySelector(".deal-status") && !r?.querySelector(".deal-pricing")`, 40000);
+  await Bun.write(`${OUT}deals.png`, await dev.screenshot());
+  await dev.resize(500, 757);
+  await shot("phone-friends", "/friends", `!!r?.querySelector(".fr-item")`, `r.querySelector(".fr-item").click()`);
+  await until(`!!r?.querySelector(".fr-cards .pf-place")`);
+  await Bun.write(`${OUT}phone-friends.png`, await dev.screenshot());
+  await shot("phone-achievements", "/achievements", `!!r?.querySelector(".ach")`);
+  dev.close();
 } else console.error("analysis: the test server is not running (bun run dev), kept the previous shot");

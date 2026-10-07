@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { load, save, drop, sweep } from "./cache.js";
+import { load, save, drop, sweep, loadFor, saveFor } from "./cache.js";
 
 // a plain in-memory localStorage (one per test)
 function memoryStorage() {
@@ -47,5 +47,20 @@ describe("cache", () => {
     expect(load("k", 60e3)).toBe(null);
     expect(() => drop("k")).not.toThrow();
     expect(() => sweep()).not.toThrow();
+  });
+});
+
+describe("loadFor and saveFor", () => {
+  beforeEach(() => { globalThis.localStorage = memoryStorage(); });
+  it("reads a value back only for the account that kept it", () => {
+    saveFor("k-owner", "alice", { friends: 3 });
+    expect(loadFor("k-owner", "alice", 60e3)).toEqual({ friends: 3 });
+    expect(loadFor("k-owner", "bob", 60e3)).toBe(null);
+  });
+  it("keeps and reads nothing while the account is unknown", () => {
+    saveFor("k-none", null, { friends: 3 });
+    expect(loadFor("k-none", "alice", 60e3)).toBe(null);
+    saveFor("k-none2", "alice", 1);
+    expect(loadFor("k-none2", null, 60e3)).toBe(null);
   });
 });

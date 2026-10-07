@@ -105,3 +105,80 @@ describe("saleStats and periods", () => {
     expect(inPeriod(series, null, at(0))).toHaveLength(4);
   });
 });
+
+// --- what mutation testing showed was not checked ------------------------------------------------
+import { groupStart, PERIODS } from "./market.js";
+
+// bun test runs in UTC: the sales at midday UTC sit at their day's midday mark
+describe("priceChart, exact geometry", () => {
+  const D = 86400e3, t0 = Date.UTC(2026, 9, 5, 12);
+  const s = [[0, 10], [0, 30], [1, 20], [2, 40], [3, 1000]].map(([d, p]) => ({ at: t0 + d * D, price: p }));
+  const c = priceChart(s, { avg: 25, label: (t) => String(new Date(t).getUTCDate()) });
+  const r2 = (n) => Math.round(n * 100) / 100;
+  it("draws each day at its trend, with its own spread and hover zone", () => {
+    expect(c.grouping).toBe("day");
+    expect(c.points.map((p) => [p.count, p.min, p.max, p.median, p.trend, r2(p.q1), r2(p.q3), r2(p.x), r2(p.y), p.out, r2(p.x0), r2(p.x1)])).toEqual([
+      [2, 10, 30, 20, 20, 15, 25, 0, 97.75, false, 0, 16.67],
+      [1, 20, 20, 20, 20, 15, 25, 33.33, 97.75, false, 16.67, 50],
+      [1, 40, 40, 40, 40, 30, 520, 66.67, 95.49, false, 50, 83.33],
+      [1, 1000, 1000, 1000, 40, 30, 520, 100, 95.49, false, 83.33, 100],
+    ]);
+  });
+  it("keeps the extreme sale's dot on the edge, flagged, and the market price inside the scale", () => {
+    expect(c.dots.map((d) => [r2(d.x), r2(d.y), d.out])).toEqual([[0, 98.87, false], [0, 96.62, false], [33.33, 97.75, false], [66.67, 95.49, false], [100, 0, true]]);
+    expect(r2(c.avgY)).toBe(97.18);
+    expect(c.maxCount).toBe(2);
+    expect(c.barW).toBe(4);
+  });
+  it("labels round steps and four dates, and draws the line and the band", () => {
+    expect(c.yTicks.map((t) => [t.value, r2(t.y)])).toEqual([[0, 100], [500, 43.67]]);
+    expect(c.xTicks.map((t) => [t.label, r2(t.x)])).toEqual([["5", 0], ["6", 33.33], ["7", 66.67], ["8", 100]]);
+    expect(c.line).toBe("M0.00 97.75 L33.33 97.75 L66.67 95.49 L100.00 95.49");
+    expect(c.band).toBe("M0.00 97.18 L33.33 97.18 L66.67 41.42 L100.00 41.42 L100.00 96.62 L66.67 96.62 L33.33 98.31 L0.00 98.31 Z");
+  });
+  it("without a market price draws no market line; ignores sales without a price or a date", () => {
+    const d = priceChart([...s, { at: t0, price: null }, { at: 0, price: 5 }]);
+    expect(d.avgY).toBe(null);
+    expect(d.dots.length).toBe(5);
+    expect(priceChart(null)).toBe(null);
+  });
+  it("on a flat price, widens the scale around it", () => {
+    const flat = priceChart([{ at: t0, price: 50 }, { at: t0 + D, price: 50 }]);
+    expect(flat.points.every((p) => p.y > 0 && p.y < 100)).toBe(true);
+    expect(flat.yTicks.length).toBeGreaterThan(0);
+  });
+});
+
+describe("rarityMarket and marketVerdict, edges", () => {
+  it("ignores sales of another rarity or without a price, and lists the 10 latest, newest first", () => {
+    const sales = Array.from({ length: 12 }, (_, i) => ({ rarity: "R", price: i + 1, at: i }));
+    const rm = rarityMarket({ sales: [...sales, { rarity: "L", price: 999, at: 99 }, { rarity: "R", price: null, at: 50 }] }, "R");
+    expect([rm.count, rm.min, rm.max, rm.avg, rm.basis]).toEqual([12, 1, 12, 7, "median"]);
+    expect(rm.recent.map((s) => s.price)).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3]);
+    expect(rarityMarket(null, "R")).toEqual({ avg: null, basis: null, series: [], count: 0, min: null, max: null, recent: [] });
+  });
+  it("quick sale: at least 1, the market price when nothing is listed", () => {
+    const rm = { avg: 100, series: [{ price: 80 }] };
+    expect(marketVerdict(rm, 1).sellAt).toBe(1);
+    expect(marketVerdict(rm, null)).toEqual({ last: 80, lastPct: -20, cheapest: null, cheapestPct: null, sellAt: 100 });
+    expect(marketVerdict({ avg: null, series: [] }, 30)).toEqual({ last: null, lastPct: null, cheapest: 30, cheapestPct: null, sellAt: 29 });
+  });
+});
+
+describe("saleStats, periods and groups", () => {
+  it("rounds the median of an even list and the average", () => {
+    expect(saleStats([{ price: 1, at: 1 }, { price: 2, at: 2 }, { price: 4, at: 3 }, { price: 10, at: 4 }])).toEqual({ count: 4, last: 10, median: 3, avg: 4, min: 1, max: 10 });
+  });
+  it("keeps a period's sales, the boundary included", () => {
+    const now = 100 * 86400e3, at = (d) => ({ at: now - d * 86400e3 });
+    expect(inPeriod([at(7), at(8), at(0)], 7, now).length).toBe(2);
+    expect(inPeriod([at(400)], null, now).length).toBe(1);
+    expect(PERIODS.map(([id, label, days]) => [id, label, days])).toEqual([["7", "7 j", 7], ["30", "30 j", 30], ["90", "90 j", 90], ["all", "Tout", null]]);
+  });
+  it("starts a day at midnight and a week on Monday", () => {
+    const wed = new Date(2026, 9, 7, 15).getTime(), sun = new Date(2026, 9, 11, 9).getTime();
+    expect(groupStart(wed)).toBe(new Date(2026, 9, 7).getTime());
+    expect(groupStart(wed, true)).toBe(new Date(2026, 9, 5).getTime());
+    expect(groupStart(sun, true)).toBe(new Date(2026, 9, 5).getTime());
+  });
+});

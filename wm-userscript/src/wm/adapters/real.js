@@ -50,6 +50,7 @@ function mapCollection(rows) {
       starred: !!it.starred,
       obtained_at: it.obtained_at || null,
       tags: (it.tags || []).map(nTag).filter(Boolean),
+      have: !!it.owned_by_viewer, // another player's card I own a copy of too
     };
   });
 }
