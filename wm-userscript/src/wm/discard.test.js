@@ -122,3 +122,30 @@ describe("readAllCopies", () => {
     expect(await readAllCopies(async () => null)).toEqual([]);
   });
 });
+
+import { firstN, tagCounts, PICK_ORDERS } from "./discard.js";
+describe("firstN: Sélectionner N", () => {
+  const at = (id, d) => copy({ id, at: d });
+  const list = [at("b", "2026-10-02T00:00:00Z"), at("x", null), at("a", "2026-10-01T00:00:00Z"), at("c", "2026-10-03T00:00:00Z")];
+  it("takes the oldest first, or the newest, an undated copy last either way", () => {
+    expect(firstN(list, 2).map((c) => c.id)).toEqual(["a", "b"]);
+    expect(firstN(list, 2, "newest").map((c) => c.id)).toEqual(["c", "b"]);
+    expect(firstN(list, Infinity).map((c) => c.id)).toEqual(["a", "b", "c", "x"]);
+    expect(firstN(list, Infinity, "newest").map((c) => c.id)).toEqual(["c", "b", "a", "x"]);
+  });
+  it("never more than there are, nothing for zero or less, and leaves the list as it was", () => {
+    expect(firstN(list, 99).length).toBe(4);
+    expect([firstN(list, 0), firstN(list, -3)]).toEqual([[], []]);
+    expect(list.map((c) => c.id)).toEqual(["b", "x", "a", "c"]);
+  });
+  it("offers the two orders", () => {
+    expect(PICK_ORDERS.map(([id]) => id)).toEqual(["oldest", "newest"]);
+  });
+});
+
+describe("tagCounts", () => {
+  it("counts each tag and the untagged copies", () => {
+    expect(tagCounts([copy({ tags: ["t1"] }), copy({ tags: ["t1", "t2"] }), copy(), copy()])).toEqual({ none: 2, t1: 2, t2: 1 });
+    expect(tagCounts([])).toEqual({ none: 0 });
+  });
+});

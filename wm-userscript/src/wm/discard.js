@@ -67,6 +67,34 @@ export function selectionFor(copies, filter, ctx, include = false) {
   return { matches, aside, take };
 }
 
+/** Which end of the collection "Sélectionner N" takes from: the oldest copies or the newest. */
+export const PICK_ORDERS = [["oldest", "les plus anciennes"], ["newest", "les plus récentes"]];
+
+/**
+ * The first `n` copies of `take` (all of them for n = Infinity), oldest or newest first by the
+ * date each was obtained; a copy without a date comes last either way.
+ */
+export function firstN(take, n, order = "oldest") {
+  const sign = order === "newest" ? -1 : 1;
+  const at = (c) => (c.at ? Date.parse(c.at) : NaN);
+  const sorted = [...take].sort((a, b) => {
+    const x = at(a), y = at(b);
+    if (Number.isNaN(x) || Number.isNaN(y)) return Number.isNaN(x) - Number.isNaN(y);
+    return sign * (x - y);
+  });
+  return sorted.slice(0, Math.max(0, n));
+}
+
+/** How many copies carry each tag, and how many carry none: { none, [tagId]: n }. */
+export function tagCounts(copies) {
+  const n = { none: 0 };
+  for (const c of copies) {
+    if (!c.tags.length) n.none++;
+    for (const t of c.tags) n[t] = (n[t] ?? 0) + 1;
+  }
+  return n;
+}
+
 /** The selection by rarity, rarest first: [[rarity, n], ...]. */
 export function byRarity(copies, order) {
   const n = {};

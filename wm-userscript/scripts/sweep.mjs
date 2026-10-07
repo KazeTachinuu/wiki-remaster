@@ -77,6 +77,11 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
   await post("/api/__fault", { human: false });
   await post("/api/reset");
   await post("/api/__profile", { is_pro: true });
+  // two tags, a few commons carrying one, for the collection's tag row
+  const [keep] = await (await post("/api/__sb/tags", { name: "À garder", color: "#22c55e" })).json();
+  await post("/api/__sb/tags", { name: "Échange", color: "#3b82f6" });
+  const commons = (await (await fetch(BASE + "/api/my-collection?page=0&rarity=C")).json()).collection.slice(0, 6);
+  for (const c of commons) await post("/api/__sb/card-tags", { user_card_id: c.id, tag_id: keep.id });
   await go("/pulls");
   await ev(() => { for (const k of Object.keys(localStorage)) if (k.startsWith("wm-cache:") || k === "wm-watches") localStorage.removeItem(k); });
 
@@ -111,7 +116,11 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
     await step(tag, "coll-sell-form", async () => (await click("[role=tab]", "^Détails$")) && click(".modal .actions button", "Mettre en vente"));
     await step(tag, "coll-select", async () => (await click(".modal-close")) && (await click("button", "Sélectionner")) && click(".grid .card-btn", null, 1));
     // bulk discard over the whole collection: select all of a filter, confirm, undo, then for real
-    await step(tag, "coll-select-all", async () => (await wait(".sel-all", "Tout sélectionner \\(", 20000)) && ((await t("has", ".rl.on", "^Commun")) || (await click(".rl", "^Commun"))) && (await wait(".rl.on", "^Commun")) && (await wait(".sel-all", "Tout sélectionner \\(", 20000)) && (await click(".sel-all")) && wait(".bulk-bar", "plus bas"));
+    await step(tag, "coll-tags", async () => (await wait(".tag-row .rl", "^À garder6", 20000)) && (await click(".tag-row .rl", "^À garder")) && (await wait(".tag-row .rl.on", "^À garder")) && (await wait(".sel-pick .rl", "^Tout5$", 20000)) && (await click(".tag-row .rl", "^Sans étiquette")) && wait(".tag-row .rl.on", "^Sans étiquette"));
+    await step(tag, "coll-select-100", async () => (await wait(".sel-pick", null, 20000)) && ((await t("has", ".rl.on", "^Commun")) || (await click(".rl", "^Commun"))) && (await wait(".rl.on", "^Commun")) && (await wait(".sel-pick .rl", "^Tout", 20000)) && (await click(".sel-pick .rl", "^100$")) && wait(".bulk-bar", "^100 sélectionnées"));
+    await step(tag, "coll-select-n", async () => (await t("fill", ".sel-num", "37")) && wait(".bulk-bar", "^37 sélectionnées"));
+    await step(tag, "coll-select-newest", async () => (await t("fill", ".sel-order", "newest")) && wait(".bulk-bar", "^37 sélectionnées"));
+    await step(tag, "coll-select-all", async () => (await click(".sel-pick .rl", "^Tout")) && wait(".bulk-bar", "plus bas"));
     await step(tag, "coll-discard-confirm", async () => (await click(".bulk-bar .btn.danger")) && wait(".dc", "Vous recevez"));
     await step(tag, "coll-discard-undo", async () => (await click(".dc .btn.danger")) && (await wait(".bulk-bar", "dans \\d s")) && (await click(".bulk-bar .btn", "Annuler")) && wait(".bulk-bar", "sélectionnées"));
     await step(tag, "coll-discard", async () => (await click(".bulk-bar .btn.danger")) && (await click(".dc .btn.danger")) && wait(".bulk-bar", "WikiBidous", 30000));

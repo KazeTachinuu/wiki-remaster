@@ -49,6 +49,8 @@
   .tool-actions > *{flex:1 0 auto;justify-content:center;padding-inline:10px}
   .rarity-legend:not(.picker-chips){flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-inline:calc(-1 * var(--s4));padding-inline:var(--s4)}
   .rarity-legend:not(.picker-chips) > *{flex:none}
+  .tag-row{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-inline:calc(-1 * var(--s4));padding-inline:var(--s4)}
+  .tag-row > *{flex:none}
   /* what floats at the bottom sits above the tab bar */
   .toasts{bottom:calc(var(--tabbar) + 12px)}
   .bulk-bar{bottom:calc(var(--tabbar) + 12px)}

@@ -8,7 +8,7 @@
   import { pickSound } from "../../sound/sfx.js";
   import { play } from "../../sound/sound.js";
   import DiscardConfirm from "./DiscardConfirm.svelte";
-  import { selectionFor, asideReason, discardInBatches } from "../../wm/discard.js";
+  import { selectionFor, asideReason, discardInBatches, matchesFilter, firstN, tagCounts, PICK_ORDERS } from "../../wm/discard.js";
   import Card from "../../components/Card.svelte";
   import CardModal from "../../components/CardModal.svelte";
   import Icon from "../../components/Icon.svelte";
@@ -103,14 +103,19 @@
   const isLocked = (it) => whyAside(it) === "En échange";
   const rows = $derived(stream.items);
   const onScreen = $derived(rows.filter((it) => picked.has(it.id)).length);
-  // without the full list (it failed), "Tout sélectionner" falls back to the cards shown
-  const takeable = $derived(sel ? sel.take.map((c) => c.id) : rows.filter((it) => include ? !isLocked(it) : !whyAside(it)).map((it) => it.id));
-  const allIn = $derived(takeable.length > 0 && takeable.every((id) => picked.has(id)));
+  // what "Sélectionner N" draws from: every copy the filters show minus the kept ones; without the
+  // full list (it failed to read), the cards shown
+  const takeable = $derived(sel ? sel.take : rows.filter((it) => include ? !isLocked(it) : !whyAside(it)).map((it) => ({ id: it.id, at: it.obtained_at })));
+  const QUICK = [50, 100, 500];
+  let pickOrder = $state("oldest");
+  let want = $state(null); // the number asked for (null: none, Infinity: all)
+  // the tag chips' counts, under the other filters (once the full list is read)
+  const tagN = $derived(copies ? tagCounts(copies.filter((c) => matchesFilter(c, { ...filterNow, tag: "" }))) : null);
   const asideCount = $derived(sel ? sel.aside.length : rows.filter(whyAside).length);
   const asideKinds = $derived([...new Set((sel ? sel.aside.map((x) => x.why) : rows.map(whyAside).filter(Boolean)))].map((w) => w.toLowerCase()).join(", "));
 
   // a new search or filter starts a new choice, as on the game's page
-  $effect(() => { void [query, filter, favOnly, tagFilter]; untrack(() => { picked = new Set(); include = false; lastPick = null; }); });
+  $effect(() => { void [query, filter, favOnly, tagFilter]; untrack(() => { picked = new Set(); include = false; lastPick = null; want = null; }); });
 
   async function readCopies() {
     readError = false; read = 0;
@@ -120,7 +125,7 @@
   }
   function toggleSelecting() {
     selecting = !selecting;
-    picked = new Set(); include = false; lastPick = null;
+    picked = new Set(); include = false; lastPick = null; want = null;
     if (selecting && !copies) readCopies();
   }
   function onCardClick(it, e) {
@@ -138,15 +143,18 @@
     lastPick = it.id;
     picked = n;
   }
-  function selectAll() {
-    pickSound(allIn);
-    const n = new Set(picked);
-    for (const id of takeable) allIn ? n.delete(id) : n.add(id);
-    picked = n;
+  // "Sélectionner N": the first N, oldest or newest first, in place of the current choice
+  function take(n) {
+    want = n;
+    picked = new Set(firstN(takeable, n ?? 0, pickOrder).map((c) => c.id));
+    pickSound(!picked.size);
   }
+  const clearPicks = () => { pickSound(true); picked = new Set(); want = null; };
+  const typed = (e) => { const n = Math.min(takeable.length, Math.max(0, Math.floor(Number(e.currentTarget.value) || 0))); take(n || null); };
   function toggleInclude() {
     include = !include;
     if (!include && sel) { const n = new Set(picked); for (const x of sel.aside) n.delete(x.copy.id); picked = n; }
+    if (want != null) take(want); // the number asked for now counts the kept-back ones too
   }
 
   // the chosen copies, light: from the full list, or from the cards shown when it is missing
@@ -220,16 +228,6 @@
           <Icon name="sort" />
           <select bind:value={sort} aria-label="Trier">{#each SORTS as [id, label] (id)}<option value={id}>{label}</option>{/each}</select>
         </div>
-        {#if tags.list?.length}
-          <div class="isel" title="Étiquette">
-            <Icon name="tag" />
-            <select bind:value={tagFilter} aria-label="Étiquette">
-              <option value="">Étiquettes</option>
-              <option value="none">Sans étiquette</option>
-              {#each tags.list as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
-            </select>
-          </div>
-        {/if}
         <button class="iconbtn" class:on={selecting} onclick={toggleSelecting}>
           <Icon name="select" /><span>{selecting ? "Annuler" : "Sélectionner"}</span>
         </button>
@@ -255,6 +253,21 @@
         </button>
       {/snippet}
       <RarityChips value={filter === "ALL" ? "" : filter} {counts} {total} onchange={(r) => (filter = r || "ALL")} children={extras} />
+      {#if tags.list?.length}
+        <!-- tags, a filter of their own: combined with the rarity, never replacing it -->
+        <div class="tag-row" role="group" aria-label="Étiquettes">
+          <span class="tag-row-label"><Icon name="tag" />Étiquettes</span>
+          <button class="rl" class:on={!tagFilter} onclick={() => (tagFilter = "")}><span class="rl-name">Toutes</span></button>
+          <button class="rl" class:on={tagFilter === "none"} onclick={() => (tagFilter = tagFilter === "none" ? "" : "none")}>
+            <span class="rl-name">Sans étiquette</span>{#if tagN}<span class="rl-n">{tagN.none.toLocaleString("fr")}</span>{/if}
+          </button>
+          {#each tags.list as t (t.id)}
+            <button class="rl tf-chip" class:on={tagFilter === t.id} style="--tc:{t.color ?? 'var(--fg-soft)'}" onclick={() => (tagFilter = tagFilter === t.id ? "" : t.id)}>
+              <i class="tag-dot"></i><span class="rl-name">{t.name}</span>{#if tagN}<span class="rl-n">{(tagN[t.id] ?? 0).toLocaleString("fr")}</span>{/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -272,9 +285,21 @@
       {#if (copies || readError) && asideCount}
         <span class="sel-aside">{include ? "En échange laissées de côté" : `${asideCount.toLocaleString("fr")} laissée${asideCount > 1 ? "s" : ""} de côté (${asideKinds})`} · <button onclick={toggleInclude}>{include ? "les laisser" : "les inclure"}</button></span>
       {/if}
-      <button class="btn sel-all" class:primary={!allIn} disabled={!copies && !readError || !takeable.length} onclick={selectAll}>
-        {allIn ? "Tout désélectionner" : `Tout sélectionner${takeable.length ? ` (${takeable.length.toLocaleString("fr")})` : ""}`}
-      </button>
+      {#if copies || readError}
+        <div class="sel-pick">
+          <span class="sel-label">Sélectionner</span>
+          {#each QUICK.filter((k) => k < takeable.length) as k (k)}
+            <button class="rl" class:on={want === k} onclick={() => take(k)}><span class="rl-name">{k}</span></button>
+          {/each}
+          <button class="rl" class:on={want === Infinity} disabled={!takeable.length} onclick={() => take(Infinity)}><span class="rl-name">Tout</span><span class="rl-n">{takeable.length.toLocaleString("fr")}</span></button>
+          <input class="sel-num" type="number" inputmode="numeric" min="1" max={takeable.length} placeholder="nombre" aria-label="Nombre de cartes à sélectionner"
+            value={want != null && want !== Infinity ? want : ""} onchange={typed} onkeydown={(e) => e.key === "Enter" && typed(e)} />
+          <select class="sel-order" bind:value={pickOrder} onchange={() => want != null && take(want)} aria-label="Lesquelles">
+            {#each PICK_ORDERS as [id, label] (id)}<option value={id}>{label}</option>{/each}
+          </select>
+          {#if picked.size}<button class="sel-clear" onclick={clearPicks}>Tout désélectionner</button>{/if}
+        </div>
+      {/if}
     </div>
   {/if}
 
