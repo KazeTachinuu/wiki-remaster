@@ -5,8 +5,9 @@
 
 const RARITY_ORDER = { C: 0, PC: 1, R: 2, SR: 3, UR: 4, L: 5 };
 
-// Draw weights (gacha odds). Tuned slightly generous so testing is fun.
-const RARITY_WEIGHTS = { C: 50, PC: 26, R: 15, SR: 6, UR: 2.6, L: 0.4 };
+// Draw weights: a real collection's share of each rarity (8 629 cards, some of them bought on the
+// market, so a little generous on the rare ones): about 69 % Commun, 0.12 % Légendaire.
+const RARITY_WEIGHTS = { C: 5968, PC: 1686, R: 691, SR: 242, UR: 32, L: 10 };
 
 const PV_BY_RARITY = { C: 12, PC: 160, R: 520, SR: 2100, UR: 9000, L: 21000 };
 function card(wikipedia_title, category, rarity, atk, def, image_url) {

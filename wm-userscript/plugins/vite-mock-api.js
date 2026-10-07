@@ -5,7 +5,7 @@
  * (mock/world.js) built from real cards (mock/snapshot.json), with a market that keeps running.
  */
 
-import { CATALOG, RARITY_WEIGHTS, SNAPSHOT_PRICES } from "../mock/catalog.js";
+import { CATALOG, RARITY_WEIGHTS, RARITY_ORDER, SNAPSHOT_PRICES } from "../mock/catalog.js";
 import { buildWorld, advanceMarket } from "../mock/world.js";
 import { pastSales, SALES_CAP } from "../mock/history.js";
 import { ACHIEVEMENTS, COLLECT } from "../mock/achievements.js";
@@ -147,8 +147,9 @@ export default function mockApiPlugin() {
         if (p.packs_remaining >= PACK_CAP) return 0;
         return Math.max(0, Math.ceil(REGEN_SECONDS - ((Date.now() - p.packs_last_regen_at) / 1000) % REGEN_SECONDS));
       }
+      // the odds of a real collection (mock/catalog.js), which already hold whatever the live game
+      // grants as pity: no guaranteed rare card on top
       function pickRarity() {
-        if (state.profile.pity_counter >= 25) return ["SR", "UR", "L"].find((r) => byRarity[r]?.length) || "R";
         let r = Math.random() * Object.values(RARITY_WEIGHTS).reduce((a, b) => a + b, 0);
         for (const [rar, w] of Object.entries(RARITY_WEIGHTS)) if ((r -= w) <= 0) return rar;
         return "C";
@@ -171,6 +172,9 @@ export default function mockApiPlugin() {
         addOwned(card, is_shiny);
         return { ...card, is_shiny };
       }
+
+      // a pack's cards come sorted by rarity, the commonest first, as the live game sends them
+      const byRarityOrder = (cards) => cards.sort((a, b) => RARITY_ORDER[a.rarity] - RARITY_ORDER[b.rarity]);
 
       // --- market: the world's, caught up on each request -------------------------------------
       const advance = () => { advanceMarket(world, Date.now(), priceOf, SPEED); drainMine(); };
@@ -257,7 +261,7 @@ export default function mockApiPlugin() {
           if (p_.packs_remaining <= 0) return send(res, 409, { error: "Plus de paquets disponibles.", packs_remaining: 0 });
           p_.packs_remaining -= 1;
           const seen = new Set();
-          const cards = Array.from({ length: PACK_SIZE }, () => drawOne(seen));
+          const cards = byRarityOrder(Array.from({ length: PACK_SIZE }, () => drawOne(seen)));
           // like the live route: every copy I own of the pack's cards, counted after the opening
           const ids = new Set(cards.map((c) => c.id));
           const owned_copies = [...state.collection.values()].filter((u) => ids.has(u.card.id)).map((u) => ({ id: u.id, card_id: u.card.id, starred: u.starred, is_shiny: u.is_shiny }));
@@ -273,7 +277,7 @@ export default function mockApiPlugin() {
           if (claimed) return send(res, 409, { error: "Pack PRO déjà réclamé aujourd'hui.", claim_date: today });
           state.proDaily = today;
           // the game's Pro panel: "15 cartes de rareté ++" (R or better here)
-          const cards = topCards(["R", "SR", "UR", "L"], PRO_PACK_SIZE);
+          const cards = byRarityOrder(topCards(["R", "SR", "UR", "L"], PRO_PACK_SIZE));
           return send(res, 200, { cards, eligible: false, claimed_today: true, claim_date: today });
         }
         if (p === "/api/packs/special") {
@@ -288,7 +292,7 @@ export default function mockApiPlugin() {
           if (!pack) return send(res, 404, { error: "Pack introuvable." });
           if (!available) return send(res, 429, { error: "Prochain pack spécial plus tard.", next_available_at });
           if (!p_.is_vip) state.specialAt = Date.now() + SPECIAL_EVERY_MS;
-          const cards = topCards(["SR", "UR", "L"], PACK_SIZE); // "SR+"
+          const cards = byRarityOrder(topCards(["SR", "UR", "L"], PACK_SIZE)); // "SR+"
           return send(res, 200, { cards, next_available_at: p_.is_vip ? null : iso(state.specialAt) });
         }
         if (p === "/api/packs/grace" && m === "POST") {
