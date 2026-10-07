@@ -15,7 +15,8 @@
     select: [["rect", {"x": "3.5", "y": "3.5", "width": "17", "height": "17", "rx": "4"}], ["path", {"d": "M8 12l2.8 2.8L16.5 9"}]],
     bell: [["path", {"d": "M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"}], ["path", {"d": "M13.5 21a2 2 0 0 1-3 0"}]],
     coin: [["circle", {"cx": "12", "cy": "12", "r": "9"}], ["circle", {"cx": "12", "cy": "12", "r": "3.4"}]],
-    pulls: [["rect", {"x": "3", "y": "4", "width": "18", "height": "16", "rx": "2"}], ["path", {"d": "M3 9h18"}]],
+    // a booster pack: one line, a wrapper crimped at both ends
+    pulls: [["path", {"d": "M5 5 6.75 3 8.5 5 10.25 3 12 5 13.75 3 15.5 5 17.25 3 19 5v14l-1.75 2-1.75-2-1.75 2L12 19l-1.75 2-1.75-2-1.75 2L5 19z"}]],
     collection: [["rect", {"x": "4", "y": "3", "width": "16", "height": "18", "rx": "2"}], ["path", {"d": "M8 7h8M8 11h8M8 15h5"}]],
     catalog: [["rect", {"x": "3", "y": "3", "width": "7", "height": "7", "rx": "1.5"}], ["rect", {"x": "14", "y": "3", "width": "7", "height": "7", "rx": "1.5"}], ["rect", {"x": "3", "y": "14", "width": "7", "height": "7", "rx": "1.5"}], ["rect", {"x": "14", "y": "14", "width": "7", "height": "7", "rx": "1.5"}]],
     market: [["path", {"d": "M4.5 9 6 5h12l1.5 4M5.5 9v10h13V9M9.5 19v-6h5v6"}]],

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.12.13
+// @version      0.12.14
 // @author       Hugo Sibony
 // @description  Unofficial redesign of wiki-masters.com, on the game's own data and your own session.
 // @license      MIT

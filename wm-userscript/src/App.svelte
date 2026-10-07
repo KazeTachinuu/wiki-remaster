@@ -269,7 +269,7 @@
     </div>
     <nav class="nav" bind:this={navEl} use:scrollFade={{ axis: "x" }}>
       {#each MAIN as v}
-        <button type="button" class:on={view === v.id} aria-current={view === v.id ? "page" : undefined} title={settings.sideRail ? v.label : undefined} onclick={() => go(v)}><Icon name={v.icon} width={1.7} /><span class="nav-long">{v.label}</span><span class="nav-short">{v.short ?? v.label}</span></button>
+        <button type="button" class:on={view === v.id} class:nav-pack={v.id === "pulls"} aria-current={view === v.id ? "page" : undefined} title={settings.sideRail ? v.label : undefined} onclick={() => go(v)}><span class="nav-ico"><Icon name={v.icon} width={1.7} /></span><span class="nav-long">{v.label}</span><span class="nav-short">{v.short ?? v.label}</span></button>
       {/each}
       <!-- mine and my friends': with the main screens on a computer, in the menu on a phone -->
       <div class="nav-line" aria-hidden="true"></div>

@@ -13,6 +13,15 @@
   .nav>button{flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden}
   .nav>button svg{width:22px;height:22px}
   .nav>button.on{background:none}
+  /* the packs in the middle of the tab bar, raised: the screen opened most */
+  .nav>button{order:2}
+  .nav>button:nth-child(n+4){order:4}
+  .nav>button.nav-pack{order:3;overflow:visible;color:var(--fg)}
+  .nav-pack .nav-ico{display:grid;place-items:center;width:46px;height:46px;margin-top:-22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);
+    box-shadow:0 0 0 5px var(--surface),0 8px 22px -8px color-mix(in oklab,var(--accent) 70%,transparent);transition:transform .15s}
+  .nav-pack .nav-ico svg{width:22px;height:22px}
+  .nav>button.nav-pack.on{color:var(--accent)}
+  .nav-pack:active .nav-ico{transform:scale(.94)}
   .nav-long{display:none}
   .nav-short{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
   .main{padding-bottom:var(--tabbar)}

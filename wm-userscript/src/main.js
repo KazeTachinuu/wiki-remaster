@@ -24,8 +24,14 @@ let hideStyle = null;  // hides the real app while we overlay
 // Mount inside a shadow root so the host site's CSS cannot leak into our UI and ours
 // cannot leak out. Fonts (Outfit/Inter) are declared page-wide via @font-face and still
 // reach shadow DOM, so typography is preserved.
+// The remaster is dark already: dark-mode extensions (Dark Reader and the like) are told so, or
+// they blank its light pictures (the pack). Only while it shows: the original site stays theirs.
+let darkLock = null;
+
 function showOverlay() {
   if (host) return;
+  darkLock = Object.assign(document.createElement("meta"), { name: "darkreader-lock" });
+  document.head.appendChild(darkLock);
   host = document.createElement("div");
   host.id = "wm-host";
   document.body.appendChild(host);
@@ -53,6 +59,7 @@ function hideOverlay() {
   if (instance) { unmount(instance); instance = null; }
   if (host) { host.remove(); host = null; }
   if (hideStyle) { hideStyle.remove(); hideStyle = null; }
+  if (darkLock) { darkLock.remove(); darkLock = null; }
 }
 
 // Escape hatch: users can drop back to the native app so no feature (Pro tools, special
