@@ -341,6 +341,14 @@ export default function mockApiPlugin() {
           return send(res, m === "POST" ? 201 : 200, []);
         }
 
+        // every copy, light, as the game's database lists `user_cards` with its card and tags
+        if (p === "/api/__sb/copies") {
+          const from = Number(q("offset") || 0), size = Math.min(1000, Number(q("limit") || 1000));
+          const rows = [...state.collection.values()].sort((a, b) => (a.id < b.id ? -1 : 1)).slice(from, from + size);
+          return send(res, 200, rows.map((r) => ({ id: r.id, card_id: r.card.id, is_shiny: !!r.is_shiny, starred: !!r.starred, obtained_at: r.obtained_at ?? null, snapshot_rarity: r.card.rarity,
+            cards: { rarity: r.card.rarity, wikipedia_title: r.card.wikipedia_title }, user_card_tags: (r.tags ?? []).map((t) => ({ tag_id: t.id })) })));
+        }
+
         if (p === "/api/my-collection") {
           // like the live route (checked by test:prod): `q` searches titles and descriptions,
           // `rarity` may repeat, `sort` as collectionOrder;

@@ -6,6 +6,9 @@
   import RarityChips from "../../components/RarityChips.svelte";
   import PickMark from "../../components/PickMark.svelte";
   import { pickSound } from "../../sound/sfx.js";
+  import { play } from "../../sound/sound.js";
+  import DiscardConfirm from "./DiscardConfirm.svelte";
+  import { selectionFor, asideReason, discardInBatches } from "../../wm/discard.js";
   import Card from "../../components/Card.svelte";
   import CardModal from "../../components/CardModal.svelte";
   import Icon from "../../components/Icon.svelte";
@@ -77,47 +80,127 @@
     collectionRemove(); // the saved first page is asked again
   }
 
-  // Bulk discard.
+  // Bulk discard, over the whole collection (wm/discard.js): choosing starts by reading the light
+  // list of every copy; "Tout sélectionner" takes what the filters show, minus what a player keeps
+  // (favourites, vitrine, shiny, a trade); the choice leaves after a few seconds to undo, then in
+  // batches of 50 as the game's own page sends them.
+  const UNDO_S = 5;
   let selecting = $state(false);
   let picked = $state(new Set());
-  let bulkConfirm = $state(false);
-  let bulkBusy = $state(false);
-  let bulkMsg = $state("");
+  let copies = $state.raw(null); // every copy, light, once read (null before)
+  let read = $state(0); // copies read so far
+  let readError = $state(false);
+  let showcaseIds = $state.raw(new Set());
+  let include = $state(false); // "les inclure": the kept-back ones too (never one in a trade)
+  let asking = $state(false); // the confirmation is open
+  let run = $state(null); // { phase: "wait" | "send" | "done", ... } in the floating bar
+  let lastPick = null; // for a Shift-click range
 
-  function onCardClick(it) {
-    if (!selecting) { selected = it; return; }
-    const n = new Set(picked);
-    pickSound(n.has(it.id));
-    n.has(it.id) ? n.delete(it.id) : n.add(it.id);
-    picked = n;
+  const filterNow = $derived({ rarity: filter, favOnly, tag: tagFilter, q: query });
+  const ctx = $derived({ locked: new Set(stream.meta?.pending ?? []), showcase: showcaseIds });
+  const sel = $derived(copies ? selectionFor(copies, filterNow, ctx, include) : null);
+  const whyAside = (it) => asideReason({ id: it.id, cardId: it.card.id, starred: it.starred, shiny: it.is_shiny }, ctx);
+  const isLocked = (it) => whyAside(it) === "En échange";
+  const rows = $derived(stream.items);
+  const onScreen = $derived(rows.filter((it) => picked.has(it.id)).length);
+  // without the full list (it failed), "Tout sélectionner" falls back to the cards shown
+  const takeable = $derived(sel ? sel.take.map((c) => c.id) : rows.filter((it) => include ? !isLocked(it) : !whyAside(it)).map((it) => it.id));
+  const allIn = $derived(takeable.length > 0 && takeable.every((id) => picked.has(id)));
+  const asideCount = $derived(sel ? sel.aside.length : rows.filter(whyAside).length);
+  const asideKinds = $derived([...new Set((sel ? sel.aside.map((x) => x.why) : rows.map(whyAside).filter(Boolean)))].map((w) => w.toLowerCase()).join(", "));
+
+  // a new search or filter starts a new choice, as on the game's page
+  $effect(() => { void [query, filter, favOnly, tagFilter]; untrack(() => { picked = new Set(); include = false; lastPick = null; }); });
+
+  async function readCopies() {
+    readError = false; read = 0;
+    data.showcase().then((sh) => (showcaseIds = new Set(sh.places.filter(Boolean).map((p) => p.id))), () => {});
+    try { copies = await data.myCopies({ onProgress: (n) => (read = n) }); }
+    catch { readError = true; }
   }
   function toggleSelecting() {
     selecting = !selecting;
-    picked = new Set();
-    bulkConfirm = false;
+    picked = new Set(); include = false; lastPick = null;
+    if (selecting && !copies) readCopies();
   }
-  async function bulkDiscard() {
-    if (bulkBusy) return; // one discard at a time: a second click never sends it twice
-    bulkBusy = true;
-    try {
-      const r = await data.bulkDiscard([...picked]);
-      const kept = new Set(r.failed || []);
-      changed([...picked].filter((id) => !kept.has(id)));
-      // the ones that failed are already gone (sold, traded or discarded elsewhere): out of the grid too
-      if (kept.size) changed([...kept]);
-      bulkMsg = `${r.discarded_count} carte${r.discarded_count > 1 ? "s" : ""} défaussée${r.discarded_count > 1 ? "s" : ""}` + (kept.size ? `, ${kept.size} déjà partie${kept.size > 1 ? "s" : ""} ailleurs` : "");
-    } catch (e) {
-      bulkMsg = e.message || "La défausse a échoué.";
-      changed(); // some may have gone through: ask again rather than guess
+  function onCardClick(it, e) {
+    if (!selecting) { selected = it; return; }
+    if (isLocked(it)) return;
+    const n = new Set(picked);
+    if (e?.shiftKey && lastPick) {
+      const ids = rows.map((r) => r.id), a = ids.indexOf(lastPick), b = ids.indexOf(it.id);
+      if (a >= 0 && b >= 0) for (const r of rows.slice(Math.min(a, b), Math.max(a, b) + 1)) if (!isLocked(r)) n.add(r.id);
+      pickSound(false);
+    } else {
+      pickSound(n.has(it.id));
+      n.has(it.id) ? n.delete(it.id) : n.add(it.id);
     }
-    bulkBusy = false;
-    toggleSelecting();
-    onwallet?.();
+    lastPick = it.id;
+    picked = n;
   }
-  const rows = $derived(stream.items);
-  const allPicked = $derived(rows.length > 0 && rows.every((it) => picked.has(it.id)));
+  function selectAll() {
+    pickSound(allIn);
+    const n = new Set(picked);
+    for (const id of takeable) allIn ? n.delete(id) : n.add(id);
+    picked = n;
+  }
+  function toggleInclude() {
+    include = !include;
+    if (!include && sel) { const n = new Set(picked); for (const x of sel.aside) n.delete(x.copy.id); picked = n; }
+  }
+
+  // the chosen copies, light: from the full list, or from the cards shown when it is missing
+  const chosen = () => {
+    const byId = new Map((copies ?? []).map((c) => [c.id, c]));
+    for (const it of rows) if (!byId.has(it.id)) byId.set(it.id, { id: it.id, rarity: it.card.rarity, title: it.card.title });
+    return [...picked].map((id) => byId.get(id)).filter(Boolean);
+  };
+
+  // gone for good: out of the list, the grid, the counts
+  function removeCopies(ids) {
+    const gone = new Set(ids);
+    const lost = {};
+    for (const c of copies ?? []) if (gone.has(c.id)) lost[c.rarity] = (lost[c.rarity] ?? 0) + 1;
+    for (const it of rows) if (gone.has(it.id) && !copies) lost[it.card.rarity] = (lost[it.card.rarity] ?? 0) + 1;
+    if (copies) copies = copies.filter((c) => !gone.has(c.id));
+    if (stream.meta?.counts) stream.meta = { ...stream.meta, counts: Object.fromEntries(Object.entries(stream.meta.counts).map(([r, k]) => [r, Math.max(0, k - (lost[r] ?? 0))])) };
+    changed(ids);
+  }
+
+  let token = 0;
+  async function discard() {
+    asking = false;
+    const ids = [...picked], mine = ++token;
+    run = { phase: "wait", n: ids.length, left: UNDO_S };
+    for (let s = UNDO_S; s > 0; s--) {
+      if (token !== mine) return;
+      run = { ...run, left: s };
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    if (token !== mine) return;
+    run = { phase: "send", n: ids.length, batch: 1, of: Math.ceil(ids.length / 50), sent: 0, stop: false };
+    const r = await discardInBatches(ids, (b) => data.bulkDiscard(b), { onProgress: (p) => (run = { ...run, ...p }), stopped: () => run?.stop });
+    if (r.gone.length) removeCopies(r.gone);
+    if (r.unsure.length) { copies = null; changed(); } // a batch may have gone through in part: read again
+    picked = new Set(r.refused); // refused ones stay mine, still chosen to show which
+    play(r.gone.length && !r.error ? "success" : "error");
+    run = { phase: "done", gone: r.gone.length, refused: r.refused.length, unsent: r.unsent.length, error: r.error?.message ?? null };
+    onwallet?.();
+    if (!r.refused.length && !r.error) selecting = false; // all done: back to browsing
+    const shown = run;
+    setTimeout(() => { if (run === shown) run = null; }, 6000);
+  }
+  const undo = () => { token++; run = null; };
+
+  const onKey = (e) => {
+    if (e.key !== "Escape" || !selecting || selected || asking) return;
+    if (run?.phase === "wait") return undo();
+    picked.size ? (picked = new Set()) : toggleSelecting();
+  };
   const plural = (n, word) => `${n.toLocaleString("fr")} ${word}${n > 1 ? "s" : ""}`;
 </script>
+
+<svelte:window onkeydown={onKey} />
 
 {#if stream.error && !stream.started}
   <div class="empty"><b>Impossible de charger la collection.</b><div>Vérifiez que vous êtes connecté, puis réessayez.</div><button class="btn" onclick={() => stream.reset()}>Réessayer</button></div>
@@ -147,19 +230,12 @@
             </select>
           </div>
         {/if}
-        {#if selecting}
-          <button class="iconbtn" onclick={() => { pickSound(allPicked); picked = allPicked ? new Set() : new Set(rows.map((it) => it.id)); }}>
-            {allPicked ? "Tout désélectionner" : "Tout sélectionner"}
-          </button>
-        {/if}
         <button class="iconbtn" class:on={selecting} onclick={toggleSelecting}>
           <Icon name="select" /><span>{selecting ? "Annuler" : "Sélectionner"}</span>
         </button>
       </div>
     </div>
   </div>
-
-  {#if bulkMsg}<div class="sort-hint">{bulkMsg}</div>{/if}
 
   {#if total > 0}
     <div class="rarity-panel">
@@ -182,6 +258,26 @@
     </div>
   {/if}
 
+  {#if selecting && stream.started}
+    <!-- what the filters show, across the whole collection, and one click to take it -->
+    <div class="sel-line">
+      {#if copies}
+        <span class="sel-n">{plural(sel.matches.length, "carte")}</span>
+      {:else if readError}
+        <span class="sel-n">{plural(rows.length, "carte")} affichée{rows.length > 1 ? "s" : ""}</span>
+        <span class="sel-aside">Collection entière illisible pour le moment · <button onclick={readCopies}>Réessayer</button></span>
+      {:else}
+        <span class="sel-n"><span class="spin"></span>Lecture de votre collection{read ? ` · ${read.toLocaleString("fr")}` : ""}</span>
+      {/if}
+      {#if (copies || readError) && asideCount}
+        <span class="sel-aside">{include ? "En échange laissées de côté" : `${asideCount.toLocaleString("fr")} laissée${asideCount > 1 ? "s" : ""} de côté (${asideKinds})`} · <button onclick={toggleInclude}>{include ? "les laisser" : "les inclure"}</button></span>
+      {/if}
+      <button class="btn sel-all" class:primary={!allIn} disabled={!copies && !readError || !takeable.length} onclick={selectAll}>
+        {allIn ? "Tout désélectionner" : `Tout sélectionner${takeable.length ? ` (${takeable.length.toLocaleString("fr")})` : ""}`}
+      </button>
+    </div>
+  {/if}
+
   {#if !stream.started}
     <div class="grid">{#each Array(10) as _}<div class="wc skeleton"></div>{/each}</div>
   {:else if !rows.length && !stream.loading}
@@ -195,11 +291,14 @@
   {:else}
     <div class="grid" class:dim={stream.loading && stream.first}>
       {#each rows as it (it.id)}
-        <button class="card-btn" class:picking={selecting} class:picked={selecting && picked.has(it.id)}
-          onclick={() => onCardClick(it)} aria-label={it.card.title} use:lazy.watch={it.card}>
+        {@const why = selecting && !picked.has(it.id) ? whyAside(it) : null}
+        <button class="card-btn" class:picking={selecting} class:picked={selecting && picked.has(it.id)} class:aside={why}
+          disabled={selecting && why === "En échange"} title={why ?? undefined}
+          onclick={(e) => onCardClick(it, e)} aria-label={it.card.title} use:lazy.watch={it.card}>
           <Card card={it.card} count={it.count} shiny={it.is_shiny} starred={it.starred} value={values[it.card.id]} />
           {#if selecting}
             <PickMark on={picked.has(it.id)} />
+            {#if why}<span class="pick-why">{why}</span>{/if}
           {/if}
         </button>
       {/each}
@@ -212,17 +311,35 @@
   {/if}
 {/if}
 
-{#if selecting && picked.size > 0}
-  <div class="bulk-bar">
-    {#if bulkConfirm}
-      <span class="bulk-text">Défausser {plural(picked.size, "carte")} contre <b>{plural(picked.size, "point")}</b> ?</span>
-      <button class="btn" disabled={bulkBusy} onclick={() => (bulkConfirm = false)}>Annuler</button>
-      <button class="btn danger" disabled={bulkBusy} onclick={bulkDiscard}>{bulkBusy ? "Défausse..." : "Confirmer"}</button>
+<!-- one floating bar: the choice, then a few seconds to undo, then the batches, then the outcome -->
+{#if run}
+  <div class="bulk-bar run" role="status" aria-live="polite">
+    {#if run.phase === "wait"}
+      <span class="bulk-text">{plural(run.n, "carte")} défaussée{run.n > 1 ? "s" : ""} dans {run.left} s</span>
+      <button class="btn" onclick={undo}>Annuler</button>
+    {:else if run.phase === "send"}
+      <span class="bulk-text">Défausse · lot {run.batch} sur {run.of}</span>
+      <span class="bulk-prog" aria-hidden="true"><i style="width:{(run.sent / run.n) * 100}%"></i></span>
+      <button class="btn" disabled={run.stop} onclick={() => (run = { ...run, stop: true })}>{run.stop ? "Arrêt..." : "Arrêter"}</button>
     {:else}
-      <span class="bulk-text">{picked.size} sélectionnée{picked.size > 1 ? "s" : ""}</span>
-      <button class="btn danger" onclick={() => (bulkConfirm = true)}>Défausser · +{picked.size} pts</button>
+      <span class="bulk-text">
+        {#if run.gone}{plural(run.gone, "carte")} défaussée{run.gone > 1 ? "s" : ""} · <b>+{run.gone.toLocaleString("fr")} WikiBidou{run.gone > 1 ? "s" : ""}</b>{/if}
+        {#if run.refused}{run.gone ? " · " : ""}{run.refused} refusée{run.refused > 1 ? "s" : ""} par le jeu (toujours à vous){/if}
+        {#if run.error}{run.gone ? " · " : ""}{run.error}{/if}
+        {#if !run.gone && !run.refused && !run.error}Défausse arrêtée{/if}
+      </span>
+      <button class="btn" onclick={() => (run = null)}>OK</button>
     {/if}
   </div>
+{:else if selecting && picked.size > 0}
+  <div class="bulk-bar">
+    <span class="bulk-text">{plural(picked.size, "sélectionnée")}{#if picked.size > onScreen}<small class="bulk-off">dont {(picked.size - onScreen).toLocaleString("fr")} plus bas</small>{/if}</span>
+    <button class="btn danger" onclick={() => (asking = true)}>Défausser · +{picked.size.toLocaleString("fr")} WB</button>
+  </div>
+{/if}
+
+{#if asking}
+  <DiscardConfirm copies={chosen()} onconfirm={discard} onclose={() => (asking = false)} />
 {/if}
 
 {#if selected}

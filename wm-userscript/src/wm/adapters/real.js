@@ -8,6 +8,7 @@ import { api, supabase, getProfile, patchProfile, bumpEpoch, getUserId, refreshP
 import { newInPack, pickCopy, nCard, nAuction, nBid, nNotification, nTrade, nMessage, validateCards } from "../schema.js";
 import { whoAmI, chatMe, otherOf, needMe } from "../trades.js";
 import { nUser, nMe, nPlayer, showcaseOf, friendshipsOf, waitingBy, achievementsOf } from "../social.js";
+import { readAllCopies, COPY_FIELDS } from "../discard.js";
 
 const PAGE = 50; // server page size; the market rejects limit > 50
 const PACK_CAP = 10;
@@ -272,6 +273,15 @@ export const RealData = {
 
   /** Mark one copy as a favourite or not (the game's collection page does the same). */
   setStarred: (userCardId, starred) => supabase(`user_cards?id=eq.${encodeURIComponent(userCardId)}`, { method: "PATCH", body: { starred }, label: starred ? "Ajout aux favoris" : "Retrait des favoris" }),
+
+  /**
+   * Every copy I own, light (rarity, title, favourite, shiny, tags; no image), for choosing in bulk
+   * over the whole collection: read from the game's database a thousand at a time (see discard.js).
+   */
+  async myCopies({ onProgress } = {}) {
+    const me = encodeURIComponent(await this.meNow());
+    return readAllCopies((from, size) => supabase(`user_cards?select=${COPY_FIELDS}&user_id=eq.${me}&order=id.asc&limit=${size}&offset=${from}`, { label: "Lecture de votre collection" }), { onProgress });
+  },
 
   /** My tags, by name: [{ id, name, color }]. */
   async myTags() {

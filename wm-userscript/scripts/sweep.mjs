@@ -110,6 +110,11 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
     await step(tag, "analysis-back", async () => (await click(".ma-back")) && wait(".modal"));
     await step(tag, "coll-sell-form", async () => (await click("[role=tab]", "^Détails$")) && click(".modal .actions button", "Mettre en vente"));
     await step(tag, "coll-select", async () => (await click(".modal-close")) && (await click("button", "Sélectionner")) && click(".grid .card-btn", null, 1));
+    // bulk discard over the whole collection: select all of a filter, confirm, undo, then for real
+    await step(tag, "coll-select-all", async () => (await wait(".sel-all", "Tout sélectionner \\(", 20000)) && ((await t("has", ".rl.on", "^Commun")) || (await click(".rl", "^Commun"))) && (await wait(".rl.on", "^Commun")) && (await wait(".sel-all", "Tout sélectionner \\(", 20000)) && (await click(".sel-all")) && wait(".bulk-bar", "plus bas"));
+    await step(tag, "coll-discard-confirm", async () => (await click(".bulk-bar .btn.danger")) && wait(".dc", "Vous recevez"));
+    await step(tag, "coll-discard-undo", async () => (await click(".dc .btn.danger")) && (await wait(".bulk-bar", "dans \\d s")) && (await click(".bulk-bar .btn", "Annuler")) && wait(".bulk-bar", "sélectionnées"));
+    await step(tag, "coll-discard", async () => (await click(".bulk-bar .btn.danger")) && (await click(".dc .btn.danger")) && wait(".bulk-bar", "WikiBidous", 30000));
 
     // catalogue
     await go("/global-collection");

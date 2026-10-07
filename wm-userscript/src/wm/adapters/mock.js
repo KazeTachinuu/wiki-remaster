@@ -7,6 +7,7 @@
 import { api } from "../api.js";
 import { RealData } from "./real.js";
 import { nMe, achievementsOf } from "../social.js";
+import { readAllCopies } from "../discard.js";
 
 export const MockData = {
   ...RealData,
@@ -41,6 +42,7 @@ export const MockData = {
   },
   tagCard: (userCardId, tagId) => api("/api/__sb/card-tags", { method: "POST", body: { user_card_id: userCardId, tag_id: tagId }, label: "Étiquette" }),
   untagCard: (userCardId, tagId) => api(`/api/__sb/card-tags?user_card_id=${encodeURIComponent(userCardId)}&tag_id=${encodeURIComponent(tagId)}`, { method: "DELETE", label: "Étiquette" }),
+  myCopies: ({ onProgress } = {}) => readAllCopies((from, size) => api(`/api/__sb/copies?offset=${from}&limit=${size}`, { label: "Lecture de votre collection" }), { onProgress }),
   // my profile and achievements: the game reads them from its database, the dev API stands in
   me: () => api("/api/__sb/me", { quiet: true }).then(nMe),
   achievements: () => api("/api/__sb/achievements", { quiet: true }).then((d) => achievementsOf(d.achievements, d.mine)),

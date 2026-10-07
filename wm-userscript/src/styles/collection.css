@@ -91,3 +91,29 @@
 @keyframes sk{to{background-position:-200% 0}}
 /* the end of the rendered part of a long collection: reaching it renders the next rows */
 .grid-more{height:1px}
+
+/* bulk discard: the line under the filters, the kept-back cards, the progress in the floating bar */
+.sel-line{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2) var(--s3);margin:0 0 var(--s4);padding:10px 10px 10px 16px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--line)}
+.sel-n{display:inline-flex;align-items:center;gap:8px;font-family:var(--display);font-weight:600;font-size:15px;font-variant-numeric:tabular-nums}
+.sel-aside{font-size:12.5px;color:var(--fg-faint)}
+.sel-aside button{background:none;border:0;padding:0;color:var(--fg-soft);text-decoration:underline;text-underline-offset:3px;font-size:inherit}
+.sel-all{margin-left:auto}
+.card-btn.aside{opacity:.45}
+.card-btn.aside:disabled{cursor:not-allowed}
+.pick-why{position:absolute;left:8px;right:8px;top:50%;transform:translateY(-50%);z-index:11;text-align:center;font-size:12px;font-weight:600;color:var(--fg);text-shadow:0 1px 6px #000;pointer-events:none}
+.bulk-off{color:var(--fg-faint);font-size:12.5px;white-space:nowrap}
+.bulk-off::before{content:" · "}
+.bulk-prog{width:120px;height:6px;border-radius:4px;background:var(--line2);overflow:hidden}
+.bulk-prog i{display:block;height:100%;background:var(--accent);transition:width .3s}
+@media (prefers-reduced-motion:reduce){.bulk-prog i{transition:none}}
+
+/* the confirmation */
+.modal.dc{display:flex;flex-direction:column;align-items:stretch;max-width:440px;gap:12px;padding:var(--s5)}
+.dc h2{font-family:var(--display);font-size:20px;margin-right:32px}
+.dc-pills{display:flex;flex-wrap:wrap;gap:6px}
+.dc-pill{font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;background:color-mix(in oklab,var(--rc) 20%,transparent);color:var(--rc);font-variant-numeric:tabular-nums}
+.dc-warn{color:var(--bad);font-weight:600;font-size:13.5px}
+.dc-titles{font-size:12.5px;color:var(--fg-faint);line-height:1.45}
+.dc-gain{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--line);padding-top:12px;color:var(--fg-soft);font-size:13px}
+.dc-gain b{font-family:var(--display);font-size:20px;color:var(--accent)}
+.dc-acts{display:flex;justify-content:flex-end;gap:8px}
