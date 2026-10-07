@@ -116,7 +116,7 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
     await step(tag, "coll-sell-form", async () => (await click("[role=tab]", "^Détails$")) && click(".modal .actions button", "Mettre en vente"));
     await step(tag, "coll-select", async () => (await click(".modal-close")) && (await click("button", "Sélectionner")) && click(".grid .card-btn", null, 1));
     // bulk discard over the whole collection: select all of a filter, confirm, undo, then for real
-    await step(tag, "coll-tags", async () => (await wait(".tag-row .rl", "^À garder6", 20000)) && (await click(".tag-row .rl", "^À garder")) && (await wait(".tag-row .rl.on", "^À garder")) && (await wait(".sel-pick .rl", "^Tout5$", 20000)) && (await click(".tag-row .rl", "^Sans étiquette")) && wait(".tag-row .rl.on", "^Sans étiquette"));
+    await step(tag, "coll-tags", async () => (await wait(".tag-row .rl", "^À garder6", 20000)) && (await click(".tag-row .rl", "^À garder")) && (await wait(".tag-row .rl.on", "^À garder")) && (await wait(".sel-pick .rl", "^Tout\\d$", 20000)) && (await click(".tag-row .rl", "^Sans étiquette")) && wait(".tag-row .rl.on", "^Sans étiquette"));
     await step(tag, "coll-select-100", async () => (await wait(".sel-pick", null, 20000)) && ((await t("has", ".rl.on", "^Commun")) || (await click(".rl", "^Commun"))) && (await wait(".rl.on", "^Commun")) && (await wait(".sel-pick .rl", "^Tout", 20000)) && (await click(".sel-pick .rl", "^100$")) && wait(".bulk-bar", "^100 sélectionnées"));
     await step(tag, "coll-select-n", async () => (await t("fill", ".sel-num", "37")) && wait(".bulk-bar", "^37 sélectionnées"));
     await step(tag, "coll-select-newest", async () => (await t("fill", ".sel-order", "newest")) && wait(".bulk-bar", "^37 sélectionnées"));

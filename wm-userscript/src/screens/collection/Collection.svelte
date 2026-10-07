@@ -187,7 +187,7 @@
     }
     if (token !== mine) return;
     run = { phase: "send", n: ids.length, batch: 1, of: Math.ceil(ids.length / 50), sent: 0, stop: false };
-    const r = await discardInBatches(ids, (b) => data.bulkDiscard(b), { onProgress: (p) => (run = { ...run, ...p }), stopped: () => run?.stop });
+    const r = await discardInBatches(ids, (b) => data.bulkDiscard(b, { quiet: true }), { onProgress: (p) => (run = { ...run, ...p }), stopped: () => run?.stop });
     if (r.gone.length) removeCopies(r.gone);
     if (r.unsure.length) { copies = null; changed(); } // a batch may have gone through in part: read again
     picked = new Set(r.refused); // refused ones stay mine, still chosen to show which

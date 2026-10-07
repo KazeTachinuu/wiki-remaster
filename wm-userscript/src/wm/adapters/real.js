@@ -277,10 +277,11 @@ export const RealData = {
   /**
    * Every copy I own, light (rarity, title, favourite, shiny, tags; no image), for choosing in bulk
    * over the whole collection: read from the game's database a thousand at a time (see discard.js).
+   * No loading pill: the caller counts the copies read (`onProgress`).
    */
   async myCopies({ onProgress } = {}) {
     const me = encodeURIComponent(await this.meNow());
-    return readAllCopies((from, size) => supabase(`user_cards?select=${COPY_FIELDS}&user_id=eq.${me}&order=id.asc&limit=${size}&offset=${from}`, { label: "Lecture de votre collection" }), { onProgress });
+    return readAllCopies((from, size) => supabase(`user_cards?select=${COPY_FIELDS}&user_id=eq.${me}&order=id.asc&limit=${size}&offset=${from}`), { onProgress });
   },
 
   /** My tags, by name: [{ id, name, color }]. */
@@ -438,6 +439,7 @@ export const RealData = {
   discard: (userCardId) => api(`/api/user-cards/${userCardId}/discard`, { method: "POST", label: "Défausse" }),
 
   /** Returns { discarded_count, failed[] }. */
-  bulkDiscard: (userCardIds) => api("/api/user-cards/bulk-discard", { method: "POST", label: "Défausse des cartes", body: { card_ids: userCardIds } }),
+  // `quiet`: the caller shows its own progress (the collection's discard bar), not the loading pill
+  bulkDiscard: (userCardIds, { quiet = false } = {}) => api("/api/user-cards/bulk-discard", { method: "POST", quiet, label: "Défausse des cartes", body: { card_ids: userCardIds } }),
 
 };

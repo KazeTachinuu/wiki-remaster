@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         wiki-remaster
 // @namespace    hugo.wikimasters
-// @version      0.12.18
+// @version      0.12.19
 // @author       Hugo Sibony
 // @description  Unofficial redesign of wiki-masters.com, on the game's own data and your own session.
 // @license      MIT
@@ -5498,7 +5498,7 @@
 		}),
 		async myCopies({ onProgress } = {}) {
 			const me = encodeURIComponent(await this.meNow());
-			return readAllCopies((from, size) => supabase(`user_cards?select=${COPY_FIELDS}&user_id=eq.${me}&order=id.asc&limit=${size}&offset=${from}`, { label: "Lecture de votre collection" }), { onProgress });
+			return readAllCopies((from, size) => supabase(`user_cards?select=${COPY_FIELDS}&user_id=eq.${me}&order=id.asc&limit=${size}&offset=${from}`), { onProgress });
 		},
 		async myTags() {
 			const me = await this.meNow();
@@ -5707,8 +5707,9 @@
 			method: "POST",
 			label: "Défausse"
 		}),
-		bulkDiscard: (userCardIds) => api("/api/user-cards/bulk-discard", {
+		bulkDiscard: (userCardIds, { quiet = false } = {}) => api("/api/user-cards/bulk-discard", {
 			method: "POST",
+			quiet,
 			label: "Défausse des cartes",
 			body: { card_ids: userCardIds }
 		})
@@ -5769,7 +5770,7 @@
 			method: "DELETE",
 			label: "Étiquette"
 		}),
-		myCopies: ({ onProgress } = {}) => readAllCopies((from, size) => api(`/api/__sb/copies?offset=${from}&limit=${size}`, { label: "Lecture de votre collection" }), { onProgress }),
+		myCopies: ({ onProgress } = {}) => readAllCopies((from, size) => api(`/api/__sb/copies?offset=${from}&limit=${size}`, { quiet: true }), { onProgress }),
 		me: () => api("/api/__sb/me", { quiet: true }).then(nMe),
 		achievements: () => api("/api/__sb/achievements", { quiet: true }).then((d) => achievementsOf(d.achievements, d.mine))
 	};
@@ -10356,7 +10357,7 @@
 				sent: 0,
 				stop: false
 			}, true);
-			const r = await discardInBatches(ids, (b) => data.bulkDiscard(b), {
+			const r = await discardInBatches(ids, (b) => data.bulkDiscard(b, { quiet: true }), {
 				onProgress: (p) => set(run, {
 					...get(run),
 					...p
@@ -18931,7 +18932,7 @@
 	var root_31 = from_html(`<div><!> <aside class="side"><div class="brand"><span class="mk"></span><b>Wiki Remaster</b> <button type="button" class="side-toggle"><!></button></div> <nav class="nav"><!> <div class="nav-line" aria-hidden="true"></div> <!> <div class="nav-sep">Le reste du site</div> <div class="nav-grid"></div></nav> <div class="side-foot"><!> <button class="foot-link" title="Raccourcis clavier"><span class="kbd">?</span><span class="foot-txt">Raccourcis clavier</span></button> <div class="hintline"> <!></div></div></aside> <main class="main"><header class="topbar"><div class="crumb"><span class="nav-long"> </span><span class="nav-short"> </span></div> <div class="wallet"><!> <button><span>ATK</span></button> <!> <button class="bell menu-btn"><!><!></button> <div class="notif"><button aria-label="Notifications"><!> <!></button> <!></div> <!> <button type="button"><span class="pk-ring"><!></span> <b> </b><span class="chip-cap"> </span> <!> <!></button> <span class="chip" title="WikiBidous"><!><b> </b></span></div></header> <section class="view"><!></section></main> <!> <!> <!> <!></div>`);
 	function App($$anchor, $$props) {
 		push($$props, true);
-		const VERSION = "0.12.18";
+		const VERSION = "0.12.19";
 		const REPO = "https://github.com/KazeTachinuu/wiki-remaster";
 		let update$1 = state(null);
 		if (isUserscript()) availableUpdate(VERSION, { metaUrl: "https://raw.githubusercontent.com/KazeTachinuu/wiki-remaster/main/dist/wikimasters-app.meta.js" }).then((v) => set(update$1, v, true));
