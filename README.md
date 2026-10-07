@@ -52,6 +52,10 @@ Live bids, your sales and wins, every listing of a card side by side. Each price
 
 ![An auction](docs/screenshots/auction.png)
 
+![Affaires: the bargains among the sales seen](docs/screenshots/deals.png)
+
+<sub>Affaires from the test server.</sub>
+
 ### Trades
 Both sides as real cards with their value and a verdict; counter-offers as one timeline. Built for busy traders: find a trade by friend or card, hundreds of cards in a trade as mini cards, long negotiations folded.
 
@@ -60,16 +64,30 @@ Both sides as real cards with their value and a verdict; counter-offers as one t
 ### Friends and profiles
 Friends as in a messaging app: the list, then the friend you pick with your offers in progress, the last message and their showcase, a trade or a message one click away. One search for friends and every player; requests counted on the menu. Every player's profile: last seen, collection by rarity, showcase as they arranged it, or a clean private state.
 
+![Friends](docs/screenshots/friends.png)
+
+![A player's profile](docs/screenshots/profile.png)
+
+<sub>From the test server: its players are made up, so no real player shows here.</sub>
+
 ### Achievements
 Every achievement with your progress where it can be counted, medals by tier, the next goals, every reward claimed in one go and counted on the menu. New achievements from the game show up with no update.
 
+![Achievements](docs/screenshots/achievements.png)
+
+<sub>From the test server.</sub>
+
 ### Phone
-App layout with a bottom tab bar.
+App layout with a bottom tab bar; Amis, Succès and Profil in the menu.
 
 <p>
   <img src="docs/screenshots/phone-packs.png" width="32%" alt="Packs on a phone">
   <img src="docs/screenshots/phone-collection.png" width="32%" alt="Collection on a phone">
   <img src="docs/screenshots/phone-market.png" width="32%" alt="The market on a phone">
+</p>
+<p>
+  <img src="docs/screenshots/phone-friends.png" width="32%" alt="A friend on a phone">
+  <img src="docs/screenshots/phone-achievements.png" width="32%" alt="Achievements on a phone">
 </p>
 
 ## Development

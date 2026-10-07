@@ -28,7 +28,7 @@ await go("/collection");
 const coll = await ev(async () => {
   const out = [];
   for (const rarity of ["L", "UR", "SR", "R", "PC", "C"]) {
-    out.push(...(await window.__wm.data.myCards({ rarity })).items.map((i) => ({ title: i.card.title, rarity: i.card.rarity, image: !!i.card.image_url && !i.card.hide_image })));
+    out.push(...(await window.__wm.data.myCards({ rarity })).items.map((i) => ({ title: i.card.title, rarity: i.card.rarity, image: !!i.card.image_url && !i.card.hide_image, category: i.card.category || "", nsfw: !!i.card.nsfw_image })));
     await new Promise((r) => setTimeout(r, 600));
   }
   return out;
@@ -37,11 +37,16 @@ const coll = await ev(async () => {
 // finds is the one shown on both sides
 // A rarity I own none of (often Légendaire) comes from the full catalogue, on both sides.
 // the most read one on Wikipedia, with a picture and nothing sensitive: a card people recognise
+// a public README shows nothing sensitive: the same subjects are left out of my cards and the catalogue's
+const SENSITIVE = /tueu|meurtr|crimin|terror|nazi|extrême|extreme|milice|guerre|attentat|génocide|genocide|porno|sex|drogue/i;
+const fit = (c) => !c.nsfw && c.title.length >= 4 && !SENSITIVE.test(`${c.title} ${c.category}`);
 const catalog = await ev(async () => (await window.__wm.data.catalog({ page: 0, rarity: "L" })).cards
-  .filter((c) => !c.nsfw_image && c.title.length >= 4 && !/tueu|meurtr|crimin|terror|nazi|guerre|attentat|porno|sex|drogue/i.test(c.category || "")).sort((a, b) => (b.pageviews ?? 0) - (a.pageviews ?? 0))
-  .map((c) => ({ title: c.title, rarity: c.rarity, image: !!c.image_url && !c.hide_image, category: c.category })));
+  .map((c) => ({ ...c, nsfw: !!c.nsfw_image, category: c.category || "" })).filter((c) => c.title.length >= 4).sort((a, b) => (b.pageviews ?? 0) - (a.pageviews ?? 0))
+  .map((c) => ({ title: c.title, rarity: c.rarity, image: !!c.image_url && !c.hide_image, category: c.category, nsfw: c.nsfw })))
+  .then((l) => l.filter(fit));
 const candidates = RARITIES_DESC.map((r) => {
-  const mine = [...coll.filter((c) => c.rarity === r && c.image), ...coll.filter((c) => c.rarity === r && !c.image)].map((c) => ({ ...c, page: "/collection" }));
+  const ok = coll.filter((c) => c.rarity === r && fit(c));
+  const mine = [...ok.filter((c) => c.image), ...ok.filter((c) => !c.image)].map((c) => ({ ...c, page: "/collection" }));
   const others = catalog.filter((c) => c.rarity === r && c.image).map((c) => ({ ...c, page: "/global-collection" }));
   return (mine.length ? mine : others).slice(0, 3);
 }).filter((l) => l.length);
@@ -248,7 +253,7 @@ console.log(`${OUT}cards-before-after.png`, before.filter(Boolean).length, "/", 
 
 // The Pro market analysis, from the test server (`bun run dev`): this account is not Pro, so the
 // game would not send it the sale history. Skipped when the test server is not running.
-const DEV = process.env.WM_DEV || "http://localhost:5173"; // WM_DEV: another port
+const DEV = process.env.WM_DEV || "http://localhost:5175"; // the test server (bun run dev --port 5175); WM_DEV: another
 const devUp = await fetch(DEV + "/api/profile").then((r) => r.ok, () => false);
 if (devUp) {
   await fetch(DEV + "/api/__profile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ is_pro: true }) });

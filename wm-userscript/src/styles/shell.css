@@ -16,6 +16,10 @@
 .nav>button.on svg{opacity:1}
 .nav-sep{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-faint);padding:var(--s4) 12px var(--s2)}
 /* the smaller screens and the native site's other pages: a compact tile grid */
+/* mine and my friends' screens: under a line, with their count (friend requests, rewards) */
+.nav-line{height:1px;margin:var(--s2) 12px;background:var(--line)}
+.nav-count{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;display:grid;place-items:center;background:#f26d6d;color:#fff;font:700 11px var(--display);font-variant-numeric:tabular-nums}
+.nav-dot{display:none;position:absolute;top:-2px;right:-3px;width:8px;height:8px;border-radius:50%;background:#f26d6d;box-shadow:0 0 0 2px var(--surface)}
 .nav-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px}
 .nav-grid :is(a,button){background:none;border:0;font-family:inherit;display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 2px 9px;border-radius:10px;
   color:var(--fg-soft);font-size:11px;line-height:1.1;text-align:center;transition:background .15s,color .15s}
@@ -135,6 +139,7 @@ button.pk-chip:hover{border-color:var(--line2)}
 .sheet-grid :is(a,button):active,.sheet-grid :is(a,button):hover{background:var(--elev);color:var(--fg)}
 .sheet-grid button.on{color:var(--accent)}
 .sheet-grid :is(a,button) svg{width:20px;height:20px}
+.sheet-social{grid-template-columns:repeat(3,minmax(0,1fr))}
 .sheet-reset{width:100%;margin-top:var(--s2)}
 /* sound control: same button as the bell, a compact panel with the volume and the mute switch */
 .snd{position:relative;display:flex}
@@ -214,6 +219,8 @@ button.pk-chip:hover{border-color:var(--line2)}
   .app.rail .nav>button{justify-content:center;padding-inline:0}
   .app.rail .nav-sep{font-size:0;padding:0;margin:var(--s3) 10px;border-top:1px solid var(--line)}
   .app.rail .nav-grid{grid-template-columns:1fr}
+  .app.rail .nav-count{display:none}
+  .app.rail .nav-dot{display:block}
   .app.rail .side-foot{align-items:center;padding-inline:0}
 }
 @media(prefers-reduced-motion:reduce){.app{transition:none}}

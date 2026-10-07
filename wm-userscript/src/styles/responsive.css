@@ -8,7 +8,7 @@
   .side{position:fixed;inset:auto 0 0 0;height:auto;z-index:20;flex-direction:row;gap:0;
     padding:6px max(6px,env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-right));
     border-right:0;border-top:1px solid var(--line);background:color-mix(in oklab,var(--surface) 97%,transparent);}
-  .side .brand,.nav-sep,.nav-grid,.side-foot{display:none}
+  .side .brand,.nav-sep,.nav-grid,.side-foot,.nav-line,.nav>.nav-social{display:none}
   .nav{flex:1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;overflow:visible}
   .nav>button{flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden}
   .nav>button svg{width:22px;height:22px}

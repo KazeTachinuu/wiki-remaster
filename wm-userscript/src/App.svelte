@@ -31,28 +31,26 @@
   let update = $state(null);
   if (isUserscript()) availableUpdate(VERSION, { metaUrl: __META_URL__ }).then((v) => (update = v));
 
-  // The main screens (keys 1 to 5), then the smaller ones that sit with the rest of the site.
+  // Our screens: the five main ones (keys 1 to 5, the phone's tab bar), then mine and my friends'
+  // (keys 6 to 8, the phone's menu).
   const VIEWS = [
     { id: "pulls", path: "/pulls", label: "Ouvrir des paquets", short: "Paquets", icon: "pulls" },
     { id: "collection", path: "/collection", label: "Ma collection", short: "Collection", icon: "collection" },
     { id: "catalog", path: "/global-collection", label: "Toutes les cartes", short: "Cartes", icon: "catalog" },
     { id: "market", path: "/marketplace", label: "Marché", icon: "market" },
     { id: "trades", path: "/trades", label: "Échanges", icon: "trades" },
-    { id: "friends", path: "/friends", label: "Amis", icon: "friends", more: true },
-    { id: "achievements", path: "/achievements", label: "Succès", icon: "achievements", more: true },
-    { id: "profile", path: "/profile", label: "Profil", icon: "profile", more: true },
+    { id: "friends", path: "/friends", label: "Amis", icon: "friends", social: true },
+    { id: "achievements", path: "/achievements", label: "Succès", icon: "achievements", social: true },
+    { id: "profile", path: "/profile", label: "Profil", icon: "profile", social: true },
   ];
-  const MAIN = VIEWS.filter((v) => !v.more);
-  // The sidebar's grid: our smaller screens among the original site's pages (full navigation).
-  const view_ = (id) => VIEWS.find((v) => v.id === id);
-  const MORE = [
+  const MAIN = VIEWS.filter((v) => !v.social);
+  const SOCIAL = VIEWS.filter((v) => v.social);
+  // the original site's pages (full navigation)
+  const NATIVE = [
     { path: "/battle", label: "Duels", icon: "battle" },
     { path: "/guild", label: "Guilde", icon: "guild" },
-    view_("friends"),
     { path: "/dms", label: "Messages", icon: "dms" },
     { path: "/leaderboard", label: "Classement", icon: "leaderboard" },
-    view_("achievements"),
-    view_("profile"),
     { path: "/settings", label: "Paramètres", icon: "settings" },
   ];
 
@@ -242,7 +240,7 @@
   $effect(() => tabTicks(appEl.getRootNode()));
   let help = $state(false);
   let menuOpen = $state(false);
-  const SHORTCUTS = [["/", "Rechercher"], ["1 à 5", "Changer d'écran"], ["Espace", "Ouvrir un paquet"], ["Flèches", "Parcourir les cartes révélées"], ["Échap", "Fermer"], ["[", "Replier ou déplier le menu"], ["?", "Afficher cette aide"]];
+  const SHORTCUTS = [["/", "Rechercher"], ["1 à 8", "Changer d'écran"], ["Espace", "Ouvrir un paquet"], ["Flèches", "Parcourir les cartes révélées"], ["Échap", "Fermer"], ["[", "Replier ou déplier le menu"], ["?", "Afficher cette aide"]];
   function onKey(e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const el = e.composedPath()[0];
@@ -256,7 +254,7 @@
     if (e.key === "?") help = !help;
     if (e.key === "[") toggleSideRail();
     else if (e.key === "/") { e.preventDefault(); appEl?.querySelector("input.search")?.focus(); }
-    else if (/^[1-5]$/.test(e.key)) go(MAIN[e.key - 1]);
+    else if (/^[1-8]$/.test(e.key)) go(VIEWS[e.key - 1]);
   }
 </script>
 
@@ -273,15 +271,18 @@
       {#each MAIN as v}
         <button type="button" class:on={view === v.id} aria-current={view === v.id ? "page" : undefined} title={settings.sideRail ? v.label : undefined} onclick={() => go(v)}><Icon name={v.icon} width={1.7} /><span class="nav-long">{v.label}</span><span class="nav-short">{v.short ?? v.label}</span></button>
       {/each}
+      <!-- mine and my friends': with the main screens on a computer, in the menu on a phone -->
+      <div class="nav-line" aria-hidden="true"></div>
+      {#each SOCIAL as v}
+        {@const n = countOn(v.id)}
+        <button type="button" class="nav-social" class:on={view === v.id} aria-current={view === v.id ? "page" : undefined} title={settings.sideRail ? countLabel(v, n) : n ? countLabel(v, n) : undefined} aria-label={countLabel(v, n)} onclick={() => go(v)}>
+          <span class="nav-ico"><Icon name={v.icon} width={1.7} />{#if n}<span class="nav-dot"></span>{/if}</span><span class="nav-long">{v.label}</span>{#if n}<span class="nav-count">{n}</span>{/if}
+        </button>
+      {/each}
       <div class="nav-sep">Le reste du site</div>
       <div class="nav-grid">
-        {#each MORE as m (m.path)}
-          {#if m.id}
-            {@const n = countOn(m.id)}
-            <button type="button" class:on={view === m.id} aria-current={view === m.id ? "page" : undefined} title={countLabel(m, n)} aria-label={countLabel(m, n)} onclick={() => go(m)}><span class="nav-ico"><Icon name={m.icon} width={1.7} />{#if n}<span class="nav-badge">{n}</span>{/if}</span><span class="nav-lbl">{m.label}</span></button>
-          {:else}
-            <a href={native(m.path)} title={m.label} aria-label={m.label}><Icon name={m.icon} width={1.7} /><span class="nav-lbl">{m.label}</span></a>
-          {/if}
+        {#each NATIVE as m (m.path)}
+          <a href={native(m.path)} title={m.label} aria-label={m.label}><Icon name={m.icon} width={1.7} /><span class="nav-lbl">{m.label}</span></a>
         {/each}
       </div>
     </nav>
@@ -387,16 +388,17 @@
         <button class="snd-switch" role="switch" aria-checked={!settings.hideStats} aria-label="Afficher l'ATK et la DEF" onclick={toggleHideStats}><span></span></button>
       </section>
       <section class="sheet-sec">
+        <div class="sheet-grid sheet-social">
+          {#each SOCIAL as v (v.id)}
+            {@const n = countOn(v.id)}
+            <button type="button" class:on={view === v.id} aria-label={countLabel(v, n)} onclick={() => { menuOpen = false; go(v); }}><span class="nav-ico"><Icon name={v.icon} width={1.7} />{#if n}<span class="nav-badge">{n}</span>{/if}</span><span>{v.label}</span></button>
+          {/each}
+        </div>
+      </section>
+      <section class="sheet-sec">
         <b class="sheet-title">Le reste du site</b>
         <div class="sheet-grid">
-          {#each MORE as m (m.path)}
-            {#if m.id}
-              {@const n = countOn(m.id)}
-              <button type="button" class:on={view === m.id} onclick={() => { menuOpen = false; go(m); }}><span class="nav-ico"><Icon name={m.icon} width={1.7} />{#if n}<span class="nav-badge">{n}</span>{/if}</span><span>{m.label}</span></button>
-            {:else}
-              <a href={native(m.path)}><Icon name={m.icon} width={1.7} /><span>{m.label}</span></a>
-            {/if}
-          {/each}
+          {#each NATIVE as m (m.path)}<a href={native(m.path)}><Icon name={m.icon} width={1.7} /><span>{m.label}</span></a>{/each}
         </div>
       </section>
       {#if update}
