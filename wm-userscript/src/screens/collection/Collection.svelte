@@ -35,6 +35,11 @@
   $effect(() => Object.assign(prefs, { filter, sort, favOnly }));
   // my tags, for the filter (shown once I have some)
   tags.load();
+  // on a phone the row scrolls sideways: the chip picked comes fully into view
+  function pickTag(id, e) {
+    tagFilter = id;
+    e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }
   let selected = $state(null);
 
   let query = $state(""); // the search once typing pauses
@@ -257,12 +262,12 @@
         <!-- tags, a filter of their own: combined with the rarity, never replacing it -->
         <div class="tag-row" role="group" aria-label="Étiquettes">
           <span class="tag-row-label"><Icon name="tag" />Étiquettes</span>
-          <button class="rl" class:on={!tagFilter} onclick={() => (tagFilter = "")}><span class="rl-name">Toutes</span></button>
-          <button class="rl" class:on={tagFilter === "none"} onclick={() => (tagFilter = tagFilter === "none" ? "" : "none")}>
+          <button class="rl" class:on={!tagFilter} onclick={(e) => pickTag("", e)}><span class="rl-name">Toutes</span></button>
+          <button class="rl" class:on={tagFilter === "none"} onclick={(e) => pickTag(tagFilter === "none" ? "" : "none", e)}>
             <span class="rl-name">Sans étiquette</span>{#if tagN}<span class="rl-n">{tagN.none.toLocaleString("fr")}</span>{/if}
           </button>
           {#each tags.list as t (t.id)}
-            <button class="rl tf-chip" class:on={tagFilter === t.id} style="--tc:{t.color ?? 'var(--fg-soft)'}" onclick={() => (tagFilter = tagFilter === t.id ? "" : t.id)}>
+            <button class="rl tf-chip" class:on={tagFilter === t.id} style="--tc:{t.color ?? 'var(--fg-soft)'}" onclick={(e) => pickTag(tagFilter === t.id ? "" : t.id, e)}>
               <i class="tag-dot"></i><span class="rl-name">{t.name}</span>{#if tagN}<span class="rl-n">{(tagN[t.id] ?? 0).toLocaleString("fr")}</span>{/if}
             </button>
           {/each}

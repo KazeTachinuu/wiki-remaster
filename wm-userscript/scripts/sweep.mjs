@@ -2,7 +2,7 @@
 // and phone sizes. A step fails when its action finds nothing, the page throws, or something
 // sticks out sideways. Screenshots in /tmp/wm-sweep/.
 //
-//   bun run dev --port 5175 &   then   bun scripts/sweep.mjs [ONLY=social|market]
+//   bun run dev --port 5175 &   then   bun scripts/sweep.mjs [ONLY=social|market|tags]
 const BASE = process.env.WM_DEV || "http://localhost:5175";
 const OUT = "/tmp/wm-sweep/";
 const ONLY = process.env.ONLY;
@@ -27,6 +27,18 @@ const HELPERS = () => {
     fill: (sel, value) => {
       const el = all(sel)[0]; if (!el) return false;
       el.value = value; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); return true;
+    },
+    submit: (sel) => { const f = all(sel)[0]; if (!f) return false; f.requestSubmit(); return true; },
+    // the card window's tags laid out: chips wrap, the field keeps room to type, nothing past the window
+    tagLayout: () => {
+      const row = all(".modal-tags .tag-chips")[0], box = all(".modal")[0], input = all(".tag-add input")[0];
+      if (!row || !box || !input) return "no tags in the card window";
+      const b = box.getBoundingClientRect(), out = [];
+      if (getComputedStyle(row).flexWrap !== "wrap") out.push("tags do not wrap");
+      if (row.scrollWidth > row.clientWidth + 1) out.push(`tags ${row.scrollWidth}px in ${row.clientWidth}px`);
+      if (input.getBoundingClientRect().width < 100) out.push(`field ${Math.round(input.getBoundingClientRect().width)}px wide`);
+      for (const el of row.children) { const r = el.getBoundingClientRect(); if (r.right > b.right + 1 || r.left < b.left - 1) out.push(`${el.className} past the window`); }
+      return out.join("; ");
     },
     key: (key) => { (root()?.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, composed: true })); dispatchEvent(new KeyboardEvent("keydown", { key })); return true; },
     spill: () => {
@@ -116,7 +128,7 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
     await step(tag, "coll-sell-form", async () => (await click("[role=tab]", "^Détails$")) && click(".modal .actions button", "Mettre en vente"));
     await step(tag, "coll-select", async () => (await click(".modal-close")) && (await click("button", "Sélectionner")) && click(".grid .card-btn", null, 1));
     // bulk discard over the whole collection: select all of a filter, confirm, undo, then for real
-    await step(tag, "coll-tags", async () => (await wait(".tag-row .rl", "^À garder6", 20000)) && (await click(".tag-row .rl", "^À garder")) && (await wait(".tag-row .rl.on", "^À garder")) && (await wait(".sel-pick .rl", "^Tout\\d$", 20000)) && (await click(".tag-row .rl", "^Sans étiquette")) && wait(".tag-row .rl.on", "^Sans étiquette"));
+    await step(tag, "coll-tags", async () => (await wait(".tag-row .rl", "^À garder6", 40000)) && (await click(".tag-row .rl", "^À garder")) && (await wait(".tag-row .rl.on", "^À garder")) && (await wait(".sel-pick .rl", "^Tout\\d$", 20000)) && (await click(".tag-row .rl", "^Sans étiquette")) && wait(".tag-row .rl.on", "^Sans étiquette"));
     await step(tag, "coll-select-100", async () => (await wait(".sel-pick", null, 20000)) && ((await t("has", ".rl.on", "^Commun")) || (await click(".rl", "^Commun"))) && (await wait(".rl.on", "^Commun")) && (await wait(".sel-pick .rl", "^Tout", 20000)) && (await click(".sel-pick .rl", "^100$")) && wait(".bulk-bar", "^100 sélectionnées"));
     await step(tag, "coll-select-n", async () => (await t("fill", ".sel-num", "37")) && wait(".bulk-bar", "^37 sélectionnées"));
     await step(tag, "coll-select-newest", async () => (await t("fill", ".sel-order", "newest")) && wait(".bulk-bar", "^37 sélectionnées"));
@@ -140,6 +152,20 @@ for (const [w, h, tag] of [[1440, 900, "d"], [390, 844, "m"]]) {
     await step(tag, "composer", async () => (await click("button", "Proposer un échange")) && (await wait(".friend")) && (await click(".friend")) && wait(".composer-tab:not([hidden]) .card-btn"));
     await step(tag, "composer-search-mine", async () => (await t("fill", ".composer-tab:not([hidden]) input", "araignee")) && wait(".composer-tab:not([hidden]) .card-btn"));
     await step(tag, "composer-theirs", async () => (await click("[role=tab]", "^Cartes de")) && (await wait(".composer-tab:not([hidden]) .card-btn")) && (await t("fill", ".composer-tab:not([hidden]) input", "araignée")) && (await Bun.sleep(1200), wait(".composer-tab:not([hidden]) .card-btn")));
+  }
+
+  if (!ONLY || ONLY === "tags") {
+    // tags: the filter row, then a card's tags managed in its window (add an existing one, create a
+    // long one, remove one), the filter row and the grid following
+    await go("/collection");
+    await step(tag, "tags-row", () => wait(".tag-row .rl", "^À garder", 20000));
+    await step(tag, "tags-filter", async () => (await click(".tag-row .rl", "^À garder")) && until(async () => (await t("count", ".grid .card-btn")) === 6));
+    await step(tag, "tags-card", async () => (await click(".grid .card-btn")) && wait(".modal-tags .tag-chip", "À garder"));
+    await step(tag, "tags-add", async () => (await t("fill", ".tag-add input", "Échange")) && (await t("submit", ".tag-add")) && wait(".modal-tags .tag-chip", "^Échange"));
+    await step(tag, "tags-create-long", async () => (await t("fill", ".tag-add input", "Une étiquette au nom vraiment très long")) && (await t("submit", ".tag-add")) && wait(".modal-tags .tag-chip", "^Une étiquette"));
+    await step(tag, "tags-layout", async () => { const bad = await t("tagLayout"); if (bad) throw new Error(bad); });
+    await step(tag, "tags-remove", async () => (await click(".tag-chip button[aria-label*='Échange']")) && until(async () => !(await t("has", ".modal-tags .tag-chip", "^Échange"))));
+    await step(tag, "tags-closed", async () => (await click(".modal-close")) && (await wait(".tag-row .rl", "^Une étiquette")) && until(async () => (await t("count", ".grid .card-btn")) === 6));
   }
 
   if (!ONLY || ONLY === "market") {

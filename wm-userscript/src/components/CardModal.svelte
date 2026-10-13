@@ -235,7 +235,7 @@
           {#if owned}
             <div class="modal-tags">
               <span class="mk-h">Étiquettes</span>
-              <div class="tag-row">
+              <div class="tag-chips">
                 {#each cardTags as t (t.id)}<span class="tag-chip" style:--tc={t.color}>{t.name}<button onclick={() => removeTag(t)} aria-label="Retirer l'étiquette {t.name}"><Icon name="close" width={2} /></button></span>{/each}
                 <form class="tag-add" onsubmit={(e) => { e.preventDefault(); addTag(); }}>
                   <input bind:value={tagText} list="wm-tag-names" maxlength="48" placeholder={cardTags.length ? "Ajouter..." : "Ajouter une étiquette..."} aria-label="Ajouter une étiquette" />

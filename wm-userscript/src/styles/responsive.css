@@ -7,7 +7,8 @@
   .app{grid-template-columns:1fr}
   .side{position:fixed;inset:auto 0 0 0;height:auto;z-index:20;flex-direction:row;gap:0;
     padding:6px max(6px,env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-right));
-    border-right:0;border-top:1px solid var(--line);background:color-mix(in oklab,var(--surface) 97%,transparent);}
+    border-right:0;border-top:1px solid var(--line);background:color-mix(in oklab,var(--surface) 97%,transparent);
+    overflow:visible} /* the raised packs button stands above the bar */
   .side .brand,.nav-sep,.nav-grid,.side-foot,.nav-line,.nav>.nav-social{display:none}
   .nav{flex:1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;overflow:visible}
   .nav>button{flex-direction:column;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden}
@@ -16,7 +17,7 @@
   /* the packs in the middle of the tab bar, raised: the screen opened most */
   .nav>button{order:2}
   .nav>button:nth-child(n+4){order:4}
-  .nav>button.nav-pack{order:3;overflow:visible;color:var(--fg)}
+  .nav>button.nav-pack{order:3;overflow:visible}
   .nav-pack .nav-ico{display:grid;place-items:center;width:46px;height:46px;margin-top:-22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);
     box-shadow:0 0 0 5px var(--surface),0 8px 22px -8px color-mix(in oklab,var(--accent) 70%,transparent);transition:transform .15s}
   .nav-pack .nav-ico svg{width:22px;height:22px}
@@ -84,7 +85,7 @@
 }
 @media(max-width:560px){
   .modal{grid-template-columns:1fr;justify-items:center;gap:var(--s4);padding:var(--s5)}
-  .modal-card{width:190px;position:static}
+  .modal-card{width:190px;position:relative}
   .fact{flex-basis:40%}
   /* two cards a row on every phone: readable at 360 px, roomy on a large phone (a third column
      would squeeze each card's stats line) */

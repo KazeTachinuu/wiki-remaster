@@ -320,7 +320,7 @@ export function advanceMarket(world, now, price, speed = 1) {
     const live = world.auctions.filter((a) => a.status === "active" && a.seller_id !== "me").length;
     if (live < LIVE_TARGET && r() < 0.5) {
       const seller = others[Math.floor(r() * others.length)];
-      const rows = world.collections.get(seller);
+      const rows = world.collections.get(seller) ?? []; // a player without cards (a new account) lists nothing
       const rarity = (() => { let x = r() * 100; for (const [rr, w] of MARKET_ODDS) if ((x -= w) <= 0) return rr; return "R"; })();
       const uc = rows.find((u) => u.card.rarity === rarity) ?? rows[Math.floor(r() * rows.length)];
       if (!uc) continue;
