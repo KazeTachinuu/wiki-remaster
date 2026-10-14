@@ -50,10 +50,10 @@ export function diffShapes(before, after) {
   const core = (t) => t.split("|").filter((x) => !["?", "null", "undefined"].includes(x));
   for (const [p, t] of Object.entries(before)) {
     if (!(p in after)) {
-      // only a parent still holding fields can lose one: an empty array, a parent now null or gone
-      // says nothing about this field
+      // only a parent still holding fields can lose one: a parent now empty, null or gone (an empty
+      // object or array among them) says nothing about this field
       const parent = parentOf(p);
-      const holds = !parent || /(^|\|)(object|array)(\||$)/.test(after[parent] ?? "");
+      const holds = !parent || Object.keys(after).some((k) => k !== parent && parentOf(k) === parent);
       if (!isOptional(t) && !p.endsWith("[]") && holds) removed.push(p);
       continue;
     }

@@ -30,6 +30,9 @@ describe("diffShapes", () => {
     expect(diffShapes(opt, shapeOf({ a: [{}] })).removed).toEqual([]);
     const bidder = shapeOf({ auction: { bidder: { id: 1 } } });
     expect(diffShapes(bidder, shapeOf({ auction: { bidder: null } })).removed).toEqual([]);
+    // an empty object (a rarity-keyed summary for a card with no sales) says nothing about its fields
+    const summary = shapeOf({ summary: { C: { average: 5 } } });
+    expect(diffShapes(summary, shapeOf({ summary: {} })).removed).toEqual([]);
   });
 });
 
