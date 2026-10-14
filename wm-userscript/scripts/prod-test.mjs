@@ -475,6 +475,10 @@ if (on("contract")) {
     // packs, regen time and Pro status: the game's own Supabase sync, replayed (read-only)
     "profile (game sync)": async () => view.evaluate("window.__wm.refreshProfile().then(() => window.__wm.getProfile())"),
   };
+  // Endpoints that return a sample of a polymorphic collection: notifications is the latest 50, a
+  // union of per-type shapes. A type absent from the sample drops its fields, which is not a
+  // removal, so removed-field checks there are false positives. Type drift and new fields still count.
+  const SAMPLED = new Set(["notifications"]);
   // one check per endpoint: its own time limit, its own line when it changes
   for (const [key, src] of Object.entries(reads)) {
     if (!src) continue;
@@ -484,9 +488,11 @@ if (on("contract")) {
       live[key] = shapeOf(body);
       if (!saved?.[key]) return `${Object.keys(live[key]).length} fields, new in the contract`;
       const d = diffShapes(saved[key], live[key]);
-      const lost = [...d.removed.map((p) => `- ${p}`), ...d.changed.map((c) => `~ ${c}`)];
+      const sampled = SAMPLED.has(key);
+      const lost = [...(sampled ? [] : d.removed).map((p) => `- ${p}`), ...d.changed.map((c) => `~ ${c}`)];
       if (lost.length && !update) throw new Error(`changed: ${lost.join(", ")} (review, then --update-shapes accepts it)`);
-      return [`${Object.keys(live[key]).length} fields`, lost.length && `accepted ${lost.join(", ")}`, d.added.length && `new: ${d.added.join(", ")}`].filter(Boolean).join("; ");
+      const absent = sampled && d.removed.length ? `not in this sample: ${d.removed.join(", ")}` : null;
+      return [`${Object.keys(live[key]).length} fields`, lost.length && `accepted ${lost.join(", ")}`, absent, d.added.length && `new: ${d.added.join(", ")}`].filter(Boolean).join("; ");
     });
   }
   await Bun.write(`${OUT}api-shapes.live.json`, JSON.stringify(live, null, 1) + "\n"); // this run's, to inspect a diff
